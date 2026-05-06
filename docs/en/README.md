@@ -52,7 +52,7 @@ Working examples: [`examples/`](../../examples/)
 | [08-profiles-and-products/01-profiles-model](07-advanced/05-profiles.md) | `IProfile` interface, callbacks, `LedStripProfile` example |
 | [09-contracts/01-mqtt-contract](08-contracts/01-mqtt-contract.md) | `mqtt_contract.yaml`: purpose and rules for modification |
 | [10-how-to-add-product/01-add-new-product](09-add-product/01-add-new-product.md) | Checklist for building a new product on top of `idryer-core` |
-| [10-troubleshooting](10-troubleshooting.md) | Common issues: WiFi, provisioning, MQTT, commands, LocalAccess |
+| [10-troubleshooting](10-troubleshooting/01-troubleshooting.md) | Common issues: WiFi, provisioning, MQTT, commands, LocalAccess |
 | [04-patterns/01-add-sensor](04-patterns/01-add-sensor.md) | How to add a sensor (data source) and publish its readings |
 | [04-patterns/02-add-peripheral](04-patterns/02-add-peripheral.md) | How to add a peripheral and receive commands |
 | [04-patterns/03-add-transport](04-patterns/03-add-transport.md) | How to add a parallel transport (BLE, HTTP, custom) |

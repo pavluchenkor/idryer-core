@@ -144,4 +144,4 @@ After any of the examples are up and running, read:
 - [05-architecture/03-data-flow.md](../05-architecture/03-data-flow.md) — how data moves.
 - [04-patterns/](../04-patterns/) — recipes: add sensor, peripheral, transport.
 - [09-add-product/01-add-new-product.md](../09-add-product/01-add-new-product.md) — full checklist for a new product.
-- [10-troubleshooting.md](../10-troubleshooting.md) — what to do if the stack is stuck.
+- [10-troubleshooting/01-troubleshooting.md](../10-troubleshooting/01-troubleshooting.md) — what to do if the stack is stuck.
