@@ -76,7 +76,8 @@ void loop() {
 
 ## Пример: Storage Link
 
-Полный composition root Storage Link: [`src/main.cpp`](../../../../src/main.cpp).
+Полный composition root Storage Link — `src/main.cpp` в репозитории
+iDryer-Storage (опубликован отдельно).
 
 Слои устройства в порядке сборки:
 

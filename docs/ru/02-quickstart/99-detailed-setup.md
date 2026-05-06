@@ -34,7 +34,7 @@ build_flags =
 
 ## Шаг 2. Создать `secrets.h`
 
-Скопируйте [`examples/secrets.h.example`](../../examples/secrets.h.example) в `include/secrets.h` своего проекта и пропишите свой SSID/пароль. Файл должен быть в `.gitignore`.
+Скопируйте [`examples/secrets.h.example`](https://github.com/pavluchenkor/idryer-core/blob/main/examples/secrets.h.example) в `include/secrets.h` своего проекта и пропишите свой SSID/пароль. Файл должен быть в `.gitignore`.
 
 ```cpp
 #define WIFI_SSID      "your-ssid"
@@ -45,7 +45,7 @@ build_flags =
 
 ## Шаг 3. Открыть первый пример
 
-Самый простой — [`examples/01_blink_status/01_blink_status.ino`](../../examples/01_blink_status/01_blink_status.ino). Скопируйте его как стартовую точку:
+Самый простой — [`examples/01_blink_status/01_blink_status.ino`](https://github.com/pavluchenkor/idryer-core/blob/main/examples/01_blink_status/01_blink_status.ino). Скопируйте его как стартовую точку:
 
 - Не требует датчиков, периферии и LAN WS.
 - Не требует ручного `handleCommand` — встроенный fallback в `IdryerRuntime` обрабатывает базовые команды.
@@ -82,9 +82,9 @@ pio device monitor -b 115200
 
 | Пример | Что добавляется |
 |--------|-----------------|
-| [`minimal_mqtt_only`](../../examples/minimal_mqtt_only/minimal_mqtt_only.ino) | свой `handleCommand`, обработка `commands/invoke` и `commands/set` |
-| [`03_with_improv`](../../examples/03_with_improv/03_with_improv.ino) | provisioning WiFi через Improv (без хардкода credentials) |
-| [`mqtt_with_local_ws`](../../examples/mqtt_with_local_ws/mqtt_with_local_ws.ino) | локальный LAN WebSocket-сервер + `DevicePublisher` (один publish — два транспорта) |
+| [`minimal_mqtt_only`](https://github.com/pavluchenkor/idryer-core/blob/main/examples/minimal_mqtt_only/minimal_mqtt_only.ino) | свой `handleCommand`, обработка `commands/invoke` и `commands/set` |
+| [`03_with_improv`](https://github.com/pavluchenkor/idryer-core/blob/main/examples/03_with_improv/03_with_improv.ino) | provisioning WiFi через Improv (без хардкода credentials) |
+| [`mqtt_with_local_ws`](https://github.com/pavluchenkor/idryer-core/blob/main/examples/mqtt_with_local_ws/mqtt_with_local_ws.ino) | локальный LAN WebSocket-сервер + `DevicePublisher` (один publish — два транспорта) |
 
 ## Dev REPL через Serial (без портала, без браузера)
 

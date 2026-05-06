@@ -349,7 +349,7 @@ link.runtime()->setCommandHandler(handleCommand);
 
 ---
 
-### Поля для записи телеметрии
+### Поля для записи телеметрии {#telemetry-fields}
 
 Заполняются продуктом в `loop()`. SDK читает их по таймеру `telemetryPeriodMs` и публикует в MQTT и Local WS.
 

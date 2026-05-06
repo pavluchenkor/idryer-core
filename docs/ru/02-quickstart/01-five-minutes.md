@@ -4,7 +4,7 @@
 
 ## 1. Подготовить secrets.h
 
-Скопируйте файл [`examples/secrets.h.example`](../../../../../examples/secrets.h.example) в `include/secrets.h` вашего проекта и укажите SSID и пароль своей WiFi-сети (только 2.4 GHz):
+Скопируйте файл [`examples/secrets.h.example`](https://github.com/pavluchenkor/idryer-core/blob/main/examples/secrets.h.example) в `include/secrets.h` вашего проекта и укажите SSID и пароль своей WiFi-сети (только 2.4 GHz):
 
 ```cpp
 #define WIFI_SSID      "your-ssid"
@@ -37,7 +37,7 @@ build_flags =
 
 ## 3. Скопировать пример 01_blink_status
 
-Скопируйте содержимое [`examples/01_blink_status/01_blink_status.ino`](../../../../../examples/01_blink_status/01_blink_status.ino) в `src/main.cpp` вашего проекта. Пример не требует датчиков и дополнительных зависимостей — только минимальный composition root.
+Скопируйте содержимое [`examples/01_blink_status/01_blink_status.ino`](https://github.com/pavluchenkor/idryer-core/blob/main/examples/01_blink_status/01_blink_status.ino) в `src/main.cpp` вашего проекта. Пример не требует датчиков и дополнительных зависимостей — только минимальный composition root.
 
 ## 4. Прошить
 
