@@ -2,7 +2,7 @@
 
 Описание движения данных в работающем устройстве. Цель — показать, что `idryer-core` не использует ни event bus, ни service locator: участники соединяются явными указателями в composition root, и каждое направление потока — отдельный, читаемый путь.
 
-Подробные паттерны "как пробросить данные между моими частями" — в [12-patterns/04-data-flow.md](../12-patterns/04-data-flow.md).
+Подробные паттерны "как пробросить данные между моими частями" — в [04-patterns/99-data-flow.md](../04-patterns/99-data-flow.md).
 
 ## Основные направления
 
@@ -33,7 +33,7 @@
         └──────┬───────────────┬───────┘
                │               │
                ▼               ▼
-   ActionDispatcher        IProfile             Sensor / Actuator TODO:
+   ActionDispatcher        IProfile             Sensor / Periphery TODO:
    handleInvoke / Set      getConfig            (product code)
                            applyConfig
                            buildInfoJson
