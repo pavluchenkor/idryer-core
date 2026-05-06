@@ -1,0 +1,131 @@
+#######################################
+# Syntax Coloring Map for idryer-core
+#######################################
+# Columns are TAB-separated.
+
+#######################################
+# Datatypes (KEYWORD1)
+#######################################
+
+IdryerRuntime	KEYWORD1
+MqttClient	KEYWORD1
+CloudStateMachine	KEYWORD1
+CloudConfig	KEYWORD1
+CloudState	KEYWORD1
+ActionDispatcher	KEYWORD1
+IProfile	KEYWORD1
+HttpApi	KEYWORD1
+DeviceIdentity	KEYWORD1
+WifiCredentials	KEYWORD1
+
+IWifiManager	KEYWORD1
+IHttpClient	KEYWORD1
+ICredentialStore	KEYWORD1
+ILocalExecutor	KEYWORD1
+
+ArduinoWifiManager	KEYWORD1
+ArduinoCredentialStore	KEYWORD1
+ArduinoHttpClient	KEYWORD1
+ArduinoWifiStore	KEYWORD1
+ArduinoTime	KEYWORD1
+ArduinoLogger	KEYWORD1
+ArduinoSerial	KEYWORD1
+
+LocalAccess	KEYWORD1
+DevicePublisher	KEYWORD1
+
+UartBridge	KEYWORD1
+ConfigReceiver	KEYWORD1
+ConfigSender	KEYWORD1
+
+LinkIntegrationsManager	KEYWORD1
+LinkIntegrationsStore	KEYWORD1
+BambuClient	KEYWORD1
+HaMqttClient	KEYWORD1
+HaIntegrationAdapter	KEYWORD1
+MoonrakerClient	KEYWORD1
+
+#######################################
+# Methods and Functions (KEYWORD2)
+#######################################
+
+begin	KEYWORD2
+loop	KEYWORD2
+stop	KEYWORD2
+disconnect	KEYWORD2
+connect	KEYWORD2
+isConnected	KEYWORD2
+isOnline	KEYWORD2
+isEnabled	KEYWORD2
+isListening	KEYWORD2
+isClientConnected	KEYWORD2
+isMqttConnected	KEYWORD2
+isLocalConnected	KEYWORD2
+
+setCommandHandler	KEYWORD2
+setCommandCallback	KEYWORD2
+setCommandSink	KEYWORD2
+setStateChangeCallback	KEYWORD2
+setClaimPinCallback	KEYWORD2
+setClaimCompleteCallback	KEYWORD2
+setUnclaimedCallback	KEYWORD2
+setTokenRefreshCallback	KEYWORD2
+setInvokeHandler	KEYWORD2
+setSetCallback	KEYWORD2
+setMcuSerial	KEYWORD2
+setWaitForMcuSerial	KEYWORD2
+
+requestClaim	KEYWORD2
+refreshToken	KEYWORD2
+getState	KEYWORD2
+getIdentity	KEYWORD2
+updateToken	KEYWORD2
+initMdns	KEYWORD2
+seedSerialFromMac	KEYWORD2
+load	KEYWORD2
+save	KEYWORD2
+clear	KEYWORD2
+
+publishInfo	KEYWORD2
+publishInfoJson	KEYWORD2
+publishTelemetry	KEYWORD2
+publishStatus	KEYWORD2
+publishConfig	KEYWORD2
+publishConfigRaw	KEYWORD2
+publishConfigDelta	KEYWORD2
+publishEvent	KEYWORD2
+publishIntegrationsStatus	KEYWORD2
+
+handleInvoke	KEYWORD2
+handleSet	KEYWORD2
+
+onOnline	KEYWORD2
+getConfig	KEYWORD2
+applyConfig	KEYWORD2
+buildInfoJson	KEYWORD2
+
+initArduinoHal	KEYWORD2
+deinitArduinoHal	KEYWORD2
+
+#######################################
+# Constants (LITERAL1)
+#######################################
+
+IDRYER_TOPIC_PREFIX	LITERAL1
+IDRYER_TOPIC_INFO	LITERAL1
+IDRYER_TOPIC_TELEMETRY	LITERAL1
+IDRYER_TOPIC_STATUS	LITERAL1
+IDRYER_TOPIC_EVENTS	LITERAL1
+IDRYER_TOPIC_CONFIG	LITERAL1
+IDRYER_TOPIC_CONFIG_DELTA	LITERAL1
+IDRYER_TOPIC_OFFLINE	LITERAL1
+IDRYER_TOPIC_CMD_SET	LITERAL1
+IDRYER_TOPIC_CMD_INVOKE	LITERAL1
+IDRYER_TOPIC_CMD_WILDCARD	LITERAL1
+IDRYER_TOPIC_INTEGRATIONS_STATUS	LITERAL1
+IDRYER_QOS_COMMANDS	LITERAL1
+
+HAL_LOG_DEBUG	LITERAL1
+HAL_LOG_INFO	LITERAL1
+HAL_LOG_WARN	LITERAL1
+HAL_LOG_ERROR	LITERAL1

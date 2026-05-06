@@ -1,0 +1,14 @@
+{
+  "name": "idryer-core",
+  "version": "1.0.0",
+  "description": "iDryer platform core library — cloud, MQTT, action dispatch, device profiles",
+  "keywords": ["idryer", "esp32", "mqtt", "iot"],
+  "authors": [{ "name": "iDryer Team" }],
+  "repository": { "type": "git", "url": "" },
+  "frameworks": "arduino",
+  "platforms": "espressif32",
+  "build": {
+    "srcDir": "src",
+    "includeDir": "src"
+  }
+}

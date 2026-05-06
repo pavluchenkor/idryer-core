@@ -1,0 +1,100 @@
+# ===========================================================================
+# Шаблон меню для устройства на idryer-core.
+#
+# КАК ИСПОЛЬЗОВАТЬ:
+#   1. Скопируй этот файл в свой проект:
+#        cp lib/idryer-core/menu/menu.template.yaml src/menu/menu.yaml
+#   2. Наполни своими параметрами (примеры — см. iDryer-Storage src/menu/menu.yaml).
+#   3. Подключи pre-hook в platformio.ini (см. lib/idryer-core/menu/README.md).
+#   4. `pio run` — pre-hook сам сгенерирует C++ в src/menu/.
+#
+# ПРАВИЛА:
+#   • bind ≤ 15 символов (лимит NVS-ключа).
+#   • units_count и language — последние два пункта (контракт фиксирован).
+#   • Toggle-группы (несколько toggle с одинаковой ролью) — эксклюзивны:
+#     активация одного должна сбрасывать остальные. Логика — в product code
+#     через menu_apply_by_bind.
+#
+# ТИПЫ (vtype):
+#   uint8 / uint16 / uint32 / int32 / float / bool
+#
+# SCOPE:
+#   global         — одно значение на устройство.
+#   per_controller — массив на N юнитов (для multi-unit устройств).
+# ===========================================================================
+
+- id: root
+  type: submenu
+  title: { ru: "MY DEVICE", en: "MY DEVICE" }
+  children:
+
+    # ─── Пример value-параметра ──────────────────────────────────
+    - id: my_param
+      type: value
+      title: { ru: "ПАРАМЕТР", en: "PARAM" }
+      unit: { ru: "ед", en: "u" }
+      vtype: uint16
+      min: 0
+      max: 100
+      step: 1
+      bind: my_param
+      persist: true
+      scope: global
+      default: 50
+
+    # ─── Пример toggle-параметра ─────────────────────────────────
+    - id: my_flag
+      type: toggle
+      title: { ru: "ВКЛ/ВЫКЛ", en: "ON/OFF" }
+      vtype: bool
+      bind: my_flag
+      persist: true
+      scope: global
+      default: false
+
+    # ─── Пример toggle-группы (эксклюзивные) ─────────────────────
+    - id: my_mode_group
+      type: submenu
+      title: { ru: "РЕЖИМ", en: "MODE" }
+      children:
+        - id: mode_a
+          type: toggle
+          title: { ru: "Режим A", en: "Mode A" }
+          vtype: bool
+          bind: mode_a
+          persist: true
+          scope: global
+          default: true
+        - id: mode_b
+          type: toggle
+          title: { ru: "Режим B", en: "Mode B" }
+          vtype: bool
+          bind: mode_b
+          persist: true
+          scope: global
+          default: false
+
+    # ─── Обязательно последние два пункта (контракт) ─────────────
+    - id: units_count
+      type: value
+      title: { ru: "КОЛ-ВО ЮНИТОВ", en: "UNITS" }
+      vtype: uint8
+      min: 1
+      max: 1
+      step: 1
+      bind: units_count
+      persist: true
+      scope: global
+      default: 1
+
+    - id: language
+      type: value
+      title: { ru: "ЯЗЫК", en: "LANGUAGE" }
+      vtype: uint8
+      min: 0
+      max: 1
+      step: 1
+      bind: language
+      persist: true
+      scope: global
+      default: 1
