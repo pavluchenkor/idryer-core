@@ -1,0 +1,583 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://idryer.org/schemas/mqtt_contract.v1.json",
+  "title": "iDryer Contract Format — meta-schema",
+  "description": "Структура mqtt_contract.yaml. Loose validation: проверяет каркас, не запрещает свободные notes/source_ref. Версия 1 (2026-05-01).",
+  "type": "object",
+  "required": ["version", "updated", "owner", "scope"],
+  "additionalProperties": false,
+  "properties": {
+    "version": { "type": "integer", "const": 3 },
+    "updated": { "type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}$" },
+    "owner": { "type": "string", "minLength": 1 },
+    "scope": { "type": "string", "minLength": 1 },
+    "source_of_truth": { "$ref": "#/$defs/SourceOfTruth" },
+    "rules": { "$ref": "#/$defs/Rules" },
+    "uart_kind_ranges": { "$ref": "#/$defs/UartKindRanges" },
+    "enums": {
+      "type": "object",
+      "additionalProperties": { "$ref": "#/$defs/Enum" }
+    },
+    "payloads": {
+      "type": "object",
+      "additionalProperties": { "$ref": "#/$defs/Payload" }
+    },
+    "messages": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/Message" }
+    },
+    "invoke_actions": { "$ref": "#/$defs/InvokeActions" },
+    "uart_only": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/UartOnly" }
+    },
+    "mqtt_only": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/MqttOnly" }
+    },
+    "legacy_command_topics": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/LegacyCommand" }
+    },
+    "ha_integration_topics": { "$ref": "#/$defs/HaTopics" },
+    "ha_discovery_topics": { "$ref": "#/$defs/HaDiscoveryTopics" },
+    "bambu_lan_mqtt": { "$ref": "#/$defs/BambuLanMqtt" },
+    "moonraker_websocket": { "$ref": "#/$defs/MoonrakerWebsocket" },
+    "local_websocket": { "$ref": "#/$defs/LocalWebsocket" },
+    "cloud_http_api": { "$ref": "#/$defs/CloudHttpApi" },
+    "wifi_provisioning": { "$ref": "#/$defs/WifiProvisioning" },
+    "known_mismatches": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/Mismatch" }
+    },
+    "todo": {
+      "type": "array",
+      "items": { "type": "string" }
+    }
+  },
+
+  "$defs": {
+    "SourceOfTruth": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "code": { "type": "array", "items": { "type": "string" } },
+        "docs": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+
+    "Rules": {
+      "type": "object",
+      "description": "Глобальные правила протокола. Свободные ключи разрешены — это раздел общего сведения.",
+      "additionalProperties": true
+    },
+
+    "UartKindRanges": {
+      "type": "object",
+      "description": "Карта диапазонов UART message kind ID. Ключ — диапазон вида '0xNN-0xMM' или '0xNN'.",
+      "patternProperties": {
+        "^0x[0-9A-Fa-f]{2}(-0x[0-9A-Fa-f]{2})?$": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+
+    "Enum": {
+      "description": "Enum может быть: (a) список значений (lowercase string list); (b) numeric mapping object {Name: int}; (c) полный с cpp_enum + json_string_form для serialize/deserialize.",
+      "oneOf": [
+        {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        {
+          "type": "object",
+          "patternProperties": {
+            "^[A-Z][A-Za-z0-9_]*$": { "type": "integer" }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": ["cpp_enum"],
+          "properties": {
+            "cpp_enum": {
+              "type": "object",
+              "required": ["values"],
+              "properties": {
+                "source_ref": { "$ref": "#/$defs/SourceRef" },
+                "values": {
+                  "oneOf": [
+                    { "type": "array", "items": { "type": "string" } },
+                    {
+                      "type": "object",
+                      "patternProperties": {
+                        "^[A-Z][A-Za-z0-9_]*$": { "type": "integer" }
+                      }
+                    }
+                  ]
+                }
+              }
+            },
+            "json_string_form": {
+              "type": "object",
+              "required": ["mapping"],
+              "properties": {
+                "source_ref": { "$ref": "#/$defs/SourceRef" },
+                "mapping": {
+                  "type": "object",
+                  "additionalProperties": { "type": "string" }
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+
+    "Payload": {
+      "type": "object",
+      "description": "Структура payload. Поля могут быть inline (одна строка) или block-style.",
+      "properties": {
+        "description": { "type": "string" },
+        "source_ref": { "$ref": "#/$defs/SourceRef" },
+        "status": { "$ref": "#/$defs/Status" },
+        "fields": { "$ref": "#/$defs/FieldsBlock" },
+        "notes": { "type": "array", "items": { "type": "string" } }
+      },
+      "anyOf": [
+        { "required": ["description"] },
+        { "required": ["fields"] }
+      ]
+    },
+
+    "FieldsBlock": {
+      "type": "object",
+      "description": "Поля payload. Ключ — имя поля. Значение — спецификация типа (inline или block).",
+      "additionalProperties": { "$ref": "#/$defs/FieldSpec" }
+    },
+
+    "FieldSpec": {
+      "description": "Inline или block-стиль описания поля. Mandatory: type. Optional: остальное.",
+      "oneOf": [
+        { "type": "string", "description": "Свободное описание (legacy форма; рекомендуется заменять на структуру)." },
+        {
+          "type": "object",
+          "additionalProperties": true,
+          "properties": {
+            "type": { "type": "string" },
+            "ref": { "type": "string", "description": "Имя enum или payload (cross-reference)" },
+            "enum_ref": { "type": ["string", "object"] },
+            "values": { "type": ["array", "object"] },
+            "range": { "type": "string", "description": "Диапазон значений 'min..max'" },
+            "count": { "type": "integer", "minimum": 1 },
+            "item_fields": { "$ref": "#/$defs/FieldsBlock" },
+            "unit": { "type": "string" },
+            "encoding": { "type": "string" },
+            "default": {},
+            "required": { "type": "boolean" },
+            "required_for_mqtt": { "type": "boolean" },
+            "optional": { "type": "boolean" },
+            "max": { "type": "integer" },
+            "format": { "type": "string" },
+            "note": { "type": "string" }
+          }
+        }
+      ]
+    },
+
+    "Bindings": {
+      "type": "object",
+      "description": "Связки payload с MQTT и/или UART транспортом.",
+      "additionalProperties": false,
+      "properties": {
+        "mqtt": { "$ref": "#/$defs/MqttBinding" },
+        "uart": { "$ref": "#/$defs/UartBinding" }
+      },
+      "anyOf": [
+        { "required": ["mqtt"] },
+        { "required": ["uart"] }
+      ]
+    },
+
+    "MqttBinding": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "suffix": { "type": "string" },
+        "full_topic": { "type": "string", "pattern": "^idryer/" },
+        "producer": { "type": "string" },
+        "consumer": { "type": "string" },
+        "qos": { "type": "integer", "enum": [0, 1, 2] },
+        "retained": { "type": "boolean" },
+        "interval": { "type": "string" },
+        "payload": {
+          "type": "object",
+          "additionalProperties": true
+        }
+      },
+      "required": ["suffix"]
+    },
+
+    "UartBinding": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "kind": { "type": "string" },
+        "kind_id": {
+          "oneOf": [
+            { "type": "integer" },
+            { "type": "string", "pattern": "^0x[0-9A-Fa-f]+$" }
+          ]
+        },
+        "payload": { "type": "string", "description": "Имя payload-а из секции payloads:" },
+        "ack": { "type": "boolean" },
+        "fragmented": { "type": "boolean" },
+        "direction_uart": {
+          "type": "string",
+          "enum": ["rp2040_to_esp", "esp_to_rp2040", "bidirectional"]
+        }
+      },
+      "required": ["kind"]
+    },
+
+    "Message": {
+      "type": "object",
+      "required": ["name", "direction"],
+      "additionalProperties": true,
+      "properties": {
+        "name": { "type": "string", "pattern": "^[a-z][a-z0-9_]*$" },
+        "direction": {
+          "type": "string",
+          "enum": ["device_to_backend", "backend_to_device", "bidirectional", "broker_to_backend"]
+        },
+        "purpose": { "type": "string" },
+        "bindings": { "$ref": "#/$defs/Bindings" },
+        "status": { "$ref": "#/$defs/Status" },
+        "notes": { "type": "array", "items": { "type": "string" } },
+        "payload": {
+          "type": "string",
+          "description": "Опциональная ссылка на payload (когда Message имеет один общий payload поверх обоих транспортов)"
+        }
+      }
+    },
+
+    "InvokeActions": {
+      "type": "object",
+      "description": "invoke actions, разбитые по продуктам. Ключи — id продуктов; значения — массивы action-записей.",
+      "additionalProperties": false,
+      "properties": {
+        "core": { "type": "array", "items": { "$ref": "#/$defs/InvokeAction" } },
+        "storage_link": { "type": "array", "items": { "$ref": "#/$defs/InvokeAction" } },
+        "iheater_link": { "type": "array", "items": { "$ref": "#/$defs/InvokeAction" } },
+        "idryer_link": { "type": "array", "items": { "$ref": "#/$defs/InvokeAction" } },
+        "rp2040": { "type": "array", "items": { "$ref": "#/$defs/InvokeAction" } }
+      }
+    },
+
+    "InvokeAction": {
+      "type": "object",
+      "required": ["name"],
+      "additionalProperties": true,
+      "properties": {
+        "name": { "type": "string" },
+        "status": { "$ref": "#/$defs/Status" },
+        "purpose": { "type": "string" },
+        "args": { "type": "object", "additionalProperties": true },
+        "reply": { "type": "object", "additionalProperties": true },
+        "bindings": { "type": "object", "additionalProperties": true },
+        "source_ref": { "$ref": "#/$defs/SourceRef" },
+        "declarative_line": { "type": ["string", "integer"] },
+        "notes": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+
+    "UartOnly": {
+      "type": "object",
+      "required": ["kind", "kind_id"],
+      "additionalProperties": true,
+      "properties": {
+        "kind": { "type": "string" },
+        "kind_id": {
+          "oneOf": [
+            { "type": "integer" },
+            { "type": "string", "pattern": "^0x[0-9A-Fa-f]+$" }
+          ]
+        },
+        "payload": { "type": ["string", "object"] },
+        "direction": {
+          "type": "string",
+          "enum": ["rp2040_to_esp", "esp_to_rp2040", "bidirectional"]
+        },
+        "ack": { "type": "boolean" },
+        "fragmented": { "type": "boolean" },
+        "purpose": { "type": "string" },
+        "interval_ms": { "type": "integer", "minimum": 1 },
+        "timeout_ms": { "type": "integer", "minimum": 1 },
+        "source_ref": { "$ref": "#/$defs/SourceRef" }
+      }
+    },
+
+    "MqttOnly": {
+      "type": "object",
+      "required": ["suffix", "direction"],
+      "additionalProperties": true,
+      "properties": {
+        "suffix": { "type": "string" },
+        "full_topic": { "type": "string", "pattern": "^idryer/" },
+        "direction": {
+          "type": "string",
+          "enum": ["device_to_backend", "backend_to_device", "bidirectional", "broker_to_backend"]
+        },
+        "producer": { "type": "string" },
+        "consumer": { "type": "string" },
+        "qos": { "type": "integer", "enum": [0, 1, 2] },
+        "retained": { "type": "boolean" },
+        "interval": { "type": "string" },
+        "status": { "$ref": "#/$defs/Status" },
+        "payload": { "type": "object", "additionalProperties": true },
+        "reason": { "type": "string" },
+        "notes": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+
+    "LegacyCommand": {
+      "type": "object",
+      "required": ["suffix", "status"],
+      "additionalProperties": true,
+      "properties": {
+        "suffix": { "type": "string" },
+        "full_topic": { "type": "string" },
+        "direction": { "type": "string" },
+        "producer": { "type": "string" },
+        "qos": { "type": "integer", "enum": [0, 1, 2] },
+        "retained": { "type": "boolean" },
+        "status": {
+          "type": "string",
+          "enum": ["legacy", "deprecated", "design_or_partial"]
+        },
+        "orphan": { "type": "boolean" },
+        "replacement": { "type": "string" },
+        "payload": { "type": "object" },
+        "notes": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+
+    "HaTopics": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "topics": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": true,
+            "required": ["pattern", "direction"],
+            "properties": {
+              "pattern": { "type": "string" },
+              "direction": { "type": "string" },
+              "source_ref": { "type": "string" },
+              "note": { "type": "string" },
+              "suffixes": { "type": "array", "items": { "type": "string" } }
+            }
+          }
+        },
+        "notes": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+
+    "HaDiscoveryTopics": {
+      "type": "object",
+      "description": "HA MQTT Discovery топики (homeassistant/...). Описательная секция, валидатор проверяет только каркас.",
+      "additionalProperties": true,
+      "properties": {
+        "namespace": { "type": "string" },
+        "broker": { "type": "string" },
+        "retained": { "type": "boolean" },
+        "qos": { "type": "integer", "enum": [0, 1, 2] },
+        "identifiers": { "type": "object", "additionalProperties": true },
+        "device_block": { "type": "object", "additionalProperties": true },
+        "topics": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": true,
+            "required": ["kind", "pattern"],
+            "properties": {
+              "kind": { "type": "string" },
+              "pattern": { "type": "string" },
+              "source_ref": { "$ref": "#/$defs/SourceRef" },
+              "entities": { "type": "array" },
+              "payload_shape": { "type": "object", "additionalProperties": true },
+              "note": { "type": "string" }
+            }
+          }
+        },
+        "notes": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+
+    "BambuLanMqtt": {
+      "type": "object",
+      "description": "Bambu printer LAN MQTT (device/{serial}/...). Описательная секция.",
+      "additionalProperties": true,
+      "properties": {
+        "namespace": { "type": "string" },
+        "transport": { "type": "string" },
+        "port": { "type": "integer" },
+        "client_id": { "type": "string" },
+        "auth": { "type": "object", "additionalProperties": true },
+        "source_ref": { "$ref": "#/$defs/SourceRef" },
+        "topics": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": true,
+            "required": ["pattern", "direction"],
+            "properties": {
+              "pattern": { "type": "string" },
+              "direction": { "type": "string" },
+              "qos": { "type": "integer", "enum": [0, 1, 2] },
+              "retained": { "type": "boolean" },
+              "source_ref": { "$ref": "#/$defs/SourceRef" },
+              "commands": { "type": "array" },
+              "payload_fields_used": { "type": "object", "additionalProperties": true },
+              "note": { "type": "string" }
+            }
+          }
+        },
+        "notes": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+
+    "MoonrakerWebsocket": {
+      "type": "object",
+      "description": "Moonraker WebSocket JSON-RPC. Описательная секция.",
+      "additionalProperties": true,
+      "properties": {
+        "transport": { "type": "string" },
+        "endpoint": { "type": "object", "additionalProperties": true },
+        "on_connect": { "type": "object", "additionalProperties": true },
+        "incoming": { "type": "array" },
+        "parsed_status_fields": { "type": "object", "additionalProperties": true },
+        "notes": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+
+    "LocalWebsocket": {
+      "type": "object",
+      "description": "Локальный WS-сервер на устройстве (приложение → устройство). Описательная секция.",
+      "additionalProperties": true,
+      "properties": {
+        "role": { "type": "string" },
+        "transport": { "type": "string" },
+        "port": { "type": "integer" },
+        "path": { "type": "string" },
+        "mdns": { "type": "object", "additionalProperties": true },
+        "source_ref": { "type": ["string", "object"], "additionalProperties": true },
+        "policy": { "type": "object", "additionalProperties": true },
+        "incoming": { "type": "object", "additionalProperties": true },
+        "outgoing": { "type": "object", "additionalProperties": true },
+        "notes": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+
+    "CloudHttpApi": {
+      "type": "object",
+      "description": "REST-API портала (provision/register/check-claim). Описательная секция.",
+      "additionalProperties": true,
+      "properties": {
+        "transport": { "type": "string" },
+        "base_url": { "type": "object", "additionalProperties": true },
+        "source_ref": { "type": ["string", "object"], "additionalProperties": true },
+        "prerequisites": { "type": "array", "items": { "type": "string" } },
+        "endpoints": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": true,
+            "required": ["name", "method", "path"],
+            "properties": {
+              "name": { "type": "string" },
+              "method": { "type": "string", "enum": ["GET", "POST", "PUT", "PATCH", "DELETE"] },
+              "path": { "type": "string" },
+              "purpose": { "type": "string" },
+              "source_ref": { "$ref": "#/$defs/SourceRef" },
+              "request_body": { "type": ["object", "null"], "additionalProperties": true },
+              "response_body": { "type": ["object", "null"], "additionalProperties": true },
+              "response_body_normal": { "type": "object", "additionalProperties": true },
+              "response_body_recovery": { "type": "object", "additionalProperties": true },
+              "idempotent": { "type": "boolean" },
+              "called_when": { "type": "string" }
+            }
+          }
+        },
+        "error_handling": { "type": "array", "items": { "type": "string" } },
+        "notes": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+
+    "WifiProvisioning": {
+      "type": "object",
+      "description": "WiFi credentials provisioning (Improv WiFi over Serial). Описательная секция.",
+      "additionalProperties": true,
+      "properties": {
+        "protocol": { "type": "string" },
+        "library": { "type": "string" },
+        "transport": { "type": "string" },
+        "source_ref": { "type": ["string", "object"], "additionalProperties": true },
+        "device_info": { "type": "object", "additionalProperties": true },
+        "on_credentials_received": { "type": "object", "additionalProperties": true },
+        "loop_blocking": { "type": "object", "additionalProperties": true },
+        "activation": { "type": "object", "additionalProperties": true },
+        "notes": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+
+    "Mismatch": {
+      "type": "object",
+      "required": ["id", "summary"],
+      "additionalProperties": true,
+      "properties": {
+        "id": { "type": "string", "pattern": "^[a-z][A-Za-z0-9_]*$" },
+        "severity": { "type": "string", "enum": ["low", "medium", "high", "critical"] },
+        "summary": { "type": "string" },
+        "impact": { "type": "string" },
+        "decision_required": { "type": "string" },
+        "decision_made": { "type": "string" },
+        "decision_date": { "type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}$" },
+        "status": { "$ref": "#/$defs/Status" },
+        "interop_break": { "type": "boolean" },
+        "interop_partial": { "type": "boolean" },
+        "found_by": { "type": "string" },
+        "todo": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+
+    "Status": {
+      "type": "string",
+      "enum": [
+        "implemented",
+        "implemented_backend_only",
+        "implemented_device_only",
+        "implemented_with_app_callback",
+        "design_or_partial",
+        "legacy",
+        "deprecated",
+        "disabled",
+        "resolved_by_contract",
+        "legacy_broken",
+        "example_only",
+        "explicitly_rejected",
+        "notes_only",
+        "stub"
+      ]
+    },
+
+    "SourceRef": {
+      "description": "Ссылка на код. Может быть строкой 'file:line' или объектом с несколькими полями.",
+      "oneOf": [
+        { "type": "string" },
+        { "type": "object", "additionalProperties": { "type": ["string", "array"] } }
+      ]
+    }
+  }
+}
