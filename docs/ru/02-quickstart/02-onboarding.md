@@ -138,4 +138,4 @@ Improv-WiFi встроен во все сборки и не зависит от 
 ## Что дальше
 
 - Полный API Link: [../03-public-api/01-link-api-reference.md](../03-public-api/01-link-api-reference.md)
-- Добавить датчик или actuator: [../04-patterns/](../04-patterns/)
+- Добавить датчик или периферию: [../04-patterns/](../04-patterns/)

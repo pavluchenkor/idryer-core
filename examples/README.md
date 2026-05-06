@@ -71,5 +71,5 @@ PIN введите в [portal.idryer.org](https://portal.idryer.org/) → "Add d
 - [`docs/ru/02-getting-started.md`](../docs/ru/02-getting-started.md) — те же шаги, расширенно.
 - [`docs/ru/02-architecture/01-composition-root.md`](../docs/ru/02-architecture/01-composition-root.md) — порядок объектов в `main.cpp`.
 - [`docs/ru/02-architecture/03-data-flow.md`](../docs/ru/02-architecture/03-data-flow.md) — поток данных в работающем устройстве.
-- [`docs/ru/12-patterns/`](../docs/ru/12-patterns/) — рецепты: добавить sensor, actuator, transport.
+- [`docs/ru/04-patterns/`](../docs/ru/04-patterns/) — рецепты: добавить sensor, peripheral, transport.
 - [`docs/ru/10-how-to-add-product/01-add-new-product.md`](../docs/ru/10-how-to-add-product/01-add-new-product.md) — чеклист сборки нового продукта.

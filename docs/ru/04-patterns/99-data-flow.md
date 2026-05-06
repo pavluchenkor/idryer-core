@@ -1,6 +1,6 @@
 # Поток данных между участниками
 
-Прикладной раздел: как в реальном продуктовом коде sensors, actuators, profile, transports и publishers связываются между собой. Архитектурное описание потоков — в [05-architecture/03-data-flow.md](../05-architecture/03-data-flow.md).
+Прикладной раздел: как в реальном продуктовом коде sensors, peripherals, profile, transports и publishers связываются между собой. Архитектурное описание потоков — в [05-architecture/03-data-flow.md](../05-architecture/03-data-flow.md).
 
 ## Принцип
 
@@ -26,7 +26,7 @@
    handleCommand   ←──  IdryerRuntime   ←──  MqttClient (commands/*)
         │           ←──  LocalAccess    ←──  WS-client (envelope)
         │
-        ├──→  ActionDispatcher  ──→  LedStripExecutor (actuator)
+        ├──→  ActionDispatcher  ──→  LedStripExecutor (периферия)
         ├──→  IProfile::getConfig  ──→  DevicePublisher::publishConfig
         └──→  IProfile::applyConfig (через onSetCommand)
 ```
@@ -62,7 +62,7 @@ void loop() {
 
 `MyTelemetryPublisher::loop` сам решает, когда публиковать (по интервалу). См. [01-add-sensor.md](01-add-sensor.md).
 
-## Рецепт 2 — Команда из облака → актуатор
+## Рецепт 2 — Команда из облака → периферия
 
 **Цель**: `commands/invoke {"action":"led.pulse",...}` → включить LED.
 
@@ -87,9 +87,9 @@ void setup() {
 }
 ```
 
-См. [02-add-actuator.md](02-add-actuator.md).
+См. [02-add-peripheral.md](02-add-peripheral.md).
 
-## Рецепт 3 — Команда из приложения по LAN → актуатор (тот же путь)
+## Рецепт 3 — Команда из приложения по LAN → периферия (тот же путь)
 
 **Цель**: WS-клиент в LAN отправляет `{"type":"command","command":"invoke","data":{"action":"led.pulse",...}}` → тот же LED включается.
 
@@ -99,7 +99,7 @@ WS-client → LocalAccess → CommandSink → handleCommand → ActionDispatcher
 
 Никакого нового кода — `s_local.setCommandSink(handleCommand)` уже сводит оба transport'а в один обработчик.
 
-## Рецепт 4 — Sensor → Actuator (внутреннее замыкание)
+## Рецепт 4 — Датчик → Периферия (внутреннее замыкание)
 
 **Цель**: датчик читает влажность → если выше порога, включается вентилятор.
 
@@ -108,7 +108,7 @@ WS-client → LocalAccess → CommandSink → handleCommand → ActionDispatcher
 ```cpp
 class HumidityController {
 public:
-    HumidityController(IClimateSensor* sensor, FanActuator* fan, float threshold)
+    HumidityController(IClimateSensor* sensor, Fan* fan, float threshold)
         : sensor_(sensor), fan_(fan), threshold_(threshold) {}
 
     void loop(uint32_t nowMs) {
@@ -122,7 +122,7 @@ public:
     }
 private:
     IClimateSensor* sensor_;
-    FanActuator*    fan_;
+    Fan*    fan_;
     float           threshold_;
     uint32_t        lastCheckMs_ = 0;
 };
@@ -142,49 +142,49 @@ void loop() {
 
 `idryer-core` об этом классе ничего не знает и не должен знать.
 
-## Рецепт 5 — Изменение конфига → переинициализация actuator
+## Рецепт 5 — Изменение конфига → переинициализация периферии
 
 **Цель**: backend прислал `commands/set {"id":CFG_BRIGHTNESS,"val":150}` → яркость LED меняется немедленно.
 
 ```
-MqttClient → IdryerRuntime → handleCommand → ActionDispatcher → onSetCommand → IProfile::applyConfig → Actuator
+MqttClient → IdryerRuntime → handleCommand → ActionDispatcher → onSetCommand → IProfile::applyConfig → Периферия
 ```
 
 ```cpp
 class MyProfile : public idryer::IProfile {
 public:
-    MyProfile(MyActuator* a) : actuator_(a) {}
+    MyProfile(MyDevice* a) : device_(a) {}
 
     bool applyConfig(int id, int val) override {
         if (id == CFG_BRIGHTNESS) {
             menu.brightness = val;
             menu.saveToNVS();
-            actuator_->setBrightness(val);   // мгновенное применение
+            device_->setBrightness(val);   // мгновенное применение
             return true;
         }
         return false;
     }
     // ...
 private:
-    MyActuator* actuator_;
+    MyDevice* device_;
 };
 ```
 
-Связь `profile → actuator` строится в composition root:
+Связь `profile → периферия` строится в composition root:
 
 ```cpp
-static MyActuator s_actuator;
-static MyProfile  s_profile(&s_actuator);
+static MyDevice s_device;
+static MyProfile  s_profile(&s_device);
 ```
 
 ## Рецепт 6 — Новое событие → events топик
 
-**Цель**: actuator поймал ошибку → событие в `idryer/{serial}/events`.
+**Цель**: периферия поймала ошибку → событие в `idryer/{serial}/events`.
 
-Actuator не публикует сам. Он сообщает продукту, продукт публикует:
+Периферия не публикует сама. Он сообщает продукту, продукт публикует:
 
 ```cpp
-class MyActuator {
+class MyDevice {
 public:
     using ErrorCallback = std::function<void(int errCode, const char* msg)>;
     void setErrorCallback(ErrorCallback cb) { errCb_ = cb; }
@@ -197,7 +197,7 @@ private:
 };
 
 // в main.cpp
-s_actuator.setErrorCallback([](int code, const char* msg) {
+s_device.setErrorCallback([](int code, const char* msg) {
     StaticJsonDocument<128> doc;
     doc["code"] = code;
     doc["msg"]  = msg;
@@ -205,16 +205,16 @@ s_actuator.setErrorCallback([](int code, const char* msg) {
 });
 ```
 
-Можно и проще — actuator принимает `DevicePublisher*` через конструктор. Главное: связь явная.
+Можно и проще — периферия принимает `DevicePublisher*` через конструктор. Главное: связь явная.
 
 ## Чего не делаем
 
 - Не вводим внутренний event bus. Это привело бы к скрытым связям и сложности отладки.
-- Не складываем sensor/actuator/publisher в общий `IDeviceContainer`. Связи строятся точечно в composition root.
+- Не складываем sensor/peripheral/publisher в общий `IDeviceContainer`. Связи строятся точечно в composition root.
 - Не делаем подписку через имена ("publisher 'telemetry' слушает sensor 'sht31'"). Все связи — типизированные указатели.
 
 ## Связанные документы
 
 - [05-architecture/01-composition-root.md](../05-architecture/01-composition-root.md) — порядок создания и сборки.
 - [05-architecture/03-data-flow.md](../05-architecture/03-data-flow.md) — архитектурная схема.
-- [04-patterns/01-add-sensor.md](01-add-sensor.md), [02-add-actuator.md](02-add-actuator.md), [03-add-transport.md](03-add-transport.md) — конкретные рецепты компонентов.
+- [04-patterns/01-add-sensor.md](01-add-sensor.md), [02-add-peripheral.md](02-add-peripheral.md), [03-add-transport.md](03-add-transport.md) — конкретные рецепты компонентов.
