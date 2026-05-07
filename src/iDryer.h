@@ -120,6 +120,17 @@ public:
     using CommandCallback           = std::function<void(JsonObjectConst data)>;
     using IntegrationStatusCallback = std::function<void(const IntegrationStatus&)>;
     using ClaimPinCallback          = std::function<void(const char* pin, uint32_t expiresInSeconds)>;
+    using PublishHookCallback       = std::function<void(JsonObject root)>;
+
+    /// Called right before telemetry is sent. Library has already filled
+    /// the standard `units[]` array (capabilities-driven), `rssi`, `uptime`.
+    /// Product can add product-specific top-level fields (e.g. iHeater Link
+    /// adds `outputMode`/`targetTempC`/`active` for the portal). Returns
+    /// JsonObject root — modify in place. Optional.
+    void onTelemetryPublish(PublishHookCallback cb);
+
+    /// Same as @ref onTelemetryPublish but for the `status` payload.
+    void onStatusPublish(PublishHookCallback cb);
 
     /// Register a callback for a command name. The callback fires when MQTT
     /// or Local-WS receives `commands/{name}` with arbitrary JSON payload.
