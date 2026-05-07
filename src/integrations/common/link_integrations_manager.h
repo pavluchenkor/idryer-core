@@ -117,6 +117,23 @@ public:
         haPublisher_.setCommandCallback(std::move(cb));
     }
 
+    /**
+     * @brief Публикует state одного юнита в HA-топики.
+     *
+     * Тонкая обёртка над HaPublisher::publishUnitState. Безопасно вызывать
+     * всегда — внутри проверка connected/discovery published. Используется
+     * фасадом для авто-публикации параллельно с порталом.
+     */
+    bool publishHaUnitState(uint8_t unitId,
+                             float temperatureC, float humidityPct,
+                             int heaterPowerPct, bool fanOn,
+                             const char* modeStr,
+                             float targetTempC, uint32_t targetDurMin) {
+        return haPublisher_.publishUnitState(unitId, temperatureC, humidityPct,
+                                              heaterPowerPct, fanOn, modeStr,
+                                              targetTempC, targetDurMin);
+    }
+
     /// @brief Must be called every iteration of the main loop.
     void loop();
 
@@ -163,6 +180,10 @@ public:
     void setDeviceInfo(const char* deviceId, uint8_t unitsCount,
                        const char* hwVersion = "unknown",
                        const char* fwVersion = "unknown");
+
+    /// @brief Какие sensor entity публиковать в HA Discovery.
+    /// Если не задано — все true (legacy-совместимость).
+    void setHaCapabilities(const ha::HaCapabilities& caps) { haCapabilities_ = caps; }
 
     ha::HaMqttClient* haMqttClient() { return haClient_.mqttClient(); }
 
@@ -218,6 +239,7 @@ private:
     uint8_t haUnitsCount_    = 1;
     char    haHwVersion_[16] = {0};
     char    haFwVersion_[16] = {0};
+    ha::HaCapabilities haCapabilities_{};
 
     HaConfig         ha_;
     BambuConfig      bambu_;
