@@ -104,34 +104,17 @@ public:
     ActiveIntegration getActive() const { return selection_.active; }
 
     /**
-     * @brief Wires HA commands (set_temp/set_duration/set_mode) to product-side dispatch.
+     * @brief Публикует sensor-state одного юнита в HA-топики.
      *
-     * HaPublisher already accumulates pending temp/duration internally and converts
-     * `set_mode IDLE/DRYING/STORAGE` into the unified command vocabulary
-     * (`stop`/`drying`/`storage`) — same as the portal MQTT contract. This method
-     * lets the facade subscribe a single callback that routes those commands into
-     * the same dispatch path the portal uses, so HA and the portal share one code
-     * path on the product side.
-     */
-    void setHaCommandCallback(ha::HaPublisher::HaCommandCallback cb) {
-        haPublisher_.setCommandCallback(std::move(cb));
-    }
-
-    /**
-     * @brief Публикует state одного юнита в HA-топики.
-     *
-     * Тонкая обёртка над HaPublisher::publishUnitState. Безопасно вызывать
-     * всегда — внутри проверка connected/discovery published. Используется
-     * фасадом для авто-публикации параллельно с порталом.
+     * Тонкая обёртка над HaPublisher::publishUnitState. Шлёт ровно те
+     * sensor-поля, что объявлены через HaCapabilities. Управляющие entities
+     * (mode_control / set_temp / ...) — продукт публикует сам.
      */
     bool publishHaUnitState(uint8_t unitId,
                              float temperatureC, float humidityPct,
-                             int heaterPowerPct, bool fanOn,
-                             const char* modeStr,
-                             float targetTempC, uint32_t targetDurMin) {
+                             int heaterPowerPct, bool fanOn) {
         return haPublisher_.publishUnitState(unitId, temperatureC, humidityPct,
-                                              heaterPowerPct, fanOn, modeStr,
-                                              targetTempC, targetDurMin);
+                                              heaterPowerPct, fanOn);
     }
 
     /// @brief Must be called every iteration of the main loop.

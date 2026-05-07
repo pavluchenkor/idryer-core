@@ -34,10 +34,6 @@ HaPublisher::HaPublisher(HaMqttClient* mqtt)
     memset(fwVersion_, 0, sizeof(fwVersion_));
     memset(topicBuf_, 0, sizeof(topicBuf_));
     memset(payloadBuf_, 0, sizeof(payloadBuf_));
-
-    mqtt_->setMessageCallback([this](const char* topic, const char* payload) {
-        handleIncomingMessage(topic, payload);
-    });
 }
 
 // =============================================================================
@@ -239,7 +235,6 @@ bool HaPublisher::publishAlertDiscovery() {
 
 bool HaPublisher::publishDiscovery(const char* deviceId, uint8_t unitsCount,
                                    const char* hwVersion, const char* fwVersion,
-                                   int tempMin, int tempMax, int durationMax,
                                    const HaCapabilities& caps) {
     if (!mqtt_ || !mqtt_->isConnected()) {
         HAL_LOG_ERROR("HA_PUB", "Cannot publish Discovery: MQTT not connected");
@@ -255,15 +250,12 @@ bool HaPublisher::publishDiscovery(const char* deviceId, uint8_t unitsCount,
     strncpy(hwVersion_, hwVersion, sizeof(hwVersion_) - 1);
     strncpy(fwVersion_, fwVersion, sizeof(fwVersion_) - 1);
     unitsCount_ = unitsCount;
-    tempMin_ = tempMin;
-    tempMax_ = tempMax;
-    durationMax_ = durationMax;
 
     HAL_LOG_INFO("HA_PUB", "Publishing Discovery for %s (%d units)", deviceId_, unitsCount_);
 
     for (uint8_t i = 0; i < unitsCount_ && i < 3; i++) {
-        // Sensors — публикуем только то, что продукт реально поддерживает.
-        // Отсутствующие — стираем (на случай если раньше публиковали retained).
+        // Sensors — публикуем только те, что объявлены через capabilities.
+        // Отсутствующие — стираем (empty retained на старый retained-config).
         if (caps.airTemp) {
             if (!publishSensorDiscovery(i, "temperature", "temperature", "°C", "mdi:thermometer")) return false;
         } else {
@@ -290,18 +282,26 @@ bool HaPublisher::publishDiscovery(const char* deviceId, uint8_t unitsCount,
             removeSensorDiscovery(i, "weight");
         }
 
-        // mode + select + numbers — общие управляющие entity, всегда.
-        if (!publishSensorDiscovery(i, "mode", nullptr, nullptr, "mdi:state-machine")) return false;
-        if (!publishSelectDiscovery(i)) return false;
-        if (!publishNumberDiscovery(i, "target temp", "set_temp", "target_temp",
-                                    tempMin_, tempMax_, "°C", "mdi:thermometer-plus")) return false;
-        if (!publishNumberDiscovery(i, "duration", "set_duration", "target_duration",
-                                    10, durationMax_, "min", "mdi:timer-outline")) return false;
+        // Зачистка stale retained от старой версии библиотеки, которая
+        // публиковала эти controls безусловно. Безопасно вызывать всегда.
+        removeSensorDiscovery(i, "mode");
+        {
+            char topic[HA_TOPIC_BUF_SIZE];
+            char unitStr[8];
+            formatUnitId(unitStr, sizeof(unitStr), i);
+            snprintf(topic, sizeof(topic), "%s/select/idryer_%s_%s_mode_control/config",
+                     "homeassistant", deviceId_, unitStr);
+            mqtt_->publish(topic, "", /*retained=*/true);
+            snprintf(topic, sizeof(topic), "%s/number/idryer_%s_%s_set_temp/config",
+                     "homeassistant", deviceId_, unitStr);
+            mqtt_->publish(topic, "", /*retained=*/true);
+            snprintf(topic, sizeof(topic), "%s/number/idryer_%s_%s_set_duration/config",
+                     "homeassistant", deviceId_, unitStr);
+            mqtt_->publish(topic, "", /*retained=*/true);
+        }
     }
 
     if (!publishAlertDiscovery()) return false;
-
-    subscribeToCommands();
 
     discoveryPublished_ = true;
     HAL_LOG_INFO("HA_PUB", "Discovery published successfully");
@@ -400,11 +400,9 @@ bool HaPublisher::removeSensorDiscovery(uint8_t unitId, const char* sensorName, 
 
 bool HaPublisher::publishUnitState(uint8_t unitId,
                                     float temperatureC, float humidityPct,
-                                    int heaterPowerPct, bool fanOn,
-                                    const char* modeStr,
-                                    float targetTempC, uint32_t targetDurMin) {
+                                    int heaterPowerPct, bool fanOn) {
     if (!mqtt_ || !mqtt_->isConnected()) return false;
-    if (!discoveryPublished_) return false;  // нет смысла публиковать state без entities
+    if (!discoveryPublished_) return false;
 
     bool ok = true;
 
@@ -423,188 +421,7 @@ bool HaPublisher::publishUnitState(uint8_t unitId,
     makeStateTopic(topicBuf_, sizeof(topicBuf_), unitId, "fan");
     ok &= mqtt_->publish(topicBuf_, fanOn ? "ON" : "OFF");
 
-    if (modeStr && modeStr[0]) {
-        makeStateTopic(topicBuf_, sizeof(topicBuf_), unitId, "mode");
-        ok &= mqtt_->publish(topicBuf_, modeStr);
-    }
-
-    // target_temp/target_duration — state_topics для number entities в Discovery.
-    makeStateTopic(topicBuf_, sizeof(topicBuf_), unitId, "target_temp");
-    snprintf(payloadBuf_, sizeof(payloadBuf_), "%d", (int)targetTempC);
-    ok &= mqtt_->publish(topicBuf_, payloadBuf_);
-
-    makeStateTopic(topicBuf_, sizeof(topicBuf_), unitId, "target_duration");
-    snprintf(payloadBuf_, sizeof(payloadBuf_), "%u", (unsigned)targetDurMin);
-    ok &= mqtt_->publish(topicBuf_, payloadBuf_);
-
     return ok;
-}
-
-bool HaPublisher::publishSelectDiscovery(uint8_t unitId) {
-    if (!mqtt_ || !mqtt_->isConnected()) return false;
-
-    char unitStr[4];
-    formatUnitId(unitStr, sizeof(unitStr), unitId);
-
-    snprintf(topicBuf_, sizeof(topicBuf_),
-        "%s/select/idryer_%s_%s_%s/config", HA_PREFIX, deviceId_, unitStr, "mode_control");
-
-    char stateTopic[HA_TOPIC_BUF_SIZE];
-    makeStateTopic(stateTopic, sizeof(stateTopic), unitId, "mode");
-
-    char cmdTopic[HA_TOPIC_BUF_SIZE];
-    snprintf(cmdTopic, sizeof(cmdTopic), "idryer/%s/%s/set_mode", deviceId_, unitStr);
-
-    char uniqueId[64];
-    snprintf(uniqueId, sizeof(uniqueId), "idryer_%s_%s_mode_control", deviceId_, unitStr);
-
-    char deviceJson[256];
-    makeDeviceJson(deviceJson, sizeof(deviceJson));
-
-    snprintf(payloadBuf_, sizeof(payloadBuf_),
-        "{"
-            "\"name\":\"iDryer %s mode control\","
-            "\"unique_id\":\"%s\","
-            "\"state_topic\":\"%s\","
-            "\"command_topic\":\"%s\","
-            "\"options\":[\"IDLE\",\"DRYING\",\"STORAGE\"],"
-            "\"icon\":\"mdi:washing-machine\","
-            "%s"
-        "}",
-        unitStr, uniqueId, stateTopic, cmdTopic, deviceJson
-    );
-
-    return mqtt_->publish(topicBuf_, payloadBuf_, true);
-}
-
-bool HaPublisher::publishNumberDiscovery(uint8_t unitId, const char* name,
-                                         const char* cmdSuffix, const char* stateSuffix,
-                                         int min, int max,
-                                         const char* unit, const char* icon) {
-    if (!mqtt_ || !mqtt_->isConnected()) return false;
-
-    char unitStr[4];
-    formatUnitId(unitStr, sizeof(unitStr), unitId);
-
-    snprintf(topicBuf_, sizeof(topicBuf_),
-        "%s/number/idryer_%s_%s_%s/config", HA_PREFIX, deviceId_, unitStr, cmdSuffix);
-
-    char cmdTopic[HA_TOPIC_BUF_SIZE];
-    snprintf(cmdTopic, sizeof(cmdTopic), "idryer/%s/%s/%s", deviceId_, unitStr, cmdSuffix);
-
-    char stateTopic[HA_TOPIC_BUF_SIZE];
-    snprintf(stateTopic, sizeof(stateTopic), "idryer/%s/%s/%s", deviceId_, unitStr, stateSuffix);
-
-    char uniqueId[64];
-    snprintf(uniqueId, sizeof(uniqueId), "idryer_%s_%s_%s", deviceId_, unitStr, cmdSuffix);
-
-    char deviceJson[256];
-    makeDeviceJson(deviceJson, sizeof(deviceJson));
-
-    snprintf(payloadBuf_, sizeof(payloadBuf_),
-        "{"
-            "\"name\":\"iDryer %s %s\","
-            "\"unique_id\":\"%s\","
-            "\"command_topic\":\"%s\","
-            "\"state_topic\":\"%s\","
-            "\"min\":%d,\"max\":%d,\"step\":1,"
-            "\"unit_of_measurement\":\"%s\","
-            "\"icon\":\"%s\","
-            "%s"
-        "}",
-        unitStr, name, uniqueId, cmdTopic, stateTopic,
-        min, max, unit, icon, deviceJson
-    );
-
-    return mqtt_->publish(topicBuf_, payloadBuf_, true);
-}
-
-bool HaPublisher::subscribeToCommands() {
-    if (!mqtt_ || !mqtt_->isConnected()) return false;
-
-    char topic[HA_TOPIC_BUF_SIZE];
-
-    snprintf(topic, sizeof(topic), "idryer/%s/+/set_mode", deviceId_);
-    mqtt_->subscribe(topic);
-
-    snprintf(topic, sizeof(topic), "idryer/%s/+/set_temp", deviceId_);
-    mqtt_->subscribe(topic);
-
-    snprintf(topic, sizeof(topic), "idryer/%s/+/set_duration", deviceId_);
-    mqtt_->subscribe(topic);
-
-    return true;
-}
-
-void HaPublisher::handleIncomingMessage(const char* topic, const char* payload) {
-    if (!topic || !payload) return;
-
-    char prefix[HA_TOPIC_BUF_SIZE];
-    snprintf(prefix, sizeof(prefix), "idryer/%s/", deviceId_);
-    size_t prefixLen = strlen(prefix);
-
-    if (strncmp(topic, prefix, prefixLen) != 0) return;
-
-    const char* rest = topic + prefixLen;
-    const char* slash = strchr(rest, '/');
-    if (!slash) return;
-
-    char unitStr[8];
-    size_t unitLen = slash - rest;
-    if (unitLen >= sizeof(unitStr)) return;
-    memcpy(unitStr, rest, unitLen);
-    unitStr[unitLen] = '\0';
-
-    const char* suffix = slash + 1;
-
-    uint8_t unitIdx = 0;
-    if (unitStr[0] == 'U' && unitStr[1] >= '1' && unitStr[1] <= '4') {
-        unitIdx = unitStr[1] - '1';
-    }
-
-    if (strcmp(suffix, "set_temp") == 0) {
-        int val = atoi(payload);
-        if (val >= 30 && val <= 85) {
-            targetTempC_[unitIdx] = val;
-            char stateTopic[HA_TOPIC_BUF_SIZE];
-            snprintf(stateTopic, sizeof(stateTopic), "idryer/%s/%s/target_temp", deviceId_, unitStr);
-            char buf[8];
-            snprintf(buf, sizeof(buf), "%d", val);
-            mqtt_->publish(stateTopic, buf);
-            HAL_LOG_INFO("HA_PUB", "Set temp %s: %d°C", unitStr, val);
-        }
-        return;
-    }
-
-    if (strcmp(suffix, "set_duration") == 0) {
-        int val = atoi(payload);
-        if (val >= 10 && val <= 1440) {
-            targetDurMin_[unitIdx] = val;
-            char stateTopic[HA_TOPIC_BUF_SIZE];
-            snprintf(stateTopic, sizeof(stateTopic), "idryer/%s/%s/target_duration", deviceId_, unitStr);
-            char buf[8];
-            snprintf(buf, sizeof(buf), "%d", val);
-            mqtt_->publish(stateTopic, buf);
-            HAL_LOG_INFO("HA_PUB", "Set duration %s: %dmin", unitStr, val);
-        }
-        return;
-    }
-
-    if (strcmp(suffix, "set_mode") == 0 && commandCallback_) {
-        const char* command = nullptr;
-        if (strcmp(payload, "DRYING") == 0)       command = "drying";
-        else if (strcmp(payload, "STORAGE") == 0) command = "storage";
-        else if (strcmp(payload, "IDLE") == 0)    command = "stop";
-
-        if (!command) {
-            HAL_LOG_WARN("HA_PUB", "Unknown mode: %s", payload);
-            return;
-        }
-
-        HAL_LOG_INFO("HA_PUB", "Command from HA: %s -> %s (temp=%d, dur=%d)",
-                     unitStr, command, targetTempC_[unitIdx], targetDurMin_[unitIdx]);
-        commandCallback_(command, unitStr, targetTempC_[unitIdx], targetDurMin_[unitIdx]);
-    }
 }
 
 bool HaPublisher::publishAlert(uint8_t unitId, const char* message, const char* severity) {
