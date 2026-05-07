@@ -68,7 +68,6 @@ void LinkIntegrationsManager::begin()
     haClient_.setStateChangeCallback([this](HaConnectionState s) {
         if (s == HaConnectionState::Connected && haDeviceId_[0] != '\0') {
             haPublisher_.publishDiscovery(haDeviceId_, haUnitsCount_, haHwVersion_, haFwVersion_,
-                                           /*tempMin=*/30, /*tempMax=*/90, /*durMax=*/1440,
                                            haCapabilities_);
         } else if (s != HaConnectionState::Connected) {
             haPublisher_.resetDiscoveryPublished();

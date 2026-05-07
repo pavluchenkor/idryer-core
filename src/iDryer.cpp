@@ -305,26 +305,6 @@ bool Link::begin() {
 
     impl_->intManager.begin();
 
-    // HA → unified dispatch. HaPublisher already accumulates pending temp/duration
-    // and converts set_mode IDLE/DRYING/STORAGE into the portal-vocabulary command
-    // names (stop/drying/storage). Here we route the resulting (command, temp, dur)
-    // into the same dispatchCommand() the portal uses, so HA and portal share one
-    // code path on the product side. No product wiring required.
-    impl_->intManager.setHaCommandCallback(
-        [this](const char* command, const char* unitId, int temp, int dur) {
-            StaticJsonDocument<128> doc;
-            if (unitId && unitId[0]) doc["unitId"] = unitId;
-            if (strcmp(command, "drying") == 0 || strcmp(command, "storage") == 0) {
-                JsonObject params = doc.createNestedObject("params");
-                params["temperature"] = temp;
-                if (strcmp(command, "drying") == 0) {
-                    // dispatchCommand expects duration in MINUTES (portal contract).
-                    params["duration"] = dur;
-                }
-            }
-            dispatchCommand(command, doc.as<JsonObjectConst>());
-        });
-
     // Runtime command handler — same dispatch as local-WS, single user callback.
     impl_->runtime.setCommandHandler([this](const char* command, JsonObjectConst data) {
         dispatchCommand(command, data);
@@ -423,24 +403,18 @@ void Link::loop() {
         }
     }
 
-    // Авто-публикация state в HA-топики (параллельно с порталом).
-    // Не зависит от telemetryPeriodMs продукта — у iHeater Link он 0
-    // (продукт сам шлёт расширенный payload в портал), но HA нужен
-    // отдельный путь. Внутри publishUnitState проверяет connected
-    // и discoveryPublished — безопасно звать всегда.
+    // Авто-публикация sensor state в HA. Шлёт ровно поля из HaCapabilities.
+    // Безопасно вызывать всегда — внутри проверка connected/discovery published.
+    // Управляющие entities (controls) — продукт публикует сам.
     if (now - impl_->lastHaStateMs >= Impl::kHaStatePeriodMs) {
         impl_->lastHaStateMs = now;
         const auto& cfg = impl_->cfg;
         for (uint8_t i = 0; i < cfg.unitsCount && i < MAX_UNITS; ++i) {
-            const float    temp        = telemetry.airTempC[i];
-            const float    hum         = telemetry.airHumidityPct[i];
-            const int      powerPct    = (int)(telemetry.heaterPower01[i] * 100.0f);
-            const bool     fan         = telemetry.fanOn[i];
-            const char*    modeStr     = unitModeString(status.mode[i]);
-            const float    targetTemp  = status.targetTempC[i];
-            const uint32_t targetDurMin= status.durationS[i] / 60u;
-            impl_->intManager.publishHaUnitState(i, temp, hum, powerPct, fan,
-                                                  modeStr, targetTemp, targetDurMin);
+            const float temp     = telemetry.airTempC[i];
+            const float hum      = telemetry.airHumidityPct[i];
+            const int   powerPct = (int)(telemetry.heaterPower01[i] * 100.0f);
+            const bool  fan      = telemetry.fanOn[i];
+            impl_->intManager.publishHaUnitState(i, temp, hum, powerPct, fan);
         }
     }
 }
