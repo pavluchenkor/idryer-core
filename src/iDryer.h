@@ -116,18 +116,23 @@ public:
                     const char* message,
                     uint8_t     unitId = 0xFF);
 
-    // ─── Incoming subscriptions ──────────────────────────────────────
-    using RequestCallback           = std::function<void(const Request&)>;
-    using ProfileCallback           = std::function<void(const ProfileSchedule&)>;
+    // ─── Incoming command subscriptions ──────────────────────────────
+    using CommandCallback           = std::function<void(JsonObjectConst data)>;
     using IntegrationStatusCallback = std::function<void(const IntegrationStatus&)>;
     using ClaimPinCallback          = std::function<void(const char* pin, uint32_t expiresInSeconds)>;
 
-    /// Called for simple business commands (Start/Stop/Storage/Find/ClearErrors)
-    /// from MQTT or local-WS. Source is transparent.
-    void onRequest(RequestCallback cb);
-
-    /// Called for `commands/profile` — multi-stage drying schedule.
-    void onProfile(ProfileCallback cb);
+    /// Register a callback for a command name. The callback fires when MQTT
+    /// or Local-WS receives `commands/{name}` with arbitrary JSON payload.
+    ///
+    /// Built-in commands (`link_integration`, `bambu_apply`, `ping`) are always
+    /// handled by the library — these cannot be intercepted. But a product can
+    /// still register a callback under the same name to run as a post-hook
+    /// (e.g. iHeater Link's menu-toggle sync after `link_integration`).
+    ///
+    /// Common product names: `drying`, `stop`, `storage`, `get_config`, `set`,
+    /// `profile`, `led.pulse` — anything is allowed. Returns false on overflow
+    /// (max 12 commands) or invalid arguments.
+    bool onCommand(const char* name, CommandCallback cb);
 
     /// Called when an integration changes connectivity state. Optional.
     void onIntegrationStatus(IntegrationStatusCallback cb);

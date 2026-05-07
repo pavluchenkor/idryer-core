@@ -9,6 +9,7 @@
 
 #include "iDryer.h"
 
+#include "mqtt/mqtt_client.h"   // MQTT_CONFIG_CHUNK_SIZE
 #include <Arduino.h>
 #include <WiFi.h>
 #include <ArduinoJson.h>
@@ -166,9 +167,16 @@ struct Link::Impl {
     // Runtime — must be last; depends on cloud/dispatcher/profile/mqtt.
     idryer::IdryerRuntime runtime;
 
+    // Command registry (для onCommand). Stack-array без heap.
+    struct CommandEntry {
+        char name[28];
+        Link::CommandCallback cb;
+    };
+    static constexpr uint8_t MAX_CMDS = 12;
+    CommandEntry commands[MAX_CMDS];
+    uint8_t      commandsCount = 0;
+
     // User callbacks.
-    Link::RequestCallback           onRequest;
-    Link::ProfileCallback           onProfile;
     Link::IntegrationStatusCallback onIntegrationStatus;
     Link::ClaimPinCallback          onClaimPin;
 
@@ -437,21 +445,6 @@ uint8_t parseUnitId(const char* s) {
     return 0xFF;
 }
 
-// Map MQTT command suffix → facade RequestKind. Returns false for commands
-// the facade doesn't expose:
-//   SDK-internal: get_config, set, invoke, ping, link_integration, bambu_apply
-//   Not yet supported: profile (needs array payload), read_rfid/write_rfid (RPC)
-//   Legacy: pause, resume, update_preset (portal no longer sends these)
-bool mapCommand(const char* command, RequestKind& outKind) {
-    if (!command) return false;
-    if (strcmp(command, "drying")       == 0) { outKind = RequestKind::Start;       return true; }
-    if (strcmp(command, "stop")         == 0) { outKind = RequestKind::Stop;        return true; }
-    if (strcmp(command, "storage")      == 0) { outKind = RequestKind::Storage;     return true; }
-    if (strcmp(command, "find")         == 0) { outKind = RequestKind::Find;        return true; }
-    if (strcmp(command, "clear_errors") == 0) { outKind = RequestKind::ClearErrors; return true; }
-    return false;
-}
-
 // UnitMode → contract string. Mirrors yaml.enums.UartDryerMode + PortalUnitStatus.UNKNOWN.
 const char* unitModeString(UnitMode m) {
     switch (m) {
@@ -567,76 +560,53 @@ void Link::raiseEvent(EventKind   severity,
     impl_->pub.publishEvent(doc);
 }
 
-void Link::onRequest(RequestCallback cb) {
-    impl_->onRequest = std::move(cb);
-}
-
-void Link::onProfile(ProfileCallback cb) {
-    impl_->onProfile = std::move(cb);
+bool Link::onCommand(const char* name, CommandCallback cb) {
+    if (!name || !name[0] || !cb) return false;
+    // Replace if name already registered.
+    for (uint8_t i = 0; i < impl_->commandsCount; ++i) {
+        if (strcmp(impl_->commands[i].name, name) == 0) {
+            impl_->commands[i].cb = std::move(cb);
+            return true;
+        }
+    }
+    if (impl_->commandsCount >= Impl::MAX_CMDS) return false;
+    auto& slot = impl_->commands[impl_->commandsCount++];
+    strncpy(slot.name, name, sizeof(slot.name) - 1);
+    slot.name[sizeof(slot.name) - 1] = '\0';
+    slot.cb = std::move(cb);
+    return true;
 }
 
 void Link::dispatchCommand(const char* command, JsonObjectConst data) {
-    // commands/profile — separate callback (array payload up to 10 stages).
-    if (command && strcmp(command, "profile") == 0) {
-        if (!impl_->onProfile) return;
+    if (!command || !command[0]) return;
 
-        ProfileSchedule sched{};
-        sched.unitId     = parseUnitId(data["unitId"].as<const char*>());
-        sched.startStage = data["startStage"].as<uint8_t>();   // 0 if absent
-
-        JsonArrayConst arr = data["stages"];
-        uint8_t n = 0;
-        if (arr) {
-            for (JsonVariantConst v : arr) {
-                if (n >= ProfileSchedule::MAX_STAGES) break;
-                sched.stages[n].tempC = v["temp"].as<float>();
-                sched.stages[n].rampS = v["ramp"].as<uint32_t>();
-                sched.stages[n].holdS = v["hold"].as<uint32_t>();
-                ++n;
-            }
-        }
-        sched.stageCount = n;
-        impl_->onProfile(sched);
-        return;
+    // ─── Built-in side-effects (always run) ──────────────────────────────
+    // Эти команды обрабатывает либа сама. Продукт может ДОПОЛНИТЕЛЬНО
+    // подписаться через onCommand(name, ...) — будет вызван post-hook'ом,
+    // например для menu-toggle sync после link_integration.
+    bool builtinHandled = false;
+    if (strcmp(command, "link_integration") == 0) {
+        impl_->intManager.handleLinkIntegrationCommand(data);
+        builtinHandled = true;
+    } else if (strcmp(command, "bambu_apply") == 0) {
+        impl_->intManager.handleBambuApplyCommand(data);
+        builtinHandled = true;
+    } else if (strcmp(command, "ping") == 0) {
+        // Time-sync делает runtime через `timestamp` в payload — здесь no-op.
+        builtinHandled = true;
     }
 
-    // Commands not exposed by the facade (set/get_config/invoke/ping/...) are
-    // handled internally by the runtime/MenuBridge — silently ignored here.
-    RequestKind kind;
-    if (!mapCommand(command, kind)) return;
-
-    if (!impl_->onRequest) return;
-
-    Request req{};
-    req.kind   = kind;
-    req.unitId = parseUnitId(data["unitId"].as<const char*>());
-
-    // Parse optional payload params for kinds that carry them.
-    // Two payload variants in the wild (per yaml):
-    //   new:    { params: { temperature, duration } }
-    //   legacy: { targetTemperature, durationMinutes }
-    // Both supported, new takes precedence.
-    if (kind == RequestKind::Start || kind == RequestKind::Storage) {
-        JsonObjectConst params = data["params"];
-        if (params && params["temperature"].is<float>()) {
-            req.targetTempC = params["temperature"].as<float>();
-        } else if (data["targetTemperature"].is<float>()) {
-            req.targetTempC = data["targetTemperature"].as<float>();
-        }
-
-        if (kind == RequestKind::Start) {
-            // Portal sends `duration` in MINUTES. Convert to seconds for API.
-            uint32_t durMin = 0;
-            if (params && params["duration"].is<uint32_t>()) {
-                durMin = params["duration"].as<uint32_t>();
-            } else if (data["durationMinutes"].is<uint32_t>()) {
-                durMin = data["durationMinutes"].as<uint32_t>();
-            }
-            req.durationS = durMin * 60u;
+    // ─── Registry — продуктовые имена через onCommand(name, cb) ───────────
+    for (uint8_t i = 0; i < impl_->commandsCount; ++i) {
+        if (strcmp(impl_->commands[i].name, command) == 0) {
+            impl_->commands[i].cb(data);
+            return;
         }
     }
 
-    impl_->onRequest(req);
+    if (!builtinHandled) {
+        HAL_LOG_WARN("LINK", "unhandled command: %s", command);
+    }
 }
 
 void Link::onClaimPin(ClaimPinCallback cb) {
