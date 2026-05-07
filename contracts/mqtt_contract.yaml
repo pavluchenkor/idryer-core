@@ -217,12 +217,15 @@ canonical_roles:
                                   args_schema: { tagData: base64_888B } }
 
   # ── iHeater Link — в статусе in_progress ─────────────────────────────────
-  iheater.material_petg:        { type: uint,  unit: "°C", widget: slider }
-  iheater.material_pla:         { type: uint,  unit: "°C", widget: slider }
-  iheater.material_pacf:        { type: uint,  unit: "°C", widget: slider }
+  # Integration toggles (interlock): только один из трёх активен.
+  # Эксклюзивность обеспечивает MenuBridge::applySetCommand.
   iheater.bambu_enabled:        { type: bool,  widget: toggle }
   iheater.moonraker_enabled:    { type: bool,  widget: toggle }
   iheater.ha_enabled:           { type: bool,  widget: toggle }
+  # Note: 27 пунктов меню «температура материала» (mat_pla, mat_petg,
+  # mat_abs ... mat_psu) пока остаются приватными menu items без
+  # canonical role. Если понадобится UI на портале — отдельный widget
+  # типа MaterialsTable, а не 27 индивидуальных ролей.
 
   # ── Storage Link — в статусе in_progress ─────────────────────────────────
   storage.led_count:            { type: uint,  widget: number }
