@@ -291,6 +291,26 @@ bool Link::begin() {
 
     impl_->intManager.begin();
 
+    // HA → unified dispatch. HaPublisher already accumulates pending temp/duration
+    // and converts set_mode IDLE/DRYING/STORAGE into the portal-vocabulary command
+    // names (stop/drying/storage). Here we route the resulting (command, temp, dur)
+    // into the same dispatchCommand() the portal uses, so HA and portal share one
+    // code path on the product side. No product wiring required.
+    impl_->intManager.setHaCommandCallback(
+        [this](const char* command, const char* unitId, int temp, int dur) {
+            StaticJsonDocument<128> doc;
+            if (unitId && unitId[0]) doc["unitId"] = unitId;
+            if (strcmp(command, "drying") == 0 || strcmp(command, "storage") == 0) {
+                JsonObject params = doc.createNestedObject("params");
+                params["temperature"] = temp;
+                if (strcmp(command, "drying") == 0) {
+                    // dispatchCommand expects duration in MINUTES (portal contract).
+                    params["duration"] = dur;
+                }
+            }
+            dispatchCommand(command, doc.as<JsonObjectConst>());
+        });
+
     // Runtime command handler — same dispatch as local-WS, single user callback.
     impl_->runtime.setCommandHandler([this](const char* command, JsonObjectConst data) {
         dispatchCommand(command, data);
