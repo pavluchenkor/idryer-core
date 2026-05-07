@@ -136,6 +136,113 @@ rules:
         → syncTimeIfPresent) — тот же контракт. В iHeater-link/idryer-core поведение восстановлено.
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Статус миграции продуктов на menu_protocol_v1
+# Согласно ___capabilities_and_menu_as_protocol.md §10.6
+# ─────────────────────────────────────────────────────────────────────────────
+migration_status:
+  iheater_link:
+    target:  menu_protocol_v1
+    status:  in_progress
+    actions:
+      - "Добавить r: в menu.yaml для mat_petg/mat_pla/mat_pacf, *_en"
+      - "Удалить ручные обработки link_integration / bambu_apply из main.cpp"
+      - "Команды переезжают в commands/set + commands/invoke"
+
+  storage_link:
+    target:  menu_protocol_v1
+    status:  in_progress
+    actions:
+      - "Добавить r: в menu.yaml для led_count, brightness, animation"
+      - "Добавить пункт act с r: led.pulse, widget: LedPulse"
+      - "Backend mapDeviceType: добавить case 'storage_link'"
+
+  dryer:
+    target:  menu_protocol_v1
+    status:  deferred
+    note: |
+      Сушилка работает в проде. Миграция отдельной задачей после стабилизации
+      iHeater Link и Storage Link на новой модели. До этого момента сушилка
+      продолжает использовать legacy-формат (top-level топики команд:
+      commands/drying, commands/storage, commands/profile, commands/read_rfid,
+      commands/write_rfid и т.п.) и старые messages-секции этого файла.
+    legacy_format_kept:
+      - "commands/drying"
+      - "commands/storage"
+      - "commands/profile"
+      - "commands/stop"
+      - "commands/find"
+      - "commands/clear_errors"
+      - "commands/read_rfid"
+      - "commands/write_rfid"
+      - "weights"
+      - "rfid"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Канонические роли — закрытый словарь menu_protocol_v1
+# Подробности — ___capabilities_and_menu_as_protocol.md §8
+# ─────────────────────────────────────────────────────────────────────────────
+canonical_roles:
+  # Каждая роль описывает:
+  #   type        — тип данных (float/uint/bool/action)
+  #   unit        — единица измерения (опционально, для UI)
+  #   widget      — какой UI-компонент рисовать на портале
+  #                   стандартные: slider | number | toggle | select | button | hidden
+  #                   хардкод: ProfileEditor | RfidWriter | LedPulse | ...
+  #   args_schema — для actions с runtime-параметрами (опционально)
+  #
+  # Default-виджет берётся по типу пункта меню если widget не задан в роли:
+  #   menu type:val             → slider (если есть min/max) или number
+  #   menu type:val + select_options → select
+  #   menu type:toggle          → toggle
+  #   menu type:act             → button
+
+  # ── Сушилка (Dryer) — в статусе deferred ─────────────────────────────────
+  drying.target_temperature:    { type: float, unit: "°C",  widget: slider }
+  drying.duration:              { type: uint,  unit: "min", widget: slider }
+  drying.start:                 { type: action, widget: button }
+  drying.stop:                  { type: action, widget: button }
+
+  storage.target_temperature:   { type: uint,  unit: "°C",  widget: slider }
+  storage.target_humidity:      { type: uint,  unit: "%RH", widget: slider }
+  storage.start:                { type: action, widget: button }
+  storage.stop:                 { type: action, widget: button }
+
+  profile.start:                { type: action, widget: ProfileEditor,
+                                  args_schema: { stages: array_of_stages } }
+  profile.stop:                 { type: action, widget: button }
+
+  rfid.read:                    { type: action, widget: button,
+                                  args_schema: { readerId: int } }
+  rfid.write:                   { type: action, widget: RfidWriter,
+                                  args_schema: { tagData: base64_888B } }
+
+  # ── iHeater Link — в статусе in_progress ─────────────────────────────────
+  iheater.material_petg:        { type: uint,  unit: "°C", widget: slider }
+  iheater.material_pla:         { type: uint,  unit: "°C", widget: slider }
+  iheater.material_pacf:        { type: uint,  unit: "°C", widget: slider }
+  iheater.bambu_enabled:        { type: bool,  widget: toggle }
+  iheater.moonraker_enabled:    { type: bool,  widget: toggle }
+  iheater.ha_enabled:           { type: bool,  widget: toggle }
+
+  # ── Storage Link — в статусе in_progress ─────────────────────────────────
+  storage.led_count:            { type: uint,  widget: number }
+  storage.led_brightness:       { type: uint,  widget: slider }
+  storage.led_animation:        { type: uint,  widget: select }
+  led.pulse:                    { type: action, widget: LedPulse,
+                                  args_schema: { ledIndex: int,
+                                                 color: rgb,
+                                                 durationMs: uint } }
+
+  # ── Общие действия (для всех продуктов) ──────────────────────────────────
+  common.stop:                  { type: action, widget: button }
+  common.find:                  { type: action, widget: button }
+  common.clear_errors:          { type: action, widget: button }
+
+  # ── Системное ────────────────────────────────────────────────────────────
+  system.active_unit:           { type: uint, widget: hidden }
+  system.language:              { type: uint, widget: select }
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Карта диапазонов UART kind_id (для удобства аудитора)
 # ─────────────────────────────────────────────────────────────────────────────
 uart_kind_ranges:
