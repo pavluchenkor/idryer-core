@@ -1,12 +1,23 @@
 # Capabilities и меню как декларативный протокол
 
-> Документ-заключение по результатам проектного исследования.
-> Описывает предлагаемую архитектуру обмена устройство ↔ портал,
-> в которой портал строит UI декларативно из capabilities + меню,
-> без хардкодного знания типов устройств.
+> **Статус: утверждённый план миграции.** Все открытые вопросы
+> (§10.2 профиль, §10.3 indexed-роли, §10.4 unitId в payload, §10.6
+> порядок миграции) **закрыты решениями** по итогам 5 раундов
+> архитектурного ревью с тремя независимыми консультантами.
 >
-> Это **проектный документ для отдельного этапа работ**, не текущий
-> контракт. Текущий контракт — `mqtt_contract.yaml`.
+> Документ описывает архитектуру обмена устройство ↔ портал, в которой
+> портал строит UI декларативно из capabilities + меню без хардкодного
+> знания типов устройств.
+>
+> **Этап 1 (можно начинать)**: iHeater Link + Storage Link — миграция
+> на menu_protocol_v1. План — §13.
+>
+> **Этап 2 (отдельная задача после стабилизации Этапа 1)**:
+> сушилка (Dryer + iDryerRP2040) — переезд в новую модель. Сейчас
+> в проде — не трогаем.
+>
+> Текущий контракт обмена — `mqtt_contract.yaml`. Этот документ — план
+> его расширения и эволюции.
 
 ---
 
@@ -486,6 +497,40 @@ config (per-unit values).
 Пункты без `r` — приватные для устройства; портал может показать как
 сырое поле в админке, но не использует в управлении.
 
+#### Поле `widget:` для сложных команд
+
+Опциональное. По умолчанию портал рисует виджет по типу пункта меню:
+`val` → слайдер/число, `toggle` → переключатель, `act` → кнопка,
+`val` с `select_options` → выпадающий список.
+
+Если `widget:` задан — портал использует **захардкоженный** React-компонент
+с этим именем вместо дефолтного. Применяется для сложных команд, которые
+не вписываются в простые виджеты.
+
+```json
+{ "id": 17, "t": "act", "p": 1, "bind": "profile_start",
+  "r": "profile.start",
+  "widget": "ProfileEditor",
+  "n": ["ПРОФИЛЬ", "PROFILE"] }
+
+{ "id": 23, "t": "act", "p": 5, "bind": "rfid_write",
+  "r": "rfid.write",
+  "widget": "RfidWriter",
+  "n": ["ЗАПИСАТЬ МЕТКУ", "WRITE TAG"] }
+
+{ "id": 31, "t": "act", "bind": "led_pulse",
+  "r": "led.pulse",
+  "widget": "LedPulse",
+  "n": ["ИМПУЛЬС", "PULSE"] }
+```
+
+При нажатии хардкод-виджет открывает свой UI (форма с таблицей этапов /
+загрузка base64 / color picker), собирает аргументы и шлёт
+`commands/invoke` с произвольным `args`-объектом.
+
+Реестр `widget:`-имён → React-компонентов хранится на портале как
+hardcoded mapping. Расширение каталога виджетов = код-релиз портала.
+
 ### 6.4. telemetry, status, weights, rfid, events
 
 Не меняются — остаются в текущем формате.
@@ -597,44 +642,81 @@ RFID write, LED pulse и т.п.):
 
 ---
 
-## 8. Словарь canonical_roles (пример)
+## 8. Словарь canonical_roles
 
 Закрытый словарь в `mqtt_contract.yaml`. Единственный hardcoded элемент,
 который portal знает наизусть.
 
+Для каждой роли указано:
+- `type` — тип данных
+- `unit` — единица измерения (опционально)
+- `widget` — какой UI-компонент рисовать на портале (`slider`/`number`/
+  `toggle`/`select`/`button` — стандартные; имена типа `ProfileEditor`/
+  `RfidWriter`/`LedPulse` — хардкод-компоненты)
+- `args_schema` — для actions с runtime-параметрами (опционально)
+
 ```yaml
 canonical_roles:
-  # Параметры режимов
-  drying.target_temperature:    { type: float, unit: "°C" }
-  drying.duration:              { type: uint,  unit: "min" }
-  storage.target_temperature:   { type: uint,  unit: "°C" }
-  storage.target_humidity:      { type: uint,  unit: "%RH" }
-  profile.stage.temperature:    { type: float, unit: "°C", indexed: true }
-  profile.stage.duration:       { type: uint,  unit: "min", indexed: true }
+  # ── Сушилка (Dryer) ────────────────────────────────────────────────
+  drying.target_temperature:    { type: float, unit: "°C",  widget: slider }
+  drying.duration:              { type: uint,  unit: "min", widget: slider }
+  drying.start:                 { type: action, widget: button }
+  drying.stop:                  { type: action, widget: button }
 
-  # Действия
-  drying.start:                 { type: action }
-  drying.stop:                  { type: action }
-  storage.start:                { type: action }
-  storage.stop:                 { type: action }
-  profile.start:                { type: action }
-  common.stop:                  { type: action }
-  common.find:                  { type: action }
-  common.clear_errors:          { type: action }
-  rfid.read:                    { type: action, args: { readerId: int } }
-  rfid.write:                   { type: action, args: { tagData: string } }
-  led.pulse:                    { type: action, args: { ledIndex: int, color: rgb, ... } }
+  storage.target_temperature:   { type: uint,  unit: "°C",  widget: slider }
+  storage.target_humidity:      { type: uint,  unit: "%RH", widget: slider }
+  storage.start:                { type: action, widget: button }
+  storage.stop:                 { type: action, widget: button }
 
-  # Системное
-  system.active_unit:           { type: uint, unit: "index" }
-  system.language:              { type: uint }
+  profile.start:                { type: action, widget: ProfileEditor,
+                                  args_schema: { stages: array } }
+  profile.stop:                 { type: action, widget: button }
+
+  rfid.read:                    { type: action, widget: button,
+                                  args_schema: { readerId: int } }
+  rfid.write:                   { type: action, widget: RfidWriter,
+                                  args_schema: { tagData: base64 } }
+
+  # ── iHeater Link ───────────────────────────────────────────────────
+  iheater.material_petg:        { type: uint, unit: "°C", widget: slider }
+  iheater.material_pla:         { type: uint, unit: "°C", widget: slider }
+  iheater.material_pacf:        { type: uint, unit: "°C", widget: slider }
+  iheater.bambu_enabled:        { type: bool, widget: toggle }
+  iheater.moonraker_enabled:    { type: bool, widget: toggle }
+  iheater.ha_enabled:           { type: bool, widget: toggle }
+
+  # ── Storage Link (полка-индикатор) ─────────────────────────────────
+  storage.led_count:            { type: uint, widget: number }
+  storage.led_brightness:       { type: uint, widget: slider }
+  storage.led_animation:        { type: uint, widget: select }
+  led.pulse:                    { type: action, widget: LedPulse,
+                                  args_schema: { ledIndex: int, color: rgb,
+                                                 durationMs: uint } }
+
+  # ── Общие действия ─────────────────────────────────────────────────
+  common.stop:                  { type: action, widget: button }
+  common.find:                  { type: action, widget: button }
+  common.clear_errors:          { type: action, widget: button }
+
+  # ── Системное ──────────────────────────────────────────────────────
+  system.active_unit:           { type: uint, widget: hidden }
+  system.language:              { type: uint, widget: select }
 ```
 
-Для каждой role портал имеет соответствующий виджет:
+### Дефолтные виджеты по типу пункта меню
 
-- `drying.target_temperature` (type: float) → слайдер с `min`/`max` из config
-- `drying.start` (type: action) → кнопка «Запустить сушку»
-- `rfid.read` (type: action, args) → кнопка с диалогом ввода readerId
+Если у пункта меню есть `r:` но соответствующая роль в словаре не имеет
+`widget:`, портал применяет дефолт по типу пункта:
+
+| Тип пункта меню | Дефолтный widget |
+|---|---|
+| `val` (number/float) | `slider` (если есть min/max) или `number` |
+| `val` с `select_options` | `select` |
+| `toggle` | `toggle` |
+| `act` | `button` |
+
+Расширение `widget:` в роли (например, `ProfileEditor`) — это **override**
+дефолта.
 
 ---
 
@@ -726,40 +808,47 @@ canonical_roles:
 **Решение**: QoS 1 + persistent session. На portal-стороне — лок
 «один юзер за раз делает действия с устройством» (уже частично есть).
 
-### 10.2. Профиль с N stages
+### 10.2. Профиль с N stages — РЕШЕНО
 
-Profile с 5 этапами по 3 параметра = 15 set'ов перед invoke. Технически
-работает, но болезненно по числу message.
+Profile с 5 этапами по 3 параметра не вписывается в плоское меню. Принят
+**вариант (b): `invoke` с `args` + захардкоженный виджет `ProfileEditor`**.
 
-**Варианты**:
-- (a) `commands/set_bulk { items: [{id, val}, ...] }` — атомарный bulk-set.
-- (b) `profile.start` остаётся action с args (исключение для сложных
-  команд): `invoke { id: <profile_start>, args: { stages: [...] } }`.
-- (c) Профиль как N stages в меню, портал шлёт N set'ов.
+В меню — один пункт `act` с `r: profile.start` и `widget: ProfileEditor`.
+Портал, увидев `widget:`, рисует не дефолтную кнопку, а захардкоженный
+React-компонент с таблицей этапов (add/remove строк, поля для каждой
+стадии). При нажатии «Применить» портал шлёт:
 
-**Предварительно выбран вариант (a) или (b)** — обсуждается.
+```json
+PUB commands/invoke
+{ "id": <profile_start_id>,
+  "args": { "stages": [
+    { "T": 50, "ramp": 600, "hold": 1800 },
+    { "T": 80, "ramp": 600, "hold": 7200 }
+  ]}
+}
+```
 
-### 10.3. Indexed-роли (profile.stage)
+Прошивка обрабатывает `args` в `applyInvokeCommand` и стартует профиль.
 
-Роль `profile.stage.temperature` относится к каждому этапу профиля.
-Привязка stage_index к role требует дополнительного поля в menu item.
+**Отклонены**:
+- Bulk-set — лишняя сложность на стороне прошивки.
+- Профиль как N menu stages — структурно невозможно при переменной длине.
 
-**Варианты**:
-- (a) Каждой стадии своя role: `profile.stage_01.temperature`,
-  `profile.stage_02.temperature`, ...
-- (b) Параметризованная role: `r: "profile.stage.temperature"` +
-  поле `index: 1` в menu_meta.
+### 10.3. Indexed-роли — ОТМЕНЕНО
 
-**Предварительно выбран вариант (b)** — обсуждается.
+Раз профиль = `widget: ProfileEditor` (хардкод-виджет), роли на каждый
+этап (`profile.stage.temperature` с index'ом) **не нужны**. Хардкод-виджет
+сам управляет своей структурой данных, отдельные роли для UI не
+требуются.
 
-### 10.4. Адресация в multi-юнитной работе портала
+### 10.4. unitId в payload — ОТМЕНЕНО
 
-Когда портал параллельно показывает 4 карточки юнитов, операции на
-разных юнитах требуют переключения активного. Это последовательно, но
-работает. При высокой частоте операций может быть узким местом.
+`unitId` в `commands/set` / `commands/invoke` **не вводим**. Адресация
+через активный юнит (`system.active_unit`) достаточна. Портал
+переключает активный юнит одним `set`, дальше все команды идут на него.
 
-**Решение**: на старте достаточно. Если станет узким местом — добавить
-явный `unitId` в `set/invoke` (поле опциональное, перекрывает active).
+Если в будущем (после работы в проде) станет узким местом для частых
+multi-юнит сценариев — пересмотрим. На старте — нет.
 
 ### 10.5. Версионирование канонических ролей
 
@@ -770,15 +859,41 @@ deprecated-aliases не вводятся.
 При добавлении новой роли — старые устройства её не публикуют, портал
 просто не видит соответствующий виджет. Деградация естественная.
 
-### 10.6. iDryer и iHeater-link в проде
+### 10.6. Порядок миграции продуктов — РЕШЕНО
 
-Эти продукты сейчас в проде с текущим протоколом (top-level топики
-команд). Переход на новую модель — breaking change для прошивки и
-backend одновременно.
+Миграция в два этапа:
 
-**Решение**: фаза переезда как отдельный этап работ. Возможны временные
-shim-ы на стороне backend (преобразование старых вызовов в новые), но
-firmware переписывается под новый формат разом.
+**Этап 1 — сейчас. Переезжают:**
+- **iHeater Link** — добавление `r:` в его меню (mat_petg/mat_pla/
+  mat_pacf/bambu_en/moon_en/ha_en); удаление топиков
+  `commands/link_integration`, `commands/bambu_apply` (переезжают в
+  `commands/set` соответствующих menu items).
+- **Storage Link** — добавление `r:` в его меню (LED count, brightness,
+  animation); починка `mapDeviceType` в backend (сейчас Storage Link
+  падает в `UNKNOWN`); добавление виджета `LedPulse` для роли
+  `led.pulse`.
+
+**Этап 2 — отдельной задачей, после стабилизации Этапа 1:**
+- **Сушилка (iDryer Dryer + iDryerRP2040)** — добавление `r:` во все
+  релевантные menu items, переезд `commands/drying`/`storage`/`profile`/
+  `read_rfid`/`write_rfid` в `set`+`invoke`. Backend старые handlers
+  (`weights.handler.ts`, `rfid.handler.ts`) переписать на чтение через
+  единый telemetry/events-канал.
+
+Сушилка сейчас работает в проде — её **не трогаем** до отдельного
+согласования. Без shim-слоёв в backend (нет полевого парка устройств с
+произвольными прошивками — owner сам пишет все три).
+
+**Зафиксировать в `mqtt_contract.yaml`:**
+
+```yaml
+migration_status:
+  iheater_link:  { target: menu_protocol_v1, status: in_progress }
+  storage_link:  { target: menu_protocol_v1, status: in_progress }
+  dryer:         { target: menu_protocol_v1, status: deferred,
+                   note: "Сушилка работает в проде. Миграция отдельной
+                          задачей после стабилизации iHeater и Storage." }
+```
 
 ---
 
@@ -823,17 +938,68 @@ firmware переписывается под новый формат разом.
 
 ## 13. Что делать дальше
 
-1. **Принять решения по открытым вопросам** (§10.2, 10.3).
-2. **Утвердить словарь `canonical_roles`** в первой версии.
-3. **Подготовить отдельный YAML-патч в `mqtt_contract.yaml`** под
-   новую модель (в рамках следующего этапа работ).
-4. **Спланировать migration**: порядок изменений в прошивке и backend,
-   тестовая среда, регрессионная проверка.
-5. **Обновить документацию портала** — концепция декларативного UI
-   на основе ролей.
+Открытые вопросы §10.2-10.4 закрыты решениями. План конкретный.
+
+### Шаг 1 — `mqtt_contract.yaml`
+1. Добавить раздел `canonical_roles` (как в §8).
+2. Добавить раздел `migration_status` (как в §10.6).
+3. Удалить из `commands` секции: `commands/drying`, `storage`, `profile`,
+   `stop`, `pause`, `resume`, `find`, `clear_errors`, `read_rfid`,
+   `write_rfid`, `link_integration`, `bambu_apply` — для устройств в
+   статусе `target: menu_protocol_v1`. Для `dryer` (status: deferred)
+   оставить.
+4. Документировать в `messages.config_full` поля `r:` и `widget:`.
+
+### Шаг 2 — SDK (`idryer-core`)
+1. `MenuBridge::applyInvokeCommand` — добавить (вызов action по id, с
+   опциональным `args`).
+2. `command_routing` — упростить до 4 веток: `set`/`invoke`/`get_config`/
+   `ping`. Удалить ветки `drying`/`storage`/etc. для iHeater и Storage.
+3. `gen_menu_v2.py` — парсить `role:` и `widget:` из YAML, выводить в
+   `menu_meta.h` (поля `const char* role; const char* widget;`).
+4. `menu_buildFullJson` — выводить `r:` и `widget:` в config-payload
+   когда заданы.
+
+### Шаг 3 — iHeater Link и Storage Link
+1. `iHeater-link/src/menu/menu.yaml`: добавить `r:` для mat_*, *_en
+   полей. Удалить ручные обработки `link_integration`/`bambu_apply` из
+   `main.cpp` (переезжают в `set`).
+2. `iDryer-Storage/src/menu/menu.yaml`: добавить `r:` для led_count,
+   brightness, animation. Добавить пункт `act` с `r: led.pulse`,
+   `widget: LedPulse`.
+3. Прошивка обоих устройств — собрать, залить, протестировать `set`
+   и `invoke` через mosquitto.
+
+### Шаг 4 — Backend portal
+1. `device-type.util.ts:3-14` — добавить `case 'storage_link': return
+   DeviceType.STORAGE_LINK;`. Prisma миграция enum.
+2. `mqtt-telemetry.service.ts` — добавить `sendSet(deviceToken, id,
+   val)` и `sendInvoke(deviceToken, id, args?)`. Старые методы
+   (`sendDryingCommand` etc.) — пометить deprecated, переписать как
+   обёртки над `sendInvoke` через `getMenuIdByRole`.
+3. `info.handler.ts` / `config.handler.ts` — парсить новый формат info
+   (unitCapabilities на корне) и config (с `r:` и `widget:`).
+4. `devices.service.ts` — добавить `getMenuIdByRole(deviceId, role)` —
+   маппинг canonical role → menu id из последнего полученного config.
+
+### Шаг 5 — Frontend portal
+1. Реестр виджетов: словарь `widget_name → React-компонент`. Стандартные:
+   `slider`, `number`, `toggle`, `select`, `button`. Хардкод:
+   `ProfileEditor`, `RfidWriter`, `LedPulse`.
+2. Generic device page: получить config → отрисовать каждый menu item с
+   `r:` через виджет из реестра. Группировка по `p:` (parent submenu) и
+   по `unit:` (если указан) для сетки юнитов.
+3. Пресеты — переписать на роли (как в §7.2).
+
+### Шаг 6 — Удалить устаревшее
+1. После работающей миграции iHeater и Storage — удалить из контракта
+   product_variants.iheater_link.extra_fields.
+2. Удалить из SDK старые command-handlers (drying/storage/etc.) для
+   продуктов в `menu_protocol_v1`.
+3. RP2040 (сушилка) — отдельной задачей после согласования.
 
 ---
 
 *Документ описывает целевую архитектуру. Для текущего состояния
-обмена см. `mqtt_contract.yaml`. Реализация — отдельный этап работ,
-после согласования*
+обмена см. `mqtt_contract.yaml`. Решения по §10.2-10.4 приняты.
+Этап 1 (iHeater Link + Storage Link) можно начинать сейчас.*
