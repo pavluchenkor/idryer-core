@@ -915,6 +915,12 @@ def emit_menu_meta_h(path, flat, lang_order):
     lines.append("    float max_val;")
     lines.append("    float step;")
     lines.append("    MenuMetaScope scope;")
+    lines.append("    // menu_protocol_v1: канонические роли и хардкод-виджеты для портала.")
+    lines.append("    // role — стабильное имя из canonical_roles в mqtt_contract.yaml.")
+    lines.append("    // widget — override дефолтного UI-компонента (ProfileEditor / RfidWriter / LedPulse).")
+    lines.append("    // Оба nullptr для приватных пунктов меню (не публикуются на портал).")
+    lines.append("    const char* role;")
+    lines.append("    const char* widget;")
     lines.append("} MenuMeta;")
     lines.append("")
 
@@ -947,10 +953,15 @@ def emit_menu_meta_h(path, flat, lang_order):
 
         mscope = "META_SCOPE_GLOBAL" if scope == "global" else "META_SCOPE_PER_UNIT"
 
+        # menu_protocol_v1: опциональные поля. nullptr = приватный пункт меню.
+        role_lit   = c_string(r["role"])   if r.get("role")   else "nullptr"
+        widget_lit = c_string(r["widget"]) if r.get("widget") else "nullptr"
+
         lines.append(f"    // [{i}] {r['id']}")
         lines.append(f"    {{ {i}, {{ {', '.join(titles)} }}, {{ {', '.join(units)} }},")
         lines.append(f"      {mtype}, {parent}, {first_child}, {child_count},")
-        lines.append(f"      {mvtype}, {c_float(minv)}, {c_float(maxv)}, {c_float(step)}, {mscope} }},")
+        lines.append(f"      {mvtype}, {c_float(minv)}, {c_float(maxv)}, {c_float(step)}, {mscope},")
+        lines.append(f"      {role_lit}, {widget_lit} }},")
 
     lines.append("};")
     lines.append("")
