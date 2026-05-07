@@ -179,6 +179,8 @@ struct Link::Impl {
     // User callbacks.
     Link::IntegrationStatusCallback onIntegrationStatus;
     Link::ClaimPinCallback          onClaimPin;
+    Link::PublishHookCallback       onTelemetryPublish;
+    Link::PublishHookCallback       onStatusPublish;
 
     // Boot state.
     bool logsEnabled = false;
@@ -492,6 +494,10 @@ void Link::publishTelemetryNow() {
     doc["rssi"]   = WiFi.RSSI();
     doc["uptime"] = millis() / 1000u;
 
+    if (impl_->onTelemetryPublish) {
+        impl_->onTelemetryPublish(doc.as<JsonObject>());
+    }
+
     impl_->pub.publishTelemetry(doc);   // → MQTT + Local WS (timestamp added by SDK)
 }
 
@@ -533,6 +539,10 @@ void Link::publishStatusNow() {
 
     doc["uptime"] = millis() / 1000u;
     doc["rssi"]   = WiFi.RSSI();   // bonus: free signal info on every status
+
+    if (impl_->onStatusPublish) {
+        impl_->onStatusPublish(doc.as<JsonObject>());
+    }
 
     impl_->pub.publishStatus(doc);
 }
@@ -611,6 +621,14 @@ void Link::dispatchCommand(const char* command, JsonObjectConst data) {
 
 void Link::onClaimPin(ClaimPinCallback cb) {
     impl_->onClaimPin = std::move(cb);
+}
+
+void Link::onTelemetryPublish(PublishHookCallback cb) {
+    impl_->onTelemetryPublish = std::move(cb);
+}
+
+void Link::onStatusPublish(PublishHookCallback cb) {
+    impl_->onStatusPublish = std::move(cb);
 }
 
 void Link::onIntegrationStatus(IntegrationStatusCallback cb) {
