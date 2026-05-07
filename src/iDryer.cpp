@@ -28,6 +28,10 @@ namespace iDryer {
 
 namespace {
 
+// Forward — определение ниже в этом же anonymous namespace (строка ~449).
+// Нужно вверху чтобы Link::loop() мог его вызвать.
+const char* unitModeString(UnitMode m);
+
 // ──────────────────────────────────────────────────────────────────────
 //  Internal Profile — generates info JSON from Config.
 //  Hides IProfile from the public API.
@@ -175,6 +179,8 @@ struct Link::Impl {
     // Auto-publish throttling (millis).
     uint32_t lastTelemetryMs = 0;
     uint32_t lastStatusMs    = 0;
+    uint32_t lastHaStateMs   = 0;
+    static constexpr uint32_t kHaStatePeriodMs = 5000;
 
     // sessionNum tracker: backend status.handler.ts requires sessionNum > 0
     // for active modes (DRYING/STORAGE/PROFILE). Increment on transition
@@ -266,6 +272,14 @@ bool Link::begin() {
                                         impl_->cfg.unitsCount,
                                         impl_->cfg.hardwareVersion,
                                         impl_->cfg.firmwareVersion);
+        // Capabilities → HA Discovery публикует только реальные sensor entity.
+        idryer::ha::HaCapabilities caps;
+        caps.airTemp     = impl_->cfg.hasAirTemp;
+        caps.airHumidity = impl_->cfg.hasAirHumidity;
+        caps.heaterPower = impl_->cfg.hasHeaterPower;
+        caps.fan         = impl_->cfg.hasFanStatus;
+        caps.weight      = impl_->cfg.hasScales;
+        impl_->intManager.setHaCapabilities(caps);
     }
     // Map facade DeviceType → SDK UartDeviceType.
     switch (impl_->cfg.deviceType) {
@@ -406,6 +420,27 @@ void Link::loop() {
             now - impl_->lastStatusMs >= impl_->cfg.statusPeriodMs) {
             impl_->lastStatusMs = now;
             publishStatusNow();
+        }
+    }
+
+    // Авто-публикация state в HA-топики (параллельно с порталом).
+    // Не зависит от telemetryPeriodMs продукта — у iHeater Link он 0
+    // (продукт сам шлёт расширенный payload в портал), но HA нужен
+    // отдельный путь. Внутри publishUnitState проверяет connected
+    // и discoveryPublished — безопасно звать всегда.
+    if (now - impl_->lastHaStateMs >= Impl::kHaStatePeriodMs) {
+        impl_->lastHaStateMs = now;
+        const auto& cfg = impl_->cfg;
+        for (uint8_t i = 0; i < cfg.unitsCount && i < MAX_UNITS; ++i) {
+            const float    temp        = telemetry.airTempC[i];
+            const float    hum         = telemetry.airHumidityPct[i];
+            const int      powerPct    = (int)(telemetry.heaterPower01[i] * 100.0f);
+            const bool     fan         = telemetry.fanOn[i];
+            const char*    modeStr     = unitModeString(status.mode[i]);
+            const float    targetTemp  = status.targetTempC[i];
+            const uint32_t targetDurMin= status.durationS[i] / 60u;
+            impl_->intManager.publishHaUnitState(i, temp, hum, powerPct, fan,
+                                                  modeStr, targetTemp, targetDurMin);
         }
     }
 }

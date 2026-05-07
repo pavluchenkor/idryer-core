@@ -239,7 +239,8 @@ bool HaPublisher::publishAlertDiscovery() {
 
 bool HaPublisher::publishDiscovery(const char* deviceId, uint8_t unitsCount,
                                    const char* hwVersion, const char* fwVersion,
-                                   int tempMin, int tempMax, int durationMax) {
+                                   int tempMin, int tempMax, int durationMax,
+                                   const HaCapabilities& caps) {
     if (!mqtt_ || !mqtt_->isConnected()) {
         HAL_LOG_ERROR("HA_PUB", "Cannot publish Discovery: MQTT not connected");
         return false;
@@ -261,12 +262,36 @@ bool HaPublisher::publishDiscovery(const char* deviceId, uint8_t unitsCount,
     HAL_LOG_INFO("HA_PUB", "Publishing Discovery for %s (%d units)", deviceId_, unitsCount_);
 
     for (uint8_t i = 0; i < unitsCount_ && i < 3; i++) {
-        if (!publishSensorDiscovery(i, "temperature", "temperature", "°C", "mdi:thermometer")) return false;
-        if (!publishSensorDiscovery(i, "humidity", "humidity", "%", "mdi:water-percent")) return false;
-        if (!publishSensorDiscovery(i, "heater_power", "power_factor", "%", "mdi:radiator")) return false;
+        // Sensors — публикуем только то, что продукт реально поддерживает.
+        // Отсутствующие — стираем (на случай если раньше публиковали retained).
+        if (caps.airTemp) {
+            if (!publishSensorDiscovery(i, "temperature", "temperature", "°C", "mdi:thermometer")) return false;
+        } else {
+            removeSensorDiscovery(i, "temperature");
+        }
+        if (caps.airHumidity) {
+            if (!publishSensorDiscovery(i, "humidity", "humidity", "%", "mdi:water-percent")) return false;
+        } else {
+            removeSensorDiscovery(i, "humidity");
+        }
+        if (caps.heaterPower) {
+            if (!publishSensorDiscovery(i, "heater_power", "power_factor", "%", "mdi:radiator")) return false;
+        } else {
+            removeSensorDiscovery(i, "heater_power");
+        }
+        if (caps.fan) {
+            if (!publishBinarySensorDiscovery(i, "fan", nullptr, "mdi:fan")) return false;
+        } else {
+            removeSensorDiscovery(i, "fan", /*binary=*/true);
+        }
+        if (caps.weight) {
+            if (!publishSensorDiscovery(i, "weight", "weight", "g", "mdi:weight-gram")) return false;
+        } else {
+            removeSensorDiscovery(i, "weight");
+        }
+
+        // mode + select + numbers — общие управляющие entity, всегда.
         if (!publishSensorDiscovery(i, "mode", nullptr, nullptr, "mdi:state-machine")) return false;
-        if (!publishBinarySensorDiscovery(i, "fan", nullptr, "mdi:fan")) return false;
-        if (!publishSensorDiscovery(i, "weight", "weight", "g", "mdi:weight-gram")) return false;
         if (!publishSelectDiscovery(i)) return false;
         if (!publishNumberDiscovery(i, "target temp", "set_temp", "target_temp",
                                     tempMin_, tempMax_, "°C", "mdi:thermometer-plus")) return false;
@@ -363,6 +388,56 @@ bool HaPublisher::publishWeights(const idryer::UartWeightsPayload& data) {
     }
 
     return allSuccess;
+}
+
+bool HaPublisher::removeSensorDiscovery(uint8_t unitId, const char* sensorName, bool binary) {
+    if (!mqtt_ || !mqtt_->isConnected()) return false;
+    const char* domain = binary ? "binary_sensor" : "sensor";
+    makeConfigTopic(topicBuf_, sizeof(topicBuf_), domain, unitId, sensorName);
+    // Empty retained payload удаляет конфиг entity в HA Discovery.
+    return mqtt_->publish(topicBuf_, "", /*retained=*/true);
+}
+
+bool HaPublisher::publishUnitState(uint8_t unitId,
+                                    float temperatureC, float humidityPct,
+                                    int heaterPowerPct, bool fanOn,
+                                    const char* modeStr,
+                                    float targetTempC, uint32_t targetDurMin) {
+    if (!mqtt_ || !mqtt_->isConnected()) return false;
+    if (!discoveryPublished_) return false;  // нет смысла публиковать state без entities
+
+    bool ok = true;
+
+    makeStateTopic(topicBuf_, sizeof(topicBuf_), unitId, "temperature");
+    snprintf(payloadBuf_, sizeof(payloadBuf_), "%.1f", temperatureC);
+    ok &= mqtt_->publish(topicBuf_, payloadBuf_);
+
+    makeStateTopic(topicBuf_, sizeof(topicBuf_), unitId, "humidity");
+    snprintf(payloadBuf_, sizeof(payloadBuf_), "%.1f", humidityPct);
+    ok &= mqtt_->publish(topicBuf_, payloadBuf_);
+
+    makeStateTopic(topicBuf_, sizeof(topicBuf_), unitId, "heater_power");
+    snprintf(payloadBuf_, sizeof(payloadBuf_), "%d", heaterPowerPct);
+    ok &= mqtt_->publish(topicBuf_, payloadBuf_);
+
+    makeStateTopic(topicBuf_, sizeof(topicBuf_), unitId, "fan");
+    ok &= mqtt_->publish(topicBuf_, fanOn ? "ON" : "OFF");
+
+    if (modeStr && modeStr[0]) {
+        makeStateTopic(topicBuf_, sizeof(topicBuf_), unitId, "mode");
+        ok &= mqtt_->publish(topicBuf_, modeStr);
+    }
+
+    // target_temp/target_duration — state_topics для number entities в Discovery.
+    makeStateTopic(topicBuf_, sizeof(topicBuf_), unitId, "target_temp");
+    snprintf(payloadBuf_, sizeof(payloadBuf_), "%d", (int)targetTempC);
+    ok &= mqtt_->publish(topicBuf_, payloadBuf_);
+
+    makeStateTopic(topicBuf_, sizeof(topicBuf_), unitId, "target_duration");
+    snprintf(payloadBuf_, sizeof(payloadBuf_), "%u", (unsigned)targetDurMin);
+    ok &= mqtt_->publish(topicBuf_, payloadBuf_);
+
+    return ok;
 }
 
 bool HaPublisher::publishSelectDiscovery(uint8_t unitId) {

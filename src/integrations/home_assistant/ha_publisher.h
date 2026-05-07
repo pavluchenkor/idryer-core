@@ -20,6 +20,18 @@
 namespace idryer {
 namespace ha {
 
+/// @brief Какие sensor/binary_sensor entity публиковать в Discovery.
+/// Флаги соответствуют iDryer::Config.hasXxx — продукт без датчика
+/// не должен создавать entity, иначе HA UI показывает "Unknown".
+struct HaCapabilities {
+    bool airTemp     = true;
+    bool airHumidity = true;
+    bool heaterPower = true;
+    bool fan         = true;
+    bool weight      = false;
+    /// mode и target_*/mode_control — общие управляющие entity, всегда.
+};
+
 class HaPublisher {
 public:
     explicit HaPublisher(HaMqttClient* mqtt);
@@ -30,12 +42,42 @@ public:
                           const char* fwVersion = "unknown",
                           int tempMin = 30,
                           int tempMax = 90,
-                          int durationMax = 1440);
+                          int durationMax = 1440,
+                          const HaCapabilities& caps = HaCapabilities{});
+
+    /// @brief Удалить retained Discovery конкретного sensor/binary_sensor.
+    /// Используется когда capabilities изменились (например, выключен датчик).
+    /// Без этого старый entity остаётся видимым в HA UI как "Unknown".
+    bool removeSensorDiscovery(uint8_t unitId, const char* sensorName, bool binary = false);
 
     bool publishTelemetry(const idryer::UartTelemetryPayload& data);
     bool publishStatus(const idryer::UartStatusPayload& data);
     bool publishWeights(const idryer::UartWeightsPayload& data);
     bool publishAlert(uint8_t unitId, const char* message, const char* severity = "error");
+
+    /**
+     * @brief Универсальная публикация state одного юнита.
+     *
+     * Не зависит от UART payload — продукт передаёт значения напрямую.
+     * Используется фасадом для авто-публикации state в HA параллельно
+     * с публикацией в портал. Покрывает все entities, объявленные в
+     * publishDiscovery: temperature, humidity, heater_power, fan, mode,
+     * target_temp, target_duration.
+     *
+     * @param unitId       индекс юнита (0..3 → "U1".."U4")
+     * @param temperatureC температура камеры °C (0 если нет датчика)
+     * @param humidityPct  влажность % (0 если нет датчика)
+     * @param heaterPowerPct мощность нагрева 0..100
+     * @param fanOn        состояние вентилятора
+     * @param modeStr      "IDLE"/"DRYING"/"STORAGE" — для select state
+     * @param targetTempC  текущая целевая температура (для number target_temp)
+     * @param targetDurMin текущая целевая длительность мин (для number target_duration)
+     */
+    bool publishUnitState(uint8_t unitId,
+                          float temperatureC, float humidityPct,
+                          int heaterPowerPct, bool fanOn,
+                          const char* modeStr,
+                          float targetTempC, uint32_t targetDurMin);
 
     using HaCommandCallback = std::function<void(const char* command, const char* unitId,
                                                   int temperature, int duration)>;
