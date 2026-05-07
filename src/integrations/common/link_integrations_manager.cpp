@@ -40,8 +40,16 @@ void isoTimestamp(char* buf, size_t bufSize)
 
 LinkIntegrationsManager::LinkIntegrationsManager(idryer::MqttClient* mqtt,
                                                  LinkIntegrationsStore* store)
-    : mqtt_(mqtt), store_(store), haPublisher_(haClient_.mqttClient())
+    : mqtt_(mqtt), store_(store),
+      haPublisher_(haClient_.mqttClient()),
+      haBuilder_(&haPublisher_, haClient_.mqttClient())
 {
+    // Маршрутизируем входящие сообщения с HA-брокера в haBuilder
+    // (он сам отфильтрует по своему prefix `idryer_ha/{deviceId}/...`).
+    haClient_.mqttClient()->setMessageCallback(
+        [this](const char* topic, const char* payload) {
+            haBuilder_.handleIncoming(topic, payload);
+        });
 }
 
 void LinkIntegrationsManager::begin()
@@ -69,6 +77,9 @@ void LinkIntegrationsManager::begin()
         if (s == HaConnectionState::Connected && haDeviceId_[0] != '\0') {
             haPublisher_.publishDiscovery(haDeviceId_, haUnitsCount_, haHwVersion_, haFwVersion_,
                                            haCapabilities_);
+            // Продуктовые controls (если зарегистрированы через link.ha()).
+            haBuilder_.setDeviceId(haDeviceId_);
+            haBuilder_.republishAll();
         } else if (s != HaConnectionState::Connected) {
             haPublisher_.resetDiscoveryPublished();
         }

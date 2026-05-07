@@ -707,6 +707,10 @@ idryer::cloud::LinkIntegrationsManager* Link::integrationsManager() {
     return &impl_->intManager;
 }
 
+idryer::ha::HaBuilder& Link::ha() {
+    return impl_->intManager.haBuilder();
+}
+
 idryer::MqttClient* Link::mqttClient() {
     return &impl_->mqtt;
 }
