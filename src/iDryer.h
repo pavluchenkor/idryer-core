@@ -132,6 +132,20 @@ public:
     /// Same as @ref onTelemetryPublish but for the `status` payload.
     void onStatusPublish(PublishHookCallback cb);
 
+    // ─── Periodic tasks ──────────────────────────────────────────────
+    using TaskCallback = std::function<void()>;
+    using TaskHandle   = uint8_t;  ///< 0xFF = invalid
+
+    /// Schedule @p cb to run every @p periodMs from `loop()`. Cooperative
+    /// scheduler — callback runs in the same context as `loop()`, must
+    /// not block. Returns handle for `cancel()`, or 0xFF if MAX_TASKS (8)
+    /// is full. First call fires after the first period elapses, not
+    /// immediately on registration.
+    TaskHandle every(uint32_t periodMs, TaskCallback cb);
+
+    /// Cancel a task previously scheduled with `every()`. Idempotent.
+    void cancel(TaskHandle handle);
+
     /// Register a callback for a command name. The callback fires when MQTT
     /// or Local-WS receives `commands/{name}` with arbitrary JSON payload.
     ///

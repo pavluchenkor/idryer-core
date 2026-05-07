@@ -176,6 +176,16 @@ struct Link::Impl {
     CommandEntry commands[MAX_CMDS];
     uint8_t      commandsCount = 0;
 
+    // Periodic task scheduler (для every/cancel). Stack-array.
+    struct Task {
+        uint32_t periodMs;
+        uint32_t lastRunMs;
+        Link::TaskCallback cb;
+        bool active;
+    };
+    static constexpr uint8_t MAX_TASKS = 8;
+    Task tasks[MAX_TASKS]{};
+
     // User callbacks.
     Link::IntegrationStatusCallback onIntegrationStatus;
     Link::ClaimPinCallback          onClaimPin;
@@ -427,6 +437,17 @@ void Link::loop() {
             impl_->intManager.publishHaUnitState(i, temp, hum, powerPct, fan);
         }
     }
+
+    // Cooperative scheduler — продуктовые задачи зарегистрированные через every().
+    // Защита от wrap millis() через signed-сравнение.
+    for (uint8_t i = 0; i < Impl::MAX_TASKS; ++i) {
+        auto& t = impl_->tasks[i];
+        if (!t.active) continue;
+        if ((int32_t)(now - t.lastRunMs) >= (int32_t)t.periodMs) {
+            t.lastRunMs = now;
+            t.cb();
+        }
+    }
 }
 
 namespace {
@@ -629,6 +650,26 @@ void Link::onTelemetryPublish(PublishHookCallback cb) {
 
 void Link::onStatusPublish(PublishHookCallback cb) {
     impl_->onStatusPublish = std::move(cb);
+}
+
+Link::TaskHandle Link::every(uint32_t periodMs, TaskCallback cb) {
+    if (!cb || periodMs == 0) return 0xFF;
+    for (uint8_t i = 0; i < Impl::MAX_TASKS; ++i) {
+        if (!impl_->tasks[i].active) {
+            impl_->tasks[i].periodMs  = periodMs;
+            impl_->tasks[i].lastRunMs = millis();
+            impl_->tasks[i].cb        = std::move(cb);
+            impl_->tasks[i].active    = true;
+            return i;
+        }
+    }
+    return 0xFF;  // overflow
+}
+
+void Link::cancel(TaskHandle handle) {
+    if (handle >= Impl::MAX_TASKS) return;
+    impl_->tasks[handle].active = false;
+    impl_->tasks[handle].cb     = nullptr;
 }
 
 void Link::onIntegrationStatus(IntegrationStatusCallback cb) {
