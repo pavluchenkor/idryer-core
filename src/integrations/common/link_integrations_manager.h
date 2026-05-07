@@ -41,6 +41,7 @@
 #include "../moonraker/moonraker_client.h"
 #include "../home_assistant/ha_integration_adapter.h"
 #include "../home_assistant/ha_publisher.h"
+#include "../home_assistant/ha_builder.h"
 #include "../../uart/uart_protocol.h"
 
 #if defined(ESP32) || defined(ESP_PLATFORM)
@@ -116,6 +117,11 @@ public:
         return haPublisher_.publishUnitState(unitId, temperatureC, humidityPct,
                                               heaterPowerPct, fanOn);
     }
+
+    /// Generic HA Discovery builder — продукт регистрирует свои controls
+    /// (button/number/select) через возвращаемый объект. Публикуется при
+    /// HA-коннекте, сообщения роутятся в зарегистрированные колбэки.
+    ha::HaBuilder& haBuilder() { return haBuilder_; }
 
     /// @brief Must be called every iteration of the main loop.
     void loop();
@@ -215,6 +221,7 @@ private:
     MoonrakerClient         moonrakerClient_;
     HaIntegrationAdapter    haClient_;
     ha::HaPublisher         haPublisher_;
+    ha::HaBuilder           haBuilder_;
 
     UartDeviceType          deviceType_ = UartDeviceType::Dryer;
 

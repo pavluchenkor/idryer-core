@@ -72,6 +72,7 @@
 // menu lookup, etc.). Real definition is in <integrations/common/link_integrations_manager.h>.
 namespace idryer { namespace cloud { class LinkIntegrationsManager; } }
 namespace idryer { class MqttClient; class IdryerRuntime; class DevicePublisher; }
+namespace idryer { namespace ha { class HaBuilder; } }
 
 namespace iDryer {
 
@@ -186,6 +187,14 @@ public:
     /// Use this instead of duplicating mapping logic in the SDK; the SDK
     /// doesn't know product specifics like filament-type → temperature lookup.
     idryer::cloud::LinkIntegrationsManager* integrationsManager();
+
+    /// Generic HA Discovery builder. Register your buttons / numbers / selects
+    /// in `setup()`; the library publishes them on HA-connect and routes
+    /// incoming commands to your callbacks.
+    ///   link.ha().button("heat_50", "Heat 50", []{ startHeating(50); });
+    ///   link.ha().select("anim", "Animation", opts, 4, [](const char* v) { ... });
+    /// No-op when @c Config.allowHa is false.
+    idryer::ha::HaBuilder& ha();
 
     /// Outlet to the SDK MQTT client — for product-side components that
     /// publish their own topics or hook into command routing (MenuBridge etc).
