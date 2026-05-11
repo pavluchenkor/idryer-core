@@ -15,12 +15,10 @@ IdryerRuntime::IdryerRuntime(cloud::CloudStateMachine* cloud,
 {}
 
 void IdryerRuntime::begin() {
-    mqtt_->setCommandCallback(&IdryerRuntime::onMqttCommandThunk, this);
+    mqtt_->setCommandCallback([this](const char* command, JsonObjectConst data) {
+        this->onMqttCommand(command, data);
+    });
     cloud_->begin();
-}
-
-void IdryerRuntime::onMqttCommandThunk(void* ctx, const char* command, JsonObjectConst data) {
-    static_cast<IdryerRuntime*>(ctx)->onMqttCommand(command, data);
 }
 
 void IdryerRuntime::loop() {
