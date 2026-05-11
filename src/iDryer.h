@@ -118,10 +118,13 @@ public:
                     uint8_t     unitId = 0xFF);
 
     // ─── Incoming command subscriptions ──────────────────────────────
-    using CommandCallback           = std::function<void(JsonObjectConst data)>;
-    using IntegrationStatusCallback = std::function<void(const IntegrationStatus&)>;
-    using ClaimPinCallback          = std::function<void(const char* pin, uint32_t expiresInSeconds)>;
-    using PublishHookCallback       = std::function<void(JsonObject root)>;
+    // Raw fnptr (не std::function) — Arduino-ESP heap фрагментируется на
+    // нескольких десятках std::function, что валит WiFi init. Только stateless
+    // лямбды (без capture). Если нужно состояние — используйте глобал/синглтон.
+    using CommandCallback           = void (*)(JsonObjectConst data);
+    using IntegrationStatusCallback = void (*)(const IntegrationStatus&);
+    using ClaimPinCallback          = void (*)(const char* pin, uint32_t expiresInSeconds);
+    using PublishHookCallback       = void (*)(JsonObject root);
 
     /// Called right before telemetry is sent. Library has already filled
     /// the standard `units[]` array (capabilities-driven), `rssi`, `uptime`.
@@ -134,7 +137,7 @@ public:
     void onStatusPublish(PublishHookCallback cb);
 
     // ─── Periodic tasks ──────────────────────────────────────────────
-    using TaskCallback = std::function<void()>;
+    using TaskCallback = void (*)();
     using TaskHandle   = uint8_t;  ///< 0xFF = invalid
 
     /// Schedule @p cb to run every @p periodMs from `loop()`. Cooperative
