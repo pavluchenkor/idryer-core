@@ -155,6 +155,12 @@ public:
     const char*               bambuLastError()     const { return bambuClient_.lastError(); }
     const BambuConfig&        bambuConfig()        const { return bambu_; }
 
+    /// Включает/выключает логирование сырых payload'ов на обоих клиентах.
+    void setLogPayloads(bool enabled) {
+        bambuClient_.setLogPayloads(enabled);
+        moonrakerClient_.setLogPayloads(enabled);
+    }
+
     // ── Home Assistant ────────────────────────────────────────────────────────
 
     /// @brief Sets the MQTT client ID used for the HA MQTT connection.

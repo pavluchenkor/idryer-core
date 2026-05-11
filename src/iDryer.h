@@ -226,4 +226,7 @@ private:
     void dispatchCommand(const char* command, JsonObjectConst data);
 };
 
+/// Returns the wire-format string for a DeviceType (e.g. "iheater_link").
+const char* deviceTypeToString(DeviceType t);
+
 } // namespace iDryer

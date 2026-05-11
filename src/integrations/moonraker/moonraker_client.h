@@ -90,6 +90,9 @@ public:
     const char* lastError() const { return lastError_; }
     const MoonrakerStatus& status() const { return status_; }
 
+    /// Включить логирование сырых WS-сообщений (тег MOON, INFO).
+    void setLogPayloads(bool enabled) { logPayloads_ = enabled; }
+
     // Callbacks --------------------------------------------------------------
 
     void setStateChangeCallback(StateChangeCallback cb) { stateCallback_ = std::move(cb); }
@@ -119,6 +122,7 @@ private:
     bool                     configValid_ = false;
     MoonrakerConnectionState state_       = MoonrakerConnectionState::Disabled;
     char                     lastError_[96] = {0};
+    bool                     logPayloads_ = false;
 
     WebSocketsClient         ws_;
     uint32_t                 reconnectBackoffMs_   = kReconnectMinMs;
