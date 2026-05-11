@@ -112,6 +112,9 @@ public:
     /// Последняя ошибка (пусто если всё ок).
     const char* lastError() const { return lastError_; }
 
+    /// Включить логирование сырых payload'ов (входящих report JSON).
+    void setLogPayloads(bool enabled) { logPayloads_ = enabled; }
+
     /// Колбэк при смене состояния (для обновления `integrations/status`).
     void setStateChangeCallback(StateChangeCallback cb) { stateCallback_ = std::move(cb); }
 
@@ -146,6 +149,7 @@ private:
     BambuConnectionState    state_       = BambuConnectionState::Disabled;
     BambuMode               mode_        = BambuMode::Writer;
     char                    lastError_[96] = {0};
+    bool                    logPayloads_ = false;
 
     WiFiClientSecure        tlsClient_;
     PubSubClient            mqttClient_{tlsClient_};

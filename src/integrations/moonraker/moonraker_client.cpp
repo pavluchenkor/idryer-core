@@ -203,8 +203,11 @@ void MoonrakerClient::onWebSocketEvent(WStype_t type, uint8_t* payload, size_t l
 
     case WStype_TEXT:
         if (payload && length > 0) {
-            HAL_LOG_DEBUG("MOON", "ws ← (%u bytes): %.*s",
-                          (unsigned)length, (int)length, (const char*)payload);
+            if (logPayloads_) {
+                unsigned int prevLen = length < 400u ? length : 400u;
+                HAL_LOG_INFO("MOON", "← RAW[%u]: %.*s",
+                              (unsigned)length, (int)prevLen, (const char*)payload);
+            }
             handleJsonRpcMessage((const char*)payload, length);
         }
         break;
@@ -406,6 +409,19 @@ void MoonrakerClient::applyStatusUpdate(const JsonObjectConst& statusObj)
             float t = bed["target"].as<float>();
             if (t != status_.bedTarget) { status_.bedTarget = t; otherChanged = true; }
         }
+    }
+
+    if (chamberChanged || otherChanged) {
+        HAL_LOG_INFO("MOON",
+                     "← state=%s progress=%.0f%% nozzle=%.0f/%.0f bed=%.0f/%.0f vc: target=%.1f temp=%.1f hasSensor=%d available=%d",
+                     status_.printerState[0] ? status_.printerState : "-",
+                     (double)status_.progress,
+                     (double)status_.nozzleTemp,   (double)status_.nozzleTarget,
+                     (double)status_.bedTemp,       (double)status_.bedTarget,
+                     (double)status_.chamberTarget,
+                     (double)status_.chamberTemperature,
+                     status_.chamberHasSensor ? 1 : 0,
+                     status_.virtualChamberAvailable ? 1 : 0);
     }
 
     if (vcStructuralChange && chamberCallback_) {

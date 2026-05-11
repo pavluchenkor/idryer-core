@@ -348,6 +348,23 @@ bool Link::begin() {
 }
 
 void Link::loop() {
+    // Pre-WL_CONNECTED: только Improv. runtime.loop() → cloud.loop() →
+    // ArduinoWifiManager::connect() делает блокирующий WiFi.scanNetworks (~5с),
+    // что переполняет USB CDC FIFO и ломает приём IMPROV-RPC байт.
+#ifndef IDRYER_DEV_REPL
+    if (!impl_->logsEnabled) {
+        impl_->improv.handleSerial();
+        if (WiFi.status() == WL_CONNECTED) {
+            impl_->logsEnabled = true;
+            idryer::hal::initArduinoHal(&Serial);
+            Serial.println();
+            Serial.println("[BOOT] Logs enabled after WiFi config");
+            Serial.flush();
+        }
+        return;
+    }
+#endif
+
     impl_->runtime.loop();
     if (impl_->localStarted) impl_->local.loop();
     impl_->intManager.loop();

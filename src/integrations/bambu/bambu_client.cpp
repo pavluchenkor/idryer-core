@@ -31,6 +31,23 @@ const char* bambuConnectionStateToString(BambuConnectionState value)
 
 namespace {
 
+// Человекочитаемая расшифровка кода состояния MQTT (PubSubClient rc).
+const char* mqttRcToString(int rc) {
+    switch (rc) {
+        case -4: return "timeout";
+        case -3: return "connection lost";
+        case -2: return "connect failed (TCP)";
+        case -1: return "disconnected";
+        case  0: return "connected";
+        case  1: return "refused: bad protocol";
+        case  2: return "refused: bad client id";
+        case  3: return "refused: server unavailable";
+        case  4: return "refused: bad credentials";
+        case  5: return "refused: not authorized";
+        default: return "unknown";
+    }
+}
+
 // Нормализация цвета: 6 hex → добавить "FF" в конец для альфа-канала.
 const char* normalizeColor(const char* in, char* outBuf, size_t bufSize)
 {
@@ -219,7 +236,7 @@ void BambuClient::attemptConnect()
 
     int rc = mqttClient_.state();
     char buf[96];
-    snprintf(buf, sizeof(buf), "connect failed rc=%d", rc);
+    snprintf(buf, sizeof(buf), "connect failed rc=%d (%s)", rc, mqttRcToString(rc));
     setError(buf);
     HAL_LOG_WARN("BAMBU", "%s (backoff=%ums)", buf, reconnectBackoffMs_);
 
@@ -351,7 +368,8 @@ void BambuClient::handleReportMessage(const char* topic, const uint8_t* payload,
         return;
     }
 
-    bool changed = false;
+    bool changed    = false;
+    bool keyChanged = false;  // gcodeState / chamberTarget / trayType
 
     if (print.containsKey("gcode_state")) {
         const char* s = print["gcode_state"].as<const char*>();
@@ -359,6 +377,7 @@ void BambuClient::handleReportMessage(const char* topic, const uint8_t* payload,
             if (strcmp(printerStatus_.gcodeState, s) != 0) {
                 copyCStr(s, printerStatus_.gcodeState, sizeof(printerStatus_.gcodeState));
                 changed = true;
+                keyChanged = true;
             }
         }
     }
@@ -411,7 +430,11 @@ void BambuClient::handleReportMessage(const char* topic, const uint8_t* payload,
     }
     if (print.containsKey("chamber_target")) {
         float t = print["chamber_target"].as<float>();
-        if (t != printerStatus_.chamberTarget) { printerStatus_.chamberTarget = t; changed = true; }
+        if (t != printerStatus_.chamberTarget) {
+            printerStatus_.chamberTarget = t;
+            changed = true;
+            keyChanged = true;
+        }
     }
 
     JsonObjectConst ams = print["ams"].as<JsonObjectConst>();
@@ -450,12 +473,28 @@ void BambuClient::handleReportMessage(const char* topic, const uint8_t* payload,
         if (strcmp(printerStatus_.trayType, newTrayType) != 0) {
             copyCStr(newTrayType, printerStatus_.trayType, sizeof(printerStatus_.trayType));
             changed = true;
+            keyChanged = true;
         }
         if (newTrayInfoIdx && strcmp(printerStatus_.trayInfoIdx, newTrayInfoIdx) != 0) {
             copyCStr(newTrayInfoIdx, printerStatus_.trayInfoIdx, sizeof(printerStatus_.trayInfoIdx));
         } else if (!newTrayInfoIdx && printerStatus_.trayInfoIdx[0]) {
             printerStatus_.trayInfoIdx[0] = '\0';
         }
+    }
+
+    if (logPayloads_) {
+        unsigned int prevLen = length < 400u ? length : 400u;
+        HAL_LOG_INFO("BAMBU", "← RAW[%u]: %.*s", length, (int)prevLen, (const char*)payload);
+    }
+    if (changed) {
+        HAL_LOG_INFO("BAMBU",
+                     "← state=%s progress=%d%% nozzle=%.0f/%.0f bed=%.0f/%.0f chamber=%.0f/%.0f tray=%s",
+                     printerStatus_.gcodeState[0] ? printerStatus_.gcodeState : "-",
+                     printerStatus_.progressPercent,
+                     (double)printerStatus_.nozzleTemp,   (double)printerStatus_.nozzleTarget,
+                     (double)printerStatus_.bedTemp,       (double)printerStatus_.bedTarget,
+                     (double)printerStatus_.chamberTemp,   (double)printerStatus_.chamberTarget,
+                     printerStatus_.trayType[0] ? printerStatus_.trayType : "-");
     }
 
     if (changed && printerStatusCallback_) {
