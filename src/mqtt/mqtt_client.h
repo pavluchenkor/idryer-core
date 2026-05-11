@@ -39,7 +39,8 @@ namespace idryer {
 class MqttClient {
 public:
     /// @brief Callback invoked when a @c commands/* message arrives.
-    using CommandCallback = std::function<void(const char* command, JsonObjectConst data)>;
+    /// fnptr + ctx — без std::function чтобы не аллоцировать heap (см. iDryer.h).
+    using CommandCallback = void (*)(void* ctx, const char* command, JsonObjectConst data);
 
     /**
      * @brief Initializes the MQTT client with device credentials.
@@ -56,7 +57,7 @@ public:
      *
      * Called by @c IdryerRuntime — you don't need to set this yourself.
      */
-    void setCommandCallback(CommandCallback callback);
+    void setCommandCallback(CommandCallback callback, void* ctx);
 
     /**
      * @brief Connects to the broker and subscribes to @c commands/#.
@@ -131,7 +132,8 @@ private:
     WiFiClient wifiClient_;
 #endif
     PubSubClient mqttClient_;
-    CommandCallback commandCallback_;
+    CommandCallback commandCallback_    = nullptr;
+    void*           commandCallbackCtx_ = nullptr;
 
     char serialNumber_[32];
     char token_[512];
