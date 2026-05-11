@@ -337,9 +337,7 @@ bool Link::begin() {
     impl_->intManager.begin();
 
     // Runtime command handler — same dispatch as local-WS, single user callback.
-    impl_->runtime.setCommandHandler([this](const char* command, JsonObjectConst data) {
-        dispatchCommand(command, data);
-    });
+    impl_->runtime.setCommandHandler(&Link::dispatchCommandThunk, this);
 
     // Auto-claim for standalone devices.
     impl_->cloud.setUnclaimedCallback([](void* ctx) {
@@ -634,6 +632,10 @@ bool Link::onCommand(const char* name, CommandCallback cb) {
     slot.name[sizeof(slot.name) - 1] = '\0';
     slot.cb = std::move(cb);
     return true;
+}
+
+void Link::dispatchCommandThunk(void* ctx, const char* command, JsonObjectConst data) {
+    static_cast<Link*>(ctx)->dispatchCommand(command, data);
 }
 
 void Link::dispatchCommand(const char* command, JsonObjectConst data) {
