@@ -81,6 +81,7 @@ public:
 
 private:
     void onMqttCommand(const char* command, JsonObjectConst data);
+    static void onMqttCommandThunk(void* ctx, const char* command, JsonObjectConst data);
 
     cloud::CloudStateMachine* cloud_;
     ActionDispatcher*         dispatcher_;
