@@ -120,6 +120,17 @@ private:
 
 } // anonymous namespace
 
+const char* deviceTypeToString(DeviceType t) {
+    switch (t) {
+        case DeviceType::Dryer:       return "dryer";
+        case DeviceType::Heater:      return "heater";
+        case DeviceType::StorageLink: return "storage_link";
+        case DeviceType::IHeaterLink: return "iheater_link";
+        case DeviceType::Unknown:     break;
+    }
+    return "unknown";
+}
+
 // ──────────────────────────────────────────────────────────────────────
 //  Link::Impl — full SDK stack on stack (no heap).
 // ──────────────────────────────────────────────────────────────────────
