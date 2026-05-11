@@ -227,6 +227,7 @@ private:
     static Impl* s_currentImpl;
 
     void dispatchCommand(const char* command, JsonObjectConst data);
+    static void dispatchCommandThunk(void* ctx, const char* command, JsonObjectConst data);
 };
 
 /// Returns the wire-format string for a DeviceType (e.g. "iheater_link").

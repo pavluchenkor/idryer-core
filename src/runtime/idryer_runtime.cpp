@@ -75,7 +75,7 @@ void IdryerRuntime::onMqttCommand(const char* command, JsonObjectConst data) {
     // This allows MQTT and local WS to share a single business-level handler
     // without duplicating routing logic.
     if (commandHandler_) {
-        commandHandler_(command, data);
+        commandHandler_(commandHandlerCtx_, command, data);
         return;
     }
 
@@ -104,8 +104,9 @@ void IdryerRuntime::onMqttCommand(const char* command, JsonObjectConst data) {
     HAL_LOG_DEBUG("RT", "unhandled command: %s", command);
 }
 
-void IdryerRuntime::setCommandHandler(CommandHandler handler) {
-    commandHandler_ = std::move(handler);
+void IdryerRuntime::setCommandHandler(CommandHandler handler, void* ctx) {
+    commandHandler_ = handler;
+    commandHandlerCtx_ = ctx;
 }
 
 } // namespace idryer

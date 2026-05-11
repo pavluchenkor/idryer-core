@@ -76,8 +76,9 @@ public:
      * @c command — suffix after @c commands/ (e.g. @c "invoke", @c "set", @c "get_config").
      * @c data    — parsed JSON payload.
      */
-    using CommandHandler = std::function<void(const char* command, JsonObjectConst data)>;
-    void setCommandHandler(CommandHandler handler);
+    // fnptr + ctx (без std::function).
+    using CommandHandler = void (*)(void* ctx, const char* command, JsonObjectConst data);
+    void setCommandHandler(CommandHandler handler, void* ctx);
 
 private:
     void onMqttCommand(const char* command, JsonObjectConst data);
@@ -88,7 +89,8 @@ private:
     IProfile*                 profile_;
     MqttClient*               mqtt_;
 
-    CommandHandler commandHandler_;
+    CommandHandler commandHandler_    = nullptr;
+    void*          commandHandlerCtx_ = nullptr;
     bool wasOnline_ = false;
 };
 
