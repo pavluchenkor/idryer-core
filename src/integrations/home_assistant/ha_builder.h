@@ -32,9 +32,10 @@ public:
     /// Вызывается либой когда identity (deviceId) известен — до publish.
     void setDeviceId(const char* deviceId);
 
-    using OnPress  = std::function<void()>;
-    using OnNumber = std::function<void(int value)>;
-    using OnSelect = std::function<void(const char* option)>;
+    // Raw fnptr (не std::function) — см. iDryer.h. Только stateless лямбды.
+    using OnPress  = void (*)();
+    using OnNumber = void (*)(int value);
+    using OnSelect = void (*)(const char* option);
 
     /// Кнопка в HA UI. При нажатии вызывается @p cb.
     void button(const char* id, const char* name, OnPress cb,
