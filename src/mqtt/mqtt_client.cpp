@@ -41,9 +41,8 @@ void MqttClient::begin(const char* serialNumber, const char* token) {
     HAL_LOG_INFO("MQTT", "Init: broker=%s:%d serial=%s", MQTT_BROKER, MQTT_PORT, serialNumber_);
 }
 
-void MqttClient::setCommandCallback(CommandCallback callback, void* ctx) {
+void MqttClient::setCommandCallback(CommandCallback callback) {
     commandCallback_ = callback;
-    commandCallbackCtx_ = ctx;
 }
 
 void MqttClient::disconnect() {
@@ -238,7 +237,7 @@ void MqttClient::handleMessage(const char* topic, const char* payload, size_t le
         return;
     }
 
-    if (commandCallback_) commandCallback_(commandCallbackCtx_, cmdStart, doc.as<JsonObjectConst>());
+    if (commandCallback_) commandCallback_(cmdStart, doc.as<JsonObjectConst>());
 }
 
 // ============================================================================
