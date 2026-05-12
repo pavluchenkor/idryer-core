@@ -17,6 +17,7 @@ GENERATORS=(
     gen_mqtt_topics_h.py
     gen_ts_types.py
     gen_idryer_api_h.py
+    gen_scaffold.py
 )
 
 for gen in "${GENERATORS[@]}"; do
