@@ -38,7 +38,7 @@ extern "C" {
 #define IDRYER_RETAINED_TELEMETRY       0
 #define IDRYER_RETAINED_STATUS          1
 #define IDRYER_RETAINED_EVENTS          0
-#define IDRYER_RETAINED_CONFIG          0
+#define IDRYER_RETAINED_CONFIG          1
 #define IDRYER_RETAINED_CONFIG_DELTA    0
 
 // Publish intervals (ms)
