@@ -4,11 +4,16 @@
 #include "../../hal/hal_types.h"
 #include "../../mqtt/root_ca.h"
 #include <HTTPClient.h>
+#include <WiFiClient.h>
 #include <WiFiClientSecure.h>
 
 namespace idryer {
 
 ArduinoHttpClient::ArduinoHttpClient() {}
+
+static bool isHttps(const char* url) {
+    return url && strncmp(url, "https://", 8) == 0;
+}
 
 bool ArduinoHttpClient::postJson(const char* url, const char* body, JsonDocument& response) {
     if (!url || !body) return false;
@@ -16,28 +21,40 @@ bool ArduinoHttpClient::postJson(const char* url, const char* body, JsonDocument
     HAL_LOG_DEBUG("HTTP", "POST %s", url);
     HAL_LOG_DEBUG("HTTP", "Body: %s", body);
 
-    WiFiClientSecure client;
-    client.setCACert(ROOT_CA_LETSENCRYPT);
+    int httpCode;
+    String payload;
 
-    HTTPClient https;
-    https.setTimeout(timeout_);
-
-    if (!https.begin(client, url)) {
-        HAL_LOG_ERROR("HTTP", "https.begin() FAILED for: %s", url);
-        return false;
+    if (isHttps(url)) {
+        WiFiClientSecure client;
+        client.setCACert(ROOT_CA_LETSENCRYPT);
+        HTTPClient http;
+        http.setTimeout(timeout_);
+        if (!http.begin(client, url)) {
+            HAL_LOG_ERROR("HTTP", "http.begin() FAILED for: %s", url);
+            return false;
+        }
+        http.addHeader("Content-Type", "application/json");
+        httpCode = http.POST(body);
+        if (httpCode >= 200 && httpCode < 300) payload = http.getString();
+        http.end();
+    } else {
+        WiFiClient client;
+        HTTPClient http;
+        http.setTimeout(timeout_);
+        if (!http.begin(client, url)) {
+            HAL_LOG_ERROR("HTTP", "http.begin() FAILED for: %s", url);
+            return false;
+        }
+        http.addHeader("Content-Type", "application/json");
+        httpCode = http.POST(body);
+        if (httpCode >= 200 && httpCode < 300) payload = http.getString();
+        http.end();
     }
-
-    https.addHeader("Content-Type", "application/json");
-    int httpCode = https.POST(body);
 
     if (httpCode < 200 || httpCode >= 300) {
         HAL_LOG_ERROR("HTTP", "POST %s failed: %d", url, httpCode);
-        https.end();
         return false;
     }
-
-    String payload = https.getString();
-    https.end();
 
     DeserializationError err = deserializeJson(response, payload);
     if (err) {
@@ -52,27 +69,40 @@ bool ArduinoHttpClient::getJson(const char* url, JsonDocument& response) {
 
     HAL_LOG_DEBUG("HTTP", "GET %s", url);
 
-    WiFiClientSecure client;
-    client.setCACert(ROOT_CA_LETSENCRYPT);
+    int httpCode;
+    String payload;
 
-    HTTPClient https;
-    https.setTimeout(timeout_);
-
-    if (!https.begin(client, url)) {
-        HAL_LOG_ERROR("HTTP", "Failed to begin connection to: %s", url);
-        return false;
+    if (isHttps(url)) {
+        WiFiClientSecure client;
+        client.setCACert(ROOT_CA_LETSENCRYPT);
+        HTTPClient http;
+        http.setTimeout(timeout_);
+        if (!http.begin(client, url)) {
+            HAL_LOG_ERROR("HTTP", "Failed to begin connection to: %s", url);
+            return false;
+        }
+        httpCode = http.GET();
+        if (httpCode >= 200 && httpCode < 300) payload = http.getString();
+        http.end();
+    } else {
+        WiFiClient client;
+        HTTPClient http;
+        http.setTimeout(timeout_);
+        if (!http.begin(client, url)) {
+            HAL_LOG_ERROR("HTTP", "Failed to begin connection to: %s", url);
+            return false;
+        }
+        httpCode = http.GET();
+        if (httpCode >= 200 && httpCode < 300) payload = http.getString();
+        http.end();
     }
 
-    int httpCode = https.GET();
-    // 404 is valid for /check-claim (device not claimed yet)
-    if (httpCode < 0 || (httpCode >= 300 && httpCode != 404)) {
+    // 404 = not yet claimed — caller handles empty result, no error log
+    if (httpCode == 404) return false;
+    if (httpCode < 0 || httpCode >= 300) {
         HAL_LOG_ERROR("HTTP", "GET %s failed: %d", url, httpCode);
-        https.end();
         return false;
     }
-
-    String payload = https.getString();
-    https.end();
 
     DeserializationError err = deserializeJson(response, payload);
     if (err) {

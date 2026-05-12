@@ -263,23 +263,31 @@ def render_integration_status_struct() -> list[str]:
     ]
 
 
-def render_config_struct() -> list[str]:
+def render_config_struct(doc: dict) -> list[str]:
+    vocab = doc.get("capability_vocabulary") or {}
     out = [
         "/// Capability declaration — what this build of the device supports.",
         "/// Filled once by product main.cpp, passed to Link constructor.",
-        "/// has* flags are 1-to-1 with Telemetry fields; allow* flags gate integrations.",
+        "/// has* flags are generated from capability_vocabulary in mqtt_contract.yaml.",
+        "/// allow* flags gate optional cloud integrations.",
         "struct Config {",
         "    DeviceType  deviceType;",
         "    uint8_t     unitsCount;          ///< 1..MAX_UNITS",
         "",
-        "    // ── Telemetry capabilities (1:1 with struct Telemetry fields) ──",
+        "    // ── Peripheral capabilities (from capability_vocabulary in mqtt_contract.yaml) ──",
+        "    // Set the flags that match your hardware in main.cpp.",
+        "    // Run contracts/regen.sh after adding a new capability to the vocabulary.",
     ]
-    for name, _ctype, flag in TELEMETRY_USER_FIELDS:
-        out.append(f"    bool        {flag};")
+    for cap_name, cap in vocab.items():
+        flag = cap.get("config_flag", f"has{cap_name.capitalize()}")
+        desc = cap.get("description", "")
+        out.append(f"    bool        {(flag + ';'):<21} ///< {desc}")
     out += [
         "",
-        "    // ── Other product capabilities (not directly in Telemetry) ──",
-        "    bool        hasRfid;             ///< RFID reader (units[].rfid array, rfid topic)",
+        "    // ── Basic air sensors (not in capability_vocabulary — present on most devices) ──",
+        "    bool        hasAirTemp;          ///< air temperature sensor (SHT/DHT)",
+        "    bool        hasAirHumidity;      ///< air humidity sensor",
+        "    bool        hasHeaterTemp;       ///< heater body temperature sensor",
         "",
         "    // ── Integration availability (compile-time decision) ──",
     ]
@@ -294,6 +302,7 @@ def render_config_struct() -> list[str]:
         "    // ── Identification (published in `info` retained payload) ──",
         "    const char* hardwareVersion;",
         "    const char* firmwareVersion;",
+        "    const char* model;             ///< Human-readable product name shown on the portal (e.g. \"iHeater Link\")",
         "};",
     ]
     return out
@@ -348,7 +357,7 @@ def render_module(doc: dict) -> str:
         "// ── Config ────────────────────────────────────────────────────────",
         "",
     ]
-    out += render_config_struct() + [""]
+    out += render_config_struct(doc) + [""]
 
     out += [
         "} // namespace iDryer",

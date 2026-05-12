@@ -21,6 +21,7 @@ Output:
 from __future__ import annotations
 import sys
 import re
+import json
 import datetime
 from pathlib import Path
 import yaml
@@ -268,6 +269,165 @@ def render_topic_constants(doc: dict) -> str:
     return "\n".join(out)
 
 
+# ── HardwareUnitConfigCapabilities ─────────────────────────────────
+
+
+def render_capabilities_interface(doc: dict) -> str:
+    """
+    Generates HardwareUnitConfigCapabilities from capability_vocabulary.
+    This is the TypeScript counterpart of iDryer::Config has* flags.
+    Keys match units[].capabilities JSON keys published by firmware in /info.
+    """
+    vocab = doc.get("capability_vocabulary") or {}
+    out = []
+    out.append("/**")
+    out.append(" * Device peripheral capabilities reported by firmware in /info → units[].capabilities.")
+    out.append(" * Generated from capability_vocabulary in mqtt_contract.yaml.")
+    out.append(" * DO NOT EDIT — run contracts/regen.sh to regenerate.")
+    out.append(" */")
+    out.append("export interface HardwareUnitConfigCapabilities {")
+    for cap_name, cap in vocab.items():
+        desc = cap.get("description", "")
+        out.append(f"  /** {desc} */")
+        out.append(f"  {cap_name}?: boolean;")
+    out.append("}")
+    return "\n".join(out)
+
+
+# ── CanonicalRoles ─────────────────────────────────────────────────
+
+
+def render_canonical_roles(doc: dict) -> str:
+    roles = doc.get("canonical_roles") or {}
+    out = []
+    out.append("/**")
+    out.append(" * Canonical roles from mqtt_contract.yaml → canonical_roles.")
+    out.append(" * Portal uses these to identify known menu items and pick widgets.")
+    out.append(" * DO NOT EDIT — run contracts/regen.sh to regenerate.")
+    out.append(" */")
+    out.append("export const CanonicalRoles = {")
+    for role_name, role_def in roles.items():
+        if not isinstance(role_def, dict):
+            continue
+        rtype  = role_def.get("type", "unknown")
+        widget = role_def.get("widget", "button" if rtype == "action" else "number")
+        unit   = role_def.get("unit", "")
+        labels = role_def.get("labels") or {}
+        labels_str = ", ".join(f'"{k}": "{v}"' for k, v in labels.items())
+        labels_ts  = f"{{ {labels_str} }}" if labels_str else "{}"
+        out.append(f'  "{role_name}": {{ type: "{rtype}", widget: "{widget}", unit: "{unit}", labels: {labels_ts} }},')
+    out.append("} as const;")
+    out.append("")
+    out.append("export type CanonicalRole = keyof typeof CanonicalRoles;")
+    out.append("export type WidgetName = typeof CanonicalRoles[CanonicalRole][\"widget\"];")
+    return "\n".join(out)
+
+
+# ── Role i18n JSON files ───────────────────────────────────────────
+
+
+def generate_roles_i18n_files(doc: dict, out_dir: Path) -> list[str]:
+    """Generate roles.{lang}.json for each language found in canonical_roles.labels.
+    Each file is a flat dict: { "role.name": "Translation" }.
+    Missing translations fall back to "en". Returns list of written file paths.
+    """
+    roles = doc.get("canonical_roles") or {}
+
+    langs: set[str] = set()
+    for role_def in roles.values():
+        if isinstance(role_def, dict):
+            langs.update((role_def.get("labels") or {}).keys())
+
+    written = []
+    for lang in sorted(langs):
+        data: dict[str, str] = {}
+        for role_name, role_def in roles.items():
+            if not isinstance(role_def, dict):
+                continue
+            labels = role_def.get("labels") or {}
+            data[role_name] = labels.get(lang) or labels.get("en") or role_name
+        out_file = out_dir / f"roles.{lang}.json"
+        out_file.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        written.append(str(out_file))
+    return written
+
+
+# ── InvokeActions ──────────────────────────────────────────────────
+
+
+def render_invoke_actions(doc: dict) -> str:
+    """
+    Generates InvokeActions const from invoke_actions section.
+    For each action, emits enum arg values and string encodings
+    so the frontend can build selectors without hardcoding.
+    """
+    invoke_actions = doc.get("invoke_actions") or {}
+    out = []
+    out.append("/**")
+    out.append(" * Invoke action arg schemas from mqtt_contract.yaml.")
+    out.append(" * Enum values and string encodings for UI selector construction.")
+    out.append(" * DO NOT EDIT — run contracts/regen.sh to regenerate.")
+    out.append(" */")
+    out.append("export const InvokeActions = {")
+
+    for device_name, actions in invoke_actions.items():
+        if not isinstance(actions, list) or not actions:
+            continue
+        out.append(f'  "{device_name}": {{')
+        for action in actions:
+            action_name = action.get("name")
+            if not action_name:
+                continue
+            args = action.get("args") or {}
+            if action_name.startswith("<"):
+                continue
+            arg_lines = []
+            for arg_name, arg_spec in args.items():
+                if not isinstance(arg_spec, dict):
+                    continue
+                if arg_spec.get("type") == "enum":
+                    values = arg_spec.get("values", [])
+                    values_str = ", ".join(f'"{v}"' for v in values)
+                    arg_lines.append(f'      {arg_name}: [{values_str}] as const,')
+                elif arg_spec.get("encoding"):
+                    encoding = arg_spec["encoding"]
+                    arg_lines.append(f'      {arg_name}Encoding: "{encoding}",')
+            if arg_lines:
+                out.append(f'    "{action_name}": {{')
+                out.extend(arg_lines)
+                out.append(f'    }},')
+            else:
+                out.append(f'    "{action_name}": {{}},')
+        out.append(f'  }},')
+
+    out.append("} as const;")
+    return "\n".join(out)
+
+
+# ── DeviceProfiles ──────────────────────────────────────────────────
+
+
+def render_device_profiles(doc: dict) -> str:
+    profiles = doc.get("device_profiles") or {}
+    vocab = doc.get("capability_vocabulary") or {}
+    all_caps = list(vocab.keys())
+
+    out = []
+    out.append("/**")
+    out.append(" * Known device profiles — which capabilities each product type has.")
+    out.append(" * Generated from device_profiles in mqtt_contract.yaml.")
+    out.append(" */")
+    out.append("export const DeviceCapabilityProfiles: Record<string, HardwareUnitConfigCapabilities> = {")
+    for profile_name, profile in profiles.items():
+        caps = profile.get("capabilities") or []
+        obj_entries = ", ".join(
+            f"{c}: true" for c in all_caps if c in caps
+        )
+        out.append(f'  "{profile_name}": {{ {obj_entries} }},')
+    out.append("} as const;")
+    return "\n".join(out)
+
+
 # ── Main render ─────────────────────────────────────────────────────
 
 
@@ -319,6 +479,26 @@ def render_module(doc: dict) -> str:
     out.append(render_topic_constants(doc))
     out.append("")
 
+    # Canonical roles
+    out.append("// ── Canonical roles (from canonical_roles) ────────────────────────")
+    out.append("")
+    out.append(render_canonical_roles(doc))
+    out.append("")
+
+    # Invoke action schemas
+    out.append("// ── Invoke action schemas (from invoke_actions) ───────────────────")
+    out.append("")
+    out.append(render_invoke_actions(doc))
+    out.append("")
+
+    # Capabilities
+    out.append("// ── Device capabilities (from capability_vocabulary) ──────────────")
+    out.append("")
+    out.append(render_capabilities_interface(doc))
+    out.append("")
+    out.append(render_device_profiles(doc))
+    out.append("")
+
     return "\n".join(out)
 
 
@@ -350,6 +530,12 @@ def main():
     print(f"  Aux entry-interfaces:    {len(aux)}")
     print(f"  Payload interfaces:      {len(payloads)}")
     print()
+
+    i18n_files = generate_roles_i18n_files(doc, out_dir)
+    for f in i18n_files:
+        print(f"Generated: {f}")
+    if i18n_files:
+        print()
 
 
 if __name__ == "__main__":

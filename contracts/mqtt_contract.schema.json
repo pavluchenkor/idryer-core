@@ -11,6 +11,35 @@
     "updated": { "type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}$" },
     "owner": { "type": "string", "minLength": 1 },
     "scope": { "type": "string", "minLength": 1 },
+    "capability_vocabulary": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "required": ["json_key", "config_flag", "description"],
+        "additionalProperties": true,
+        "properties": {
+          "json_key":       { "type": "string" },
+          "config_flag":    { "type": "string" },
+          "description":    { "type": "string" },
+          "telemetry_field":{ "type": "string" },
+          "telemetry_type": { "type": "string" },
+          "invoke_actions": { "type": "array", "items": { "type": "string" } }
+        }
+      }
+    },
+    "device_profiles": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": true,
+        "properties": {
+          "device_type":   { "type": "string" },
+          "capabilities":  { "type": "array", "items": { "type": "string" } }
+        }
+      }
+    },
+    "canonical_roles":    { "type": "object", "additionalProperties": true },
+    "migration_status":   { "type": "object", "additionalProperties": true },
     "source_of_truth": { "$ref": "#/$defs/SourceOfTruth" },
     "rules": { "$ref": "#/$defs/Rules" },
     "uart_kind_ranges": { "$ref": "#/$defs/UartKindRanges" },
@@ -538,7 +567,7 @@
       "additionalProperties": true,
       "properties": {
         "id": { "type": "string", "pattern": "^[a-z][A-Za-z0-9_]*$" },
-        "severity": { "type": "string", "enum": ["low", "medium", "high", "critical"] },
+        "severity": { "type": "string", "enum": ["low", "medium", "high", "critical", "resolved"] },
         "summary": { "type": "string" },
         "impact": { "type": "string" },
         "decision_required": { "type": "string" },

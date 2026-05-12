@@ -210,15 +210,16 @@ bool MqttClient::publishConfigDelta(const char* json, size_t length) {
 // ============================================================================
 
 void MqttClient::mqttCallback(char* topic, byte* payload, unsigned int length) {
-    if (instance_) {
-        char* buf = (char*)malloc(length + 1);
-        if (buf) {
-            memcpy(buf, payload, length);
-            buf[length] = '\0';
-            instance_->handleMessage(topic, buf, length);
-            free(buf);
-        }
+    if (!instance_) return;
+    // Входящие команды маленькие (< 512 байт). Статический буфер без heap.
+    static char s_payload_buf[512];
+    if (length >= sizeof(s_payload_buf)) {
+        HAL_LOG_ERROR("MQTT", "← payload too large: %u bytes, dropped", length);
+        return;
     }
+    memcpy(s_payload_buf, payload, length);
+    s_payload_buf[length] = '\0';
+    instance_->handleMessage(topic, s_payload_buf, length);
 }
 
 void MqttClient::handleMessage(const char* topic, const char* payload, size_t length) {
@@ -257,17 +258,20 @@ bool MqttClient::publishJson(const char* suffix, JsonDocument& json, bool retain
         json["timestamp"] = getIsoTimestamp(ts);
     }
 
-    size_t jsonSize = measureJson(json);
-    char* buf = (char*)malloc(jsonSize + 1);
-    if (!buf) { HAL_LOG_ERROR("MQTT", "OOM"); return false; }
-    serializeJson(json, buf, jsonSize + 1);
+    // Статический буфер — без heap allocation.
+    // 1024 байт покрывает telemetry/status/events/integrations.
+    // Для config используется publishConfigRaw (отдельный путь).
+    static char s_buf[1024];
+    size_t needed = measureJson(json);
+    if (needed >= sizeof(s_buf)) {
+        HAL_LOG_ERROR("MQTT", "→ %s: payload too large (%u bytes)", suffix, (unsigned)needed);
+        return false;
+    }
+    serializeJson(json, s_buf, sizeof(s_buf));
 
     const char* topic = makeTopic(suffix);
-    HAL_LOG_DEBUG("MQTT", "→ %s (%u bytes): %s", topic, (unsigned)jsonSize, buf);
-
-    bool ok = mqttClient_.publish(topic, buf, retained);
-    free(buf);
-    return ok;
+    HAL_LOG_DEBUG("MQTT", "→ %s (%u bytes)", topic, (unsigned)needed);
+    return mqttClient_.publish(topic, s_buf, retained);
 }
 
 char* MqttClient::getIsoTimestamp(char* buffer) {

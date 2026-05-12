@@ -8,6 +8,43 @@
 #   3. Подключи pre-hook в platformio.ini (см. lib/idryer-core/menu/README.md).
 #   4. `pio run` — pre-hook сам сгенерирует C++ в src/menu/.
 #
+# CANONICAL ROLES (поле role:)
+#   Если пункт меню должен быть виден порталу — добавь поле role: с одним из
+#   значений ниже. Полный список и описание: lib/idryer-core/contracts/mqtt_contract.yaml
+#   секция canonical_roles. Неизвестная роль → ошибка сборки.
+#
+#   Сушилка:
+#     drying.target_temperature   float °C   slider
+#     drying.duration             uint  min  slider
+#     drying.start                action     button
+#     drying.stop                 action     button
+#     storage.target_temperature  uint  °C   slider
+#     storage.target_humidity     uint  %RH  slider
+#     storage.start               action     button
+#     storage.stop                action     button
+#     profile.start               action     ProfileEditor
+#     rfid.read                   action     button
+#     rfid.write                  action     RfidWriter
+#
+#   iHeater Link:
+#     iheater.bambu_enabled       bool       toggle
+#     iheater.moonraker_enabled   bool       toggle
+#     iheater.ha_enabled          bool       toggle
+#     iheater.heat_start          action     HeaterControl
+#     iheater.heat_stop           action     button
+#
+#   Storage Link:
+#     storage.led_count           uint       number
+#     storage.led_brightness      uint       slider
+#     led.pulse                   action     LedPulse
+#
+#   Общие (все продукты):
+#     common.stop                 action     button
+#     common.find                 action     button
+#     common.clear_errors         action     button
+#     system.active_unit          uint       hidden
+#     system.language             uint       select
+#
 # ПРАВИЛА:
 #   • bind ≤ 15 символов (лимит NVS-ключа).
 #   • units_count и language — последние два пункта (контракт фиксирован).
