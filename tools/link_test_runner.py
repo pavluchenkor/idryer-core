@@ -309,6 +309,42 @@ def test_request_response(cfg: Config) -> Result:
     )
 
 
+def test_auto_config(cfg: Config) -> Result:
+    """Устройство само публикует /config при выходе в онлайн — без явного get_config.
+
+    Проверяет retained-сообщение на топике /config. Если оно есть — устройство
+    опубликовало меню при коннекте к брокеру (new behavior). Дополнительно
+    валидирует структуру JSON: должно быть поле v и непустой массив menu.
+    """
+    config_topic = f"idryer/{cfg.serial}/config"
+    msgs = mqtt_collect(cfg.local_broker, cfg.local_port, [config_topic], cfg.test_timeout_s)
+    if config_topic not in msgs:
+        return Result(
+            "auto_config",
+            False,
+            f"retained /config не найден за {cfg.test_timeout_s:.0f}с — "
+            "устройство не публикует меню при подключении к брокеру",
+        )
+    try:
+        data = json.loads(msgs[config_topic])
+    except Exception as e:
+        return Result("auto_config", False, f"retained /config — невалидный JSON: {e}")
+
+    v = data.get("v")
+    menu = data.get("menu", [])
+    if not isinstance(menu, list) or len(menu) == 0:
+        return Result(
+            "auto_config",
+            False,
+            f"retained /config есть, но menu пустой или отсутствует (v={v})",
+        )
+    return Result(
+        "auto_config",
+        True,
+        f"retained /config получен автоматически: v={v}, {len(menu)} пунктов меню",
+    )
+
+
 def _fetch_integrations_status(cfg: Config) -> Optional[dict]:
     topic = f"idryer/{cfg.serial}/integrations/status"
     msgs = mqtt_collect(cfg.local_broker, cfg.local_port, [topic], cfg.test_timeout_s)
@@ -663,6 +699,12 @@ TESTS: List = [
         "устройство сообщает кто оно: deviceType, model, версия прошивки",
     ),
     (
+        "auto_config",
+        test_auto_config,
+        False, False,
+        "устройство само публикует retained /config при выходе в онлайн (без get_config)",
+    ),
+    (
         "request_response",
         test_request_response,
         False, False,
@@ -721,6 +763,10 @@ HUMAN_VERDICTS = {
     "info": (
         "устройство себя идентифицировало",
         "устройство не публикует /info — портал не узнает кто это и какие у него возможности",
+    ),
+    "auto_config": (
+        "устройство само публикует меню при коннекте — виджеты рисуются без ожидания",
+        "retained /config нет — портал не получит меню автоматически, виджеты не отрисуются до явного get_config",
     ),
     "request_response": (
         "запрос-ответ работает — портал получит актуальные настройки",
