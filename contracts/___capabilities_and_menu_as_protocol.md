@@ -1,16 +1,39 @@
 # Capabilities и меню как декларативный протокол
 
-> **Статус: утверждённый план миграции.** Все открытые вопросы
-> (§10.2 профиль, §10.3 indexed-роли, §10.4 unitId в payload, §10.6
-> порядок миграции) **закрыты решениями** по итогам 5 раундов
-> архитектурного ревью с тремя независимыми консультантами.
+## TL;DR — быстрая выжимка
+
+**Что делаем:** Устройство само описывает свой UI через MQTT. Портал рендерит карточку автоматически — без хардкода под каждый тип устройства.
+
+**Как работает:**
+- Firmware: `menu.yaml` → генератор → C++ → при подключении публикует JSON-меню в MQTT
+- JSON-меню содержит поле `r:` (canonical role) для пунктов которые должен знать портал
+- `mqtt_contract.yaml` — единый словарь обоих концов: роль → тип виджета
+- Portal: читает меню из кэша (DB) → находит пункты с known roles → рендерит виджеты
+
+**Dashboard-карточка — два режима:**
+- Известный deviceType → захардкоженный компонент (переходный режим, будет сокращаться)
+- Нет хардкода → автосборка из кубиков по canonical roles
+
+**Зачем:** Новое устройство = написать `menu.yaml` с ролями. Портал рисует карточку сам. Без изменений портала.
+
+**Где что:**
+- Словарь ролей: `mqtt_contract.yaml → canonical_roles`
+- TypeScript для портала: `gen_ts_types.py` → `canonical-roles.ts` (автогенерация)
+- Виджеты: `widget-registry.tsx` — новая роль без компонента = ошибка компиляции TypeScript
+- Валидация прошивки: `pre_gen_menu.py` — роль не в контракте = ошибка сборки PlatformIO
+- Что уже работает: см. §14
+
+---
+
+> **Статус: Этап 1 — в работе.** Архитектурные решения приняты (§10.2–10.6 закрыты).
+> Часть шагов реализована — см. §14. Открытые вопросы отсутствуют.
 >
 > Документ описывает архитектуру обмена устройство ↔ портал, в которой
 > портал строит UI декларативно из capabilities + меню без хардкодного
 > знания типов устройств.
 >
-> **Этап 1 (можно начинать)**: iHeater Link + Storage Link — миграция
-> на menu_protocol_v1. План — §13.
+> **Этап 1 (в работе)**: iHeater Link + Storage Link — миграция
+> на menu_protocol_v1. План — §13. Выполненное — §14.
 >
 > **Этап 2 (отдельная задача после стабилизации Этапа 1)**:
 > сушилка (Dryer + iDryerRP2040) — переезд в новую модель. Сейчас
@@ -32,10 +55,15 @@
 
 Реальное состояние на момент исследования:
 
-- **Портал не знает `storage_link` как тип устройства**. Функция
+- **Портал не знал `storage_link` как тип устройства**. Функция
   `mapDeviceType` в `backend/src/mqtt-telemetry/device-type.util.ts:3-14`
-  превращает любой неизвестный `deviceType` в `UNKNOWN`. Storage Link был
-  «невидимкой» в системе.
+  превращала любой неизвестный `deviceType` в `UNKNOWN`. Storage Link был
+  «невидимкой» в системе. → **ИСПРАВЛЕНО**: `case 'storage_link'` добавлен,
+  Prisma enum `STORAGE_LINK` добавлен.
+
+- **Home Assistant integration** — реализована в idryer-core (`ha_builder.cpp`,
+  `ha_publisher.cpp`). Устройства публикуют discovery в `homeassistant/` топики
+  и автоматически видны в HA. Протестировано.
 
 - **`info` каждого устройства имеет своё ad-hoc расширение**.
   Storage Link шлёт `unitsCount: 0` как неофициальный маркер «не сушилка»,
@@ -497,39 +525,16 @@ config (per-unit values).
 Пункты без `r` — приватные для устройства; портал может показать как
 сырое поле в админке, но не использует в управлении.
 
-#### Поле `widget:` для сложных команд
+Виджет для пункта меню определяется **исключительно** через `canonical_roles` в контракте
+по полю `r:`. Устройство не шлёт имя виджета — портал смотрит его сам:
 
-Опциональное. По умолчанию портал рисует виджет по типу пункта меню:
-`val` → слайдер/число, `toggle` → переключатель, `act` → кнопка,
-`val` с `select_options` → выпадающий список.
-
-Если `widget:` задан — портал использует **захардкоженный** React-компонент
-с этим именем вместо дефолтного. Применяется для сложных команд, которые
-не вписываются в простые виджеты.
-
-```json
-{ "id": 17, "t": "act", "p": 1, "bind": "profile_start",
-  "r": "profile.start",
-  "widget": "ProfileEditor",
-  "n": ["ПРОФИЛЬ", "PROFILE"] }
-
-{ "id": 23, "t": "act", "p": 5, "bind": "rfid_write",
-  "r": "rfid.write",
-  "widget": "RfidWriter",
-  "n": ["ЗАПИСАТЬ МЕТКУ", "WRITE TAG"] }
-
-{ "id": 31, "t": "act", "bind": "led_pulse",
-  "r": "led.pulse",
-  "widget": "LedPulse",
-  "n": ["ИМПУЛЬС", "PULSE"] }
+```
+r: "led.pulse" → CanonicalRoles["led.pulse"].widget = "LedPulse" → LedPulseWidget
+r: "common.stop" → CanonicalRoles["common.stop"].widget = "button" → ButtonWidget
 ```
 
-При нажатии хардкод-виджет открывает свой UI (форма с таблицей этапов /
-загрузка base64 / color picker), собирает аргументы и шлёт
-`commands/invoke` с произвольным `args`-объектом.
-
-Реестр `widget:`-имён → React-компонентов хранится на портале как
-hardcoded mapping. Расширение каталога виджетов = код-релиз портала.
+Реестр виджетов хранится на портале. Расширение каталога = добавить роль в контракт +
+реализовать компонент на портале.
 
 ### 6.4. telemetry, status, weights, rfid, events
 
@@ -703,20 +708,10 @@ canonical_roles:
   system.language:              { type: uint, widget: select }
 ```
 
-### Дефолтные виджеты по типу пункта меню
+### Виджет определяется через canonical_roles
 
-Если у пункта меню есть `r:` но соответствующая роль в словаре не имеет
-`widget:`, портал применяет дефолт по типу пункта:
-
-| Тип пункта меню | Дефолтный widget |
-|---|---|
-| `val` (number/float) | `slider` (если есть min/max) или `number` |
-| `val` с `select_options` | `select` |
-| `toggle` | `toggle` |
-| `act` | `button` |
-
-Расширение `widget:` в роли (например, `ProfileEditor`) — это **override**
-дефолта.
+Портал смотрит `CanonicalRoles[item.r].widget`. Каждая роль в контракте
+**обязана** иметь `widget:`. Устройство поле `widget` не публикует.
 
 ---
 
@@ -731,8 +726,13 @@ canonical_roles:
 3. **`menu_meta.h`**: добавить поле `const char* role` в структуру
    `MenuMeta`.
 4. **`menu_buildFullJson` (`menu_commands.h:182`)**: при сериализации
-   menu item выводить поле `r` если задан.
-5. **`MenuBridge::applySetCommand`**: уже работает в текущем виде,
+   menu item выводить поле `r` если задан. Поле `widget` устройство
+   не публикует — портал определяет виджет из `canonical_roles` по `r`.
+5. **`pre_gen_menu.py` — валидация ролей**: при генерации проверять каждый
+   `role:` из `menu.yaml` против `canonical_roles` в `mqtt_contract.yaml`.
+   Если роль не найдена — сборка падает с ошибкой. Разработчик не может
+   использовать неизвестную роль молча.
+6. **`MenuBridge::applySetCommand`**: уже работает в текущем виде,
    изменений не требует. Адресация юнита — через активный
    контроллер (`controller_choice`), как сейчас.
 6. **`MenuBridge::applyInvokeCommand`**: добавить — вызов `on_invoke`
@@ -813,8 +813,8 @@ canonical_roles:
 Profile с 5 этапами по 3 параметра не вписывается в плоское меню. Принят
 **вариант (b): `invoke` с `args` + захардкоженный виджет `ProfileEditor`**.
 
-В меню — один пункт `act` с `r: profile.start` и `widget: ProfileEditor`.
-Портал, увидев `widget:`, рисует не дефолтную кнопку, а захардкоженный
+В меню — один пункт `act` с `r: profile.start`. Портал смотрит
+`CanonicalRoles["profile.start"].widget = "ProfileEditor"` и рисует захардкоженный
 React-компонент с таблицей этапов (add/remove строк, поля для каждой
 стадии). При нажатии «Применить» портал шлёт:
 
@@ -836,7 +836,7 @@ PUB commands/invoke
 
 ### 10.3. Indexed-роли — ОТМЕНЕНО
 
-Раз профиль = `widget: ProfileEditor` (хардкод-виджет), роли на каждый
+Раз профиль = роль `profile.start` → виджет `ProfileEditor` из `canonical_roles`, роли на каждый
 этап (`profile.stage.temperature` с index'ом) **не нужны**. Хардкод-виджет
 сам управляет своей структурой данных, отдельные роли для UI не
 требуются.
@@ -941,55 +941,102 @@ migration_status:
 Открытые вопросы §10.2-10.4 закрыты решениями. План конкретный.
 
 ### Шаг 1 — `mqtt_contract.yaml`
-1. Добавить раздел `canonical_roles` (как в §8).
+1. ~~Добавить раздел `canonical_roles` (как в §8).~~ **✅ DONE** — раздел присутствует.
 2. Добавить раздел `migration_status` (как в §10.6).
 3. Удалить из `commands` секции: `commands/drying`, `storage`, `profile`,
    `stop`, `pause`, `resume`, `find`, `clear_errors`, `read_rfid`,
    `write_rfid`, `link_integration`, `bambu_apply` — для устройств в
    статусе `target: menu_protocol_v1`. Для `dryer` (status: deferred)
    оставить.
-4. Документировать в `messages.config_full` поля `r:` и `widget:`.
+4. Документировать в `messages.config_full` поле `r:`.
 
 ### Шаг 2 — SDK (`idryer-core`)
 1. `MenuBridge::applyInvokeCommand` — добавить (вызов action по id, с
    опциональным `args`).
 2. `command_routing` — упростить до 4 веток: `set`/`invoke`/`get_config`/
    `ping`. Удалить ветки `drying`/`storage`/etc. для iHeater и Storage.
-3. `gen_menu_v2.py` — парсить `role:` и `widget:` из YAML, выводить в
-   `menu_meta.h` (поля `const char* role; const char* widget;`).
-4. `menu_buildFullJson` — выводить `r:` и `widget:` в config-payload
-   когда заданы.
+3. `gen_menu_v2.py` — парсить `role:` из YAML, выводить в
+   `menu_meta.h` (поле `const char* role`).
+4. `menu_buildFullJson` — выводить `r:` в config-payload когда задан.
 
 ### Шаг 3 — iHeater Link и Storage Link
 1. `iHeater-link/src/menu/menu.yaml`: добавить `r:` для mat_*, *_en
    полей. Удалить ручные обработки `link_integration`/`bambu_apply` из
    `main.cpp` (переезжают в `set`).
 2. `iDryer-Storage/src/menu/menu.yaml`: добавить `r:` для led_count,
-   brightness, animation. Добавить пункт `act` с `r: led.pulse`,
-   `widget: LedPulse`.
+   brightness, animation. Добавить пункт `act` с `r: led.pulse`.
 3. Прошивка обоих устройств — собрать, залить, протестировать `set`
    и `invoke` через mosquitto.
 
 ### Шаг 4 — Backend portal
-1. `device-type.util.ts:3-14` — добавить `case 'storage_link': return
-   DeviceType.STORAGE_LINK;`. Prisma миграция enum.
+1. ~~`device-type.util.ts:3-14` — добавить `case 'storage_link'`.~~ **✅ DONE**
 2. `mqtt-telemetry.service.ts` — добавить `sendSet(deviceToken, id,
    val)` и `sendInvoke(deviceToken, id, args?)`. Старые методы
    (`sendDryingCommand` etc.) — пометить deprecated, переписать как
    обёртки над `sendInvoke` через `getMenuIdByRole`.
-3. `info.handler.ts` / `config.handler.ts` — парсить новый формат info
-   (unitCapabilities на корне) и config (с `r:` и `widget:`).
-4. `devices.service.ts` — добавить `getMenuIdByRole(deviceId, role)` —
-   маппинг canonical role → menu id из последнего полученного config.
+3. `config.handler.ts` — парсить config (с `r:`),
+   сохранять в `device_configurations`, эмитить `device:config` через
+   WebSocket. **✅ DONE** (`persistMenuConfig` + socket emit реализованы).
+4. ~~`devices.service.ts` — добавить `getMenuIdByRole(deviceId, role)`.~~ **✅ DONE**
+5. `GET /devices/:id/menu-config` — кэшированное меню из БД. **✅ DONE**
 
 ### Шаг 5 — Frontend portal
-1. Реестр виджетов: словарь `widget_name → React-компонент`. Стандартные:
-   `slider`, `number`, `toggle`, `select`, `button`. Хардкод:
-   `ProfileEditor`, `RfidWriter`, `LedPulse`.
-2. Generic device page: получить config → отрисовать каждый menu item с
-   `r:` через виджет из реестра. Группировка по `p:` (parent submenu) и
-   по `unit:` (если указан) для сетки юнитов.
-3. Пресеты — переписать на роли (как в §7.2).
+
+#### 5a. Генерация canonical-roles.ts
+Расширить `gen_ts_types.py`: выгружать `canonical_roles` из `mqtt_contract.yaml`
+в `canonical-roles.ts`. Портал импортирует этот файл — не редактирует вручную.
+
+```typescript
+// canonical-roles.ts (autogenerated)
+export const CANONICAL_ROLES = {
+  "storage.led_brightness": { type: "uint", widget: "BrightnessSlider" },
+  "drying.start":           { type: "action", widget: "StartButton" },
+  // ...
+} as const;
+export type WidgetName = typeof CANONICAL_ROLES[keyof typeof CANONICAL_ROLES]["widget"];
+```
+
+#### 5b. Widget registry
+Hand-written. TypeScript проверяет полноту при компиляции:
+
+```typescript
+// widget-registry.tsx
+const WIDGET_REGISTRY: Record<WidgetName, React.ComponentType<WidgetProps>> = {
+  BrightnessSlider: BrightnessSliderWidget,
+  StartButton: StartButtonWidget,
+  // пропустить → ошибка TypeScript при компиляции
+};
+```
+
+Стандартные виджеты: `slider`, `number`, `toggle`, `select`, `button`.
+Хардкод-виджеты: `ProfileEditor`, `RfidWriter`, `LedPulse`.
+
+#### 5c. Dashboard-карточка — два режима
+
+```typescript
+const HARDCODED_CARDS: Partial<Record<DeviceType, React.ComponentType>> = {
+  DRYER:        DryerCard,        // TODO: migrate to dynamic
+  IHEATER_LINK: IHeaterCard,      // TODO: migrate to dynamic
+};
+
+function DeviceCard({ device }) {
+  const HardcodedCard = HARDCODED_CARDS[device.deviceType];
+  return HardcodedCard
+    ? <HardcodedCard device={device} />
+    : <DynamicDeviceCard device={device} />;
+}
+```
+
+`Partial<Record<...>>` — явный сигнал что это переходное. Новые устройства
+сразу идут в dynamic-режим.
+
+#### 5d. DynamicDeviceCard
+Получает menu-config устройства → фильтрует items с известным `r:` →
+рендерит виджет из реестра. Группировка по `p:` сохраняет структуру
+подменю (CHIPSET group, COLOR ORDER group и т.п.).
+
+#### 5e. Пресеты
+Переписать на роли (как в §7.2).
 
 ### Шаг 6 — Удалить устаревшее
 1. После работающей миграции iHeater и Storage — удалить из контракта
@@ -1000,6 +1047,219 @@ migration_status:
 
 ---
 
+---
+
+## 14. Что уже реализовано
+
+### Backend (iDryerPortal/backend)
+- **`mapDeviceType`**: `storage_link` → `DeviceType.STORAGE_LINK` ✅
+- **Prisma**: enum `STORAGE_LINK` добавлен ✅
+- **`persistMenuConfig`**: сохраняет menu JSON в `device_configurations` ✅
+- **`GET /devices/:id/menu-config`**: кэшированное меню из БД ✅
+- **`PUT /devices/:id/settings`**: `{cmd:set/invoke, id, val}` → MQTT ✅
+- **`getMenuIdByRole(deviceId, role)`**: canonical role → menu item id ✅
+- **WebSocket `device:config`**: эмит в комнату устройства при получении нового config ✅
+
+### Frontend (iDryerPortal/frontend-v2)
+- **`DeviceMenuPanel`**: отображает полное дерево меню устройства на странице `/devices/:id` ✅
+- **`fetchDeviceMenuConfig`**: API-клиент для `/menu-config` ✅
+- **Live-update**: подписка на `device:config` через socket, обновление без перезагрузки ✅
+- **`.env.local`**: `VITE_WS_URL=ws://localhost:3000` (локальная разработка) ✅
+
+### Firmware / SDK (idryer-core)
+- **HA integration**: `ha_builder.cpp`, `ha_publisher.cpp` — discovery в `homeassistant/` топики, устройства видны в Home Assistant ✅
+- **`r:` поле в menu items**: iHeater Link и Storage Link публикуют canonical roles ✅
+- **`commands/set` + `commands/invoke`**: прошивка принимает и обрабатывает ✅
+
+### Ещё не реализовано (остаток Этапа 1)
+- `gen_ts_types.py` → `canonical-roles.ts` для портала
+- `widget-registry.tsx` + `DynamicDeviceCard`
+- `pre_gen_menu.py` валидация ролей против контракта
+- Dashboard-карточки для iHeater Link и Storage Link (сейчас Storage показывает UI сушилки)
+
+---
+
 *Документ описывает целевую архитектуру. Для текущего состояния
 обмена см. `mqtt_contract.yaml`. Решения по §10.2-10.4 приняты.
-Этап 1 (iHeater Link + Storage Link) можно начинать сейчас.*
+Этап 1 — в работе, см. §14.*
+
+---
+
+## 15. Стратегический план работ
+
+> **Цель:** сделать систему универсальной — любое новое устройство
+> автоматически получает меню настроек и карточку на дашборде без
+> ручного кода на портале. Параллельно — очистить протокол команд
+> от legacy-топиков.
+
+**Термины, используемые в плане:**
+
+- **Canonical role** (`r:`) — стандартное смысловое имя параметра или действия, например `drying.target_temperature`. Зафиксировано в `mqtt_contract.yaml`. Firmware и портал говорят на одном языке через эти имена.
+- **Menu-as-protocol** — прошивка публикует полное дерево настроек устройства в MQTT-топике `idryer/{serial}/config`. Портал читает его и строит UI динамически, без хардкода.
+- **Виджет** — React-компонент на портале, который отображает один параметр: `ToggleWidget`, `SliderWidget`, `ButtonWidget` и т.д.
+- **Widget registry** — словарь `{ "toggle": ToggleWidget, "slider": SliderWidget, ... }`. Портал смотрит в него, чтобы по имени виджета из меню найти нужный компонент.
+- **Dashboard-карточка** — плашка на главной странице портала (`/`). Показывает ключевые параметры устройства и быстрые действия.
+- **`commands/set` / `commands/invoke`** — унифицированный MQTT-протокол команд. `set` — изменить значение параметра, `invoke` — вызвать действие (например, запустить сушку). Заменяет старые отдельные топики.
+- **`gen_ts_types.py`** — скрипт, генерирующий TypeScript-типы из `mqtt_contract.yaml`. Запускается при сборке, результат коммитится в репозиторий.
+- **`pre_gen_menu.py`** — скрипт проверки прошивки. Запускается при сборке прошивки и проверяет, что все `r:` в `menu.yaml` существуют в `mqtt_contract.yaml`. Если нет — сборка падает.
+
+---
+
+### Шаг 1 — Контракт как единственный источник правды ✅
+
+`mqtt_contract.yaml` содержит секцию `canonical_roles` с описанием всех
+стандартных параметров и действий. Сделано.
+
+**Следующий микрошаг:** при добавлении нового устройства — сначала
+дополнять `canonical_roles`, затем добавлять `r:` в `menu.yaml`.
+
+---
+
+### Шаг 2 — Проверка ролей при сборке прошивки
+
+**Что делаем:** расширяем `pre_gen_menu.py` так, чтобы скрипт проверял
+каждый `r:` в `menu.yaml` против списка ключей в `canonical_roles`.
+Если роль неизвестна — сборка прошивки завершается с ошибкой.
+
+**Зачем:** исключает ситуацию, когда прошивка публикует роль, которую
+портал не понимает. Проблема обнаруживается на этапе сборки, а не в
+продакшне.
+
+**Файлы:** `idryer-core/scripts/pre_gen_menu.py`,
+`idryer-core/contracts/mqtt_contract.yaml`
+
+---
+
+### Шаг 3 — TypeScript-типы canonical roles для портала
+
+**Что делаем:** расширяем `gen_ts_types.py` — добавляем генерацию
+файла `canonical-roles.ts`:
+
+```typescript
+// Авто-генерируется из mqtt_contract.yaml — не редактировать вручную
+export const CanonicalRoles = {
+  "drying.target_temperature": { type: "float", unit: "°C", widget: "slider" },
+  "iheater.bambu_enabled":     { type: "bool",  widget: "toggle" },
+  // ...
+} as const;
+
+export type CanonicalRole = keyof typeof CanonicalRoles;
+```
+
+**Зачем:** портал знает список допустимых ролей на уровне компилятора
+TypeScript. Опечатка в имени роли → ошибка сборки фронтенда.
+
+**Файлы:** `idryer-core/scripts/gen_ts_types.py`,
+`idryer-core/contracts/_generated/canonical-roles.ts`
+
+---
+
+### Шаг 4 — Библиотека виджетов на портале
+
+**Что делаем:** создаём `widget-registry.tsx` — словарь, связывающий
+имя виджета из меню с React-компонентом. Ключи берутся из
+`CanonicalRoles`, поэтому TypeScript проверяет полноту при сборке.
+
+```typescript
+// Тип гарантирует: каждый виджет из canonical_roles должен быть реализован
+type WidgetName = typeof CanonicalRoles[CanonicalRole]["widget"];
+const widgetRegistry: Record<WidgetName, React.ComponentType<WidgetProps>> = {
+  toggle:  ToggleWidget,
+  slider:  SliderWidget,
+  button:  ButtonWidget,
+  hidden:  () => null,
+};
+```
+
+Компоненты `ToggleWidget`, `SliderWidget`, `ButtonWidget` — минималистичные,
+без device-специфичной логики. Знают только как отобразить значение и
+отправить `commands/set` или `commands/invoke`.
+
+**Файлы:** `frontend-v2/src/components/widgets/widget-registry.tsx`
+
+---
+
+### Шаг 5 — Динамическая dashboard-карточка
+
+**Что делаем:** реализуем `DynamicDeviceCard` — компонент, который
+получает menu-config устройства, фильтрует items с известными `r:` и
+рендерит виджеты из реестра. Для известных устройств (DRYER,
+IHEATER_LINK) временно остаются хардкодные карточки — они мигрируют
+постепенно.
+
+```typescript
+// Переходная схема: хардкод → dynamic
+const HARDCODED_CARDS: Partial<Record<DeviceType, React.ComponentType>> = {
+  DRYER:        DryerCard,        // TODO: мигрировать на dynamic
+  IHEATER_LINK: IHeaterCard,      // TODO: мигрировать на dynamic
+};
+
+function DeviceCard({ device }) {
+  const HardcodedCard = HARDCODED_CARDS[device.deviceType];
+  return HardcodedCard
+    ? <HardcodedCard device={device} />
+    : <DynamicDeviceCard device={device} />;
+}
+```
+
+**Ближайшая цель:** Storage Link — первое устройство, которое сразу
+идёт в dynamic-режим (сейчас показывается UI сушилки — это баг).
+
+**Файлы:** `frontend-v2/src/components/DeviceCard.tsx`,
+`frontend-v2/src/components/DynamicDeviceCard.tsx`
+
+---
+
+### Шаг 6 — Очистка протокола команд
+
+**Контекст:** часть устройств (iHeater, Storage) до сих пор слушает
+legacy MQTT-топики: `commands/link_integration`, `commands/bambu_apply`
+и т.п. Новый протокол — единый `commands/set {id, val}` и
+`commands/invoke {id}`.
+
+**Что делаем:**
+1. Убираем из прошивки обработчики legacy-топиков поочерёдно, начиная
+   с iHeater Link и Storage Link.
+2. На портале — убеждаемся, что все действия идут только через
+   `PUT /devices/:id/settings` → `commands/set` / `commands/invoke`.
+3. После миграции — удаляем legacy-поля из `mqtt_contract.yaml`.
+
+**Порядок:** сначала iHeater Link (меньше legacy), затем Storage Link.
+Сушилка (RP2040) — отдельная задача, после согласования с командой.
+
+---
+
+### Шаг 7 — Документация для разработчика
+
+Короткий `CONTRIBUTING.md` в `idryer-core/contracts/`:
+
+- Как добавить новое устройство (checklist: контракт → menu.yaml → прошивка → портал auto).
+- Как добавить новый виджет (контракт → gen_ts_types → widget-registry → готово).
+- Что такое canonical role и зачем она нужна.
+
+**Зачем:** следующий разработчик не должен читать весь этот документ,
+чтобы добавить кнопку.
+
+---
+
+### Шаг 8 — Миграция сушилки (отложено)
+
+Сушилка (DRYER, RP2040) работает на старом протоколе. Миграция
+затронет прошивку, портал и, возможно, существующих пользователей.
+Выполняется отдельным этапом после стабилизации Шагов 1–7.
+
+---
+
+### Итоговый порядок
+
+| # | Задача | Зависит от |
+|---|--------|-----------|
+| 1 | `pre_gen_menu.py` — валидация ролей | — |
+| 2 | `gen_ts_types.py` → `canonical-roles.ts` | — |
+| 3 | `widget-registry.tsx` | 2 |
+| 4 | `DynamicDeviceCard` (Storage Link первый) | 3 |
+| 5 | Очистка legacy-команд iHeater + Storage | 4 |
+| 6 | CONTRIBUTING.md для разработчика | 1–5 |
+| 7 | Миграция сушилки | 1–6, отдельно |
+
+Шаги 1 и 2 независимы — можно делать параллельно.

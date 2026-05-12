@@ -123,6 +123,55 @@ def validate_binds(flat):
         print("\n".join(errors), file=sys.stderr)
         sys.exit(1)
 
+def validate_roles(flat, contract_path=None):
+    """Проверяет что все role: в menu.yaml существуют в canonical_roles контракта.
+
+    contract_path — путь к mqtt_contract.yaml. По умолчанию ищет
+    ../contracts/mqtt_contract.yaml относительно этого файла.
+    Если контракт не найден — валидация пропускается с предупреждением.
+    """
+    if contract_path is None:
+        contract_path = os.path.join(os.path.dirname(__file__), "..", "contracts", "mqtt_contract.yaml")
+    contract_path = os.path.normpath(contract_path)
+
+    if not os.path.exists(contract_path):
+        print(f"[menu_gen] WARNING: contract not found at {contract_path} — role validation skipped", file=sys.stderr)
+        return
+
+    with open(contract_path, encoding="utf-8") as f:
+        contract = yaml.safe_load(f)
+
+    known_roles = contract.get("canonical_roles") or {}
+    if not known_roles:
+        print("[menu_gen] WARNING: canonical_roles not found in contract — role validation skipped", file=sys.stderr)
+        return
+
+    errors = []
+    for fn in flat:
+        role = fn["raw"].get("role")
+        if role and role not in known_roles:
+            errors.append((role, fn["raw"].get("id", "?")))
+
+    if not errors:
+        used = [fn["raw"].get("role") for fn in flat if fn["raw"].get("role")]
+        if used:
+            print(f"[menu_gen] roles OK — {len(used)} role(s) validated against contract")
+        return
+
+    print("ERROR: unknown canonical role(s) in menu.yaml:", file=sys.stderr)
+    for role, item_id in errors:
+        print(f"  item id={item_id}: role \"{role}\" not in canonical_roles", file=sys.stderr)
+
+    print("\nAvailable canonical roles:", file=sys.stderr)
+    for role, spec in sorted(known_roles.items()):
+        widget = spec.get("widget", "—") if isinstance(spec, dict) else "—"
+        rtype  = spec.get("type",   "—") if isinstance(spec, dict) else "—"
+        print(f"  {role:<40} widget: {widget}, type: {rtype}", file=sys.stderr)
+
+    print("\nFix role(s) above or add them to mqtt_contract.yaml → canonical_roles", file=sys.stderr)
+    sys.exit(1)
+
+
 def node_title_unit_arrays(raw, lang_order):
     if isinstance(raw.get("title"), dict):
         titles = [c_string(raw["title"].get(l, raw["title"].get("en",""))) for l in lang_order]
@@ -1098,6 +1147,7 @@ def main():
 
     flat = flatten(roots, -1, [])
     validate_binds(flat)
+    validate_roles(flat)
 
     outdir = args.out
     os.makedirs(outdir, exist_ok=True)

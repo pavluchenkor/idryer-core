@@ -225,8 +225,12 @@ struct Link::Impl {
 //  Link — facade methods.
 // ──────────────────────────────────────────────────────────────────────
 
-Link::Link(const Config& cfg) : impl_(new Impl(cfg)) {
-    // Zero out the outgoing data structs.
+Link::Link(const Config& cfg) {
+    // Static local — живёт в .bss, нет heap allocation.
+    // Конструктор приватного Impl доступен здесь т.к. мы внутри Link.
+    static Impl s_impl(cfg);
+    impl_ = &s_impl;
+
     for (uint8_t i = 0; i < MAX_UNITS; ++i) {
         telemetry.airTempC[i]       = 0.0f;
         telemetry.airHumidityPct[i] = 0.0f;
@@ -242,7 +246,7 @@ Link::Link(const Config& cfg) : impl_(new Impl(cfg)) {
     }
 }
 
-Link::~Link() { delete impl_; }
+Link::~Link() { impl_ = nullptr; }
 
 bool Link::begin() {
     Serial.begin(115200);
@@ -271,9 +275,12 @@ bool Link::begin() {
 #endif
 
     // Restore saved WiFi credentials if any.
+    // WiFi.begin() called directly so the non-DEV_REPL loop (which returns early
+    // before runtime.loop()) can observe WL_CONNECTED without cloud state machine.
     char ssid[64], pass[64];
     if (impl_->wifiStore.load(ssid, sizeof(ssid), pass, sizeof(pass))) {
         impl_->wifi.begin(ssid, pass);
+        WiFi.begin(ssid, pass);
     }
 
     // Serial number from MAC: `DEVICE_<12HEX_UPPERCASE>` (see %02X in
@@ -359,58 +366,32 @@ bool Link::begin() {
 }
 
 void Link::loop() {
-    // Pre-WL_CONNECTED: только Improv. runtime.loop() → cloud.loop() →
-    // ArduinoWifiManager::connect() делает блокирующий WiFi.scanNetworks (~5с),
-    // что переполняет USB CDC FIFO и ломает приём IMPROV-RPC байт.
 #ifndef IDRYER_DEV_REPL
+    // До WiFi: только Improv. runtime.loop() → cloud.loop() →
+    // WiFi.scanNetworks (~5с) переполняет USB CDC FIFO и ломает Improv-RPC.
     if (!impl_->logsEnabled) {
         impl_->improv.handleSerial();
         if (WiFi.status() == WL_CONNECTED) {
             impl_->logsEnabled = true;
             idryer::hal::initArduinoHal(&Serial);
-            Serial.println();
-            Serial.println("[BOOT] Logs enabled after WiFi config");
+            Serial.println("[BOOT] WiFi ok, logs enabled");
             Serial.flush();
         }
         return;
     }
-#endif
 
-    impl_->runtime.loop();
-    if (impl_->localStarted) impl_->local.loop();
-    impl_->intManager.loop();
-
-    // Lazy: mDNS/WS only after WiFi has IP (lwIP requirement).
-    if (!impl_->localStarted && WiFi.status() == WL_CONNECTED) {
-        idryer::DeviceIdentity id;
-        impl_->credentials.load(id);
-        impl_->local.initMdns(id.serialNumber);
-        impl_->local.begin(id.serialNumber, id.token);
-        impl_->localStarted = true;
-    }
-
-#ifndef IDRYER_DEV_REPL
-    // Production: Improv handshake until WiFi connects, then enable HAL logs.
-    if (!impl_->logsEnabled) {
-        impl_->improv.handleSerial();
-        if (WiFi.status() == WL_CONNECTED) {
-            impl_->logsEnabled = true;
-            idryer::hal::initArduinoHal(&Serial);
-            // flasher-portal trigger: signals web-side to send START_CLAIM.
-            Serial.println();
-            Serial.println("[BOOT] Logs enabled after WiFi config");
-            Serial.flush();
-        }
-    } else {
-        // Listen for flasher-portal commands on Serial.
-        static String s_buf;
+    // После WiFi: слушаем flasher-portal команды по Serial.
+    {
+        static char   s_serial_buf[64];
+        static uint8_t s_serial_len = 0;
         while (Serial.available() > 0) {
             char c = (char)Serial.read();
             if (c == '\r' || c == '\n') {
-                if (s_buf.length() > 0) {
-                    String cmd = s_buf; cmd.trim();
-                    if (cmd.equalsIgnoreCase("START_CLAIM") ||
-                        cmd.equalsIgnoreCase("claim")) {
+                if (s_serial_len > 0) {
+                    s_serial_buf[s_serial_len] = '\0';
+                    s_serial_len = 0;
+                    const char* cmd = s_serial_buf;
+                    if (strcmp(cmd, "START_CLAIM") == 0 || strcmp(cmd, "claim") == 0) {
                         if (isOnline()) {
                             idryer::DeviceIdentity id;
                             impl_->credentials.load(id);
@@ -418,20 +399,32 @@ void Link::loop() {
                                           id.hasSerialNumber() ? id.serialNumber : "?");
                         } else {
                             bool ok = requestClaim();
-                            Serial.println(ok ? "CLAIM_STARTED:OK"
-                                              : "CLAIM_STARTED:ERROR");
+                            Serial.println(ok ? "CLAIM_STARTED:OK" : "CLAIM_STARTED:ERROR");
                         }
                         Serial.flush();
                     }
-                    s_buf = "";
                 }
+            } else if (s_serial_len < sizeof(s_serial_buf) - 1) {
+                s_serial_buf[s_serial_len++] = c;
             } else {
-                s_buf += c;
-                if (s_buf.length() > 64) s_buf = "";
+                s_serial_len = 0;  // overflow — сброс
             }
         }
     }
 #endif
+
+    impl_->runtime.loop();
+    if (impl_->localStarted) impl_->local.loop();
+    impl_->intManager.loop();
+
+    // Lazy: mDNS/WS только после WiFi (lwIP requirement).
+    if (!impl_->localStarted && WiFi.status() == WL_CONNECTED) {
+        idryer::DeviceIdentity id;
+        impl_->credentials.load(id);
+        impl_->local.initMdns(id.serialNumber);
+        impl_->local.begin(id.serialNumber, id.token);
+        impl_->localStarted = true;
+    }
 
     // Auto-publish on Config-defined intervals. Period == 0 means disabled
     // (used by products that don't have telemetry or status — e.g. Storage Link
