@@ -207,6 +207,74 @@ s_device.setErrorCallback([](int code, const char* msg) {
 
 Можно и проще — периферия принимает `DevicePublisher*` через конструктор. Главное: связь явная.
 
+## Рецепт 7 — Внешняя интеграция → периферия
+
+**Цель**: целевая температура камеры от стороннего принтера (Klipper или Bambu) → импульс на нагреватель.
+
+В отличие от рецептов 1–3, входящий поток сюда приходит **не от backend через MQTT-команды**, а от чужой системы через её собственный протокол (Klipper WebSocket, Bambu MQTT). Менеджер интеграций (`LinkIntegrationsManager`) держит соединение, парсит сообщения и вызывает зарегистрированный колбэк.
+
+```
+Принтер → intManager.loop() → callback (продукт) → периферия
+```
+
+Реализация в продукте — модуль-«мост», знающий про конкретное железо:
+
+```cpp
+// heater/auto_heat.h
+namespace iheaterlink {
+    void wireAutoHeat(RmtOutputAdapter* output);
+    void onVirtualChamberUpdate(const idryer::cloud::VirtualChamberData& data);
+    void onBambuPrinterStatusUpdate(const idryer::cloud::BambuPrinterStatus& status);
+}
+```
+
+```cpp
+// heater/auto_heat.cpp
+namespace iheaterlink {
+namespace { RmtOutputAdapter* g_output = nullptr; }
+
+void wireAutoHeat(RmtOutputAdapter* output) { g_output = output; }
+
+void onVirtualChamberUpdate(const idryer::cloud::VirtualChamberData& data) {
+    if (!g_output) return;
+    ControllerOutputCommand cmd{};
+    if (data.available && data.target > 0.0f) {
+        cmd.mode = ControllerOutputMode::TargetTemperature;
+        cmd.targetTempC = data.target;
+    } else {
+        cmd.mode = ControllerOutputMode::Off;
+    }
+    g_output->apply(cmd);
+}
+} // namespace iheaterlink
+```
+
+Composition root связывает три участника одной строкой:
+
+```cpp
+static iheaterlink::RmtOutputAdapter s_output{...};
+
+void setup() {
+    intManager.begin();
+
+    iheaterlink::wireAutoHeat(&s_output);
+    intManager.setVirtualChamberCallback(iheaterlink::onVirtualChamberUpdate);
+    intManager.setBambuPrinterStatusCallback(iheaterlink::onBambuPrinterStatusUpdate);
+}
+
+void loop() {
+    intManager.loop();   // здесь произойдёт парсинг и вызов колбэков
+}
+```
+
+Жизненный цикл колбэков (когда они вызываются, что произойдёт если не подписать) — см. [07-advanced/03-integrations.md](../07-advanced/03-integrations.md#жизненный-цикл-колбэков).
+
+Почему `auto_heat` живёт в продукте, а не в `idryer-core`:
+
+- `RmtOutputAdapter` — продуктовое железо. У других устройств (iDryer Dryer, Storage Link) его нет.
+- Политика «target>0 → греть» тоже продуктовая. У iHeater Link она такая, у другого устройства может быть гистерезис, ограничения, блокировки по другим датчикам.
+- SDK даёт «сырое» событие от принтера; решение, что с ним делать, остаётся продукту.
+
 ## Чего не делаем
 
 - Не вводим внутренний event bus. Это привело бы к скрытым связям и сложности отладки.

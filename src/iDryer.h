@@ -72,6 +72,7 @@
 // menu lookup, etc.). Real definition is in <integrations/common/link_integrations_manager.h>.
 namespace idryer { namespace cloud { class LinkIntegrationsManager; } }
 namespace idryer { class MqttClient; class IdryerRuntime; class DevicePublisher; }
+namespace idryer { namespace ha { class HaBuilder; } }
 
 namespace iDryer {
 
@@ -116,18 +117,51 @@ public:
                     const char* message,
                     uint8_t     unitId = 0xFF);
 
-    // ─── Incoming subscriptions ──────────────────────────────────────
-    using RequestCallback           = std::function<void(const Request&)>;
-    using ProfileCallback           = std::function<void(const ProfileSchedule&)>;
-    using IntegrationStatusCallback = std::function<void(const IntegrationStatus&)>;
-    using ClaimPinCallback          = std::function<void(const char* pin, uint32_t expiresInSeconds)>;
+    // ─── Incoming command subscriptions ──────────────────────────────
+    // Raw fnptr (не std::function) — Arduino-ESP heap фрагментируется на
+    // нескольких десятках std::function, что валит WiFi init. Только stateless
+    // лямбды (без capture). Если нужно состояние — используйте глобал/синглтон.
+    using CommandCallback           = void (*)(JsonObjectConst data);
+    using IntegrationStatusCallback = void (*)(const IntegrationStatus&);
+    using ClaimPinCallback          = void (*)(const char* pin, uint32_t expiresInSeconds);
+    using PublishHookCallback       = void (*)(JsonObject root);
 
-    /// Called for simple business commands (Start/Stop/Storage/Find/ClearErrors)
-    /// from MQTT or local-WS. Source is transparent.
-    void onRequest(RequestCallback cb);
+    /// Called right before telemetry is sent. Library has already filled
+    /// the standard `units[]` array (capabilities-driven), `rssi`, `uptime`.
+    /// Product can add product-specific top-level fields (e.g. iHeater Link
+    /// adds `outputMode`/`targetTempC`/`active` for the portal). Returns
+    /// JsonObject root — modify in place. Optional.
+    void onTelemetryPublish(PublishHookCallback cb);
 
-    /// Called for `commands/profile` — multi-stage drying schedule.
-    void onProfile(ProfileCallback cb);
+    /// Same as @ref onTelemetryPublish but for the `status` payload.
+    void onStatusPublish(PublishHookCallback cb);
+
+    // ─── Periodic tasks ──────────────────────────────────────────────
+    using TaskCallback = void (*)();
+    using TaskHandle   = uint8_t;  ///< 0xFF = invalid
+
+    /// Schedule @p cb to run every @p periodMs from `loop()`. Cooperative
+    /// scheduler — callback runs in the same context as `loop()`, must
+    /// not block. Returns handle for `cancel()`, or 0xFF if MAX_TASKS (8)
+    /// is full. First call fires after the first period elapses, not
+    /// immediately on registration.
+    TaskHandle every(uint32_t periodMs, TaskCallback cb);
+
+    /// Cancel a task previously scheduled with `every()`. Idempotent.
+    void cancel(TaskHandle handle);
+
+    /// Register a callback for a command name. The callback fires when MQTT
+    /// or Local-WS receives `commands/{name}` with arbitrary JSON payload.
+    ///
+    /// Built-in commands (`link_integration`, `bambu_apply`, `ping`) are always
+    /// handled by the library — these cannot be intercepted. But a product can
+    /// still register a callback under the same name to run as a post-hook
+    /// (e.g. iHeater Link's menu-toggle sync after `link_integration`).
+    ///
+    /// Common product names: `drying`, `stop`, `storage`, `get_config`, `set`,
+    /// `profile`, `led.pulse` — anything is allowed. Returns false on overflow
+    /// (max 12 commands) or invalid arguments.
+    bool onCommand(const char* name, CommandCallback cb);
 
     /// Called when an integration changes connectivity state. Optional.
     void onIntegrationStatus(IntegrationStatusCallback cb);
@@ -156,6 +190,14 @@ public:
     /// Use this instead of duplicating mapping logic in the SDK; the SDK
     /// doesn't know product specifics like filament-type → temperature lookup.
     idryer::cloud::LinkIntegrationsManager* integrationsManager();
+
+    /// Generic HA Discovery builder. Register your buttons / numbers / selects
+    /// in `setup()`; the library publishes them on HA-connect and routes
+    /// incoming commands to your callbacks.
+    ///   link.ha().button("heat_50", "Heat 50", []{ startHeating(50); });
+    ///   link.ha().select("anim", "Animation", opts, 4, [](const char* v) { ... });
+    /// No-op when @c Config.allowHa is false.
+    idryer::ha::HaBuilder& ha();
 
     /// Outlet to the SDK MQTT client — for product-side components that
     /// publish their own topics or hook into command routing (MenuBridge etc).
@@ -186,5 +228,8 @@ private:
 
     void dispatchCommand(const char* command, JsonObjectConst data);
 };
+
+/// Returns the wire-format string for a DeviceType (e.g. "iheater_link").
+const char* deviceTypeToString(DeviceType t);
 
 } // namespace iDryer

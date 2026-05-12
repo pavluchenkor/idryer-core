@@ -5,16 +5,13 @@
 namespace idryer {
 
 /**
- * @brief Routes @c commands/invoke and @c commands/set MQTT messages to product handlers.
+ * Calls your functions when "invoke" or "set" MQTT commands arrive.
  *
- * Register one @c InvokeHandler and one @c SetCallback in your product assembly.
- * @c IdryerRuntime calls @c handleInvoke() / @c handleSet() automatically when
- * the corresponding MQTT messages arrive.
+ * In setup(): store your functions with setInvokeHandler() / setSetCallback().
+ * IdryerRuntime then calls handleInvoke() / handleSet() automatically on each command.
+ * Uses plain function pointers — no heap allocation.
  *
- * Uses plain function pointers (not @c std::function) to stay lightweight and
- * avoid heap allocation.
- *
- * Example — wiring in @c setup():
+ * Example:
  * @code
  * dispatcher.setInvokeHandler(
  *     [](const char* action, JsonObjectConst args, void* ctx) -> bool {
@@ -32,31 +29,31 @@ namespace idryer {
 class ActionDispatcher {
 public:
     /**
-     * @brief Handler for @c commands/invoke.
-     * @param action The action name from the @c "action" field (e.g. @c "led.pulse").
-     * @param args   The @c "args" object from the payload.
-     * @param ctx    Context pointer passed to @c setInvokeHandler().
-     * @return @c true if the action was handled, @c false if unrecognized.
+     * Function pointer type for "invoke" commands.
+     * @param action  Action name from the payload, e.g. "led.pulse".
+     * @param args    The "args" object from the payload.
+     * @param ctx     Your context pointer (passed to setInvokeHandler).
+     * @return true if the action was handled, false if unknown.
      */
     using InvokeHandler = bool (*)(const char* action, JsonObjectConst args, void* ctx);
 
     /**
-     * @brief Callback for @c commands/set.
-     * @param data The full JSON payload (contains @c "id" and @c "val").
-     * @param ctx  Context pointer passed to @c setSetCallback().
+     * Function pointer type for "set" commands.
+     * @param data  Full JSON payload — contains "id" and "val".
+     * @param ctx   Your context pointer (passed to setSetCallback).
      */
     using SetCallback = void (*)(JsonObjectConst data, void* ctx);
 
-    /// @brief Registers the invoke handler. Pass @c nullptr as @p ctx if not needed.
+    /// Stores fn as the function to call on "invoke" commands. Pass nullptr for ctx if not needed.
     void setInvokeHandler(InvokeHandler fn, void* ctx) { invokeHandler_ = fn; invokeHandlerCtx_ = ctx; }
 
-    /// @brief Registers the set callback. Pass @c nullptr as @p ctx if not needed.
+    /// Stores fn as the function to call on "set" commands. Pass nullptr for ctx if not needed.
     void setSetCallback(SetCallback fn, void* ctx)     { setCallback_ = fn; setCallbackCtx_ = ctx; }
 
-    /// @brief Called by @c IdryerRuntime when a @c commands/invoke message arrives.
+    /// Reads action and args from data, then calls the stored invoke handler.
     void handleInvoke(JsonObjectConst data);
 
-    /// @brief Called by @c IdryerRuntime when a @c commands/set message arrives.
+    /// Passes data to the stored set callback.
     void handleSet(JsonObjectConst data);
 
 private:

@@ -9,6 +9,7 @@
 
 #include "iDryer.h"
 
+#include "mqtt/mqtt_client.h"   // MQTT_CONFIG_CHUNK_SIZE
 #include <Arduino.h>
 #include <WiFi.h>
 #include <ArduinoJson.h>
@@ -27,6 +28,10 @@
 namespace iDryer {
 
 namespace {
+
+// Forward — определение ниже в этом же anonymous namespace (строка ~449).
+// Нужно вверху чтобы Link::loop() мог его вызвать.
+const char* unitModeString(UnitMode m);
 
 // ──────────────────────────────────────────────────────────────────────
 //  Internal Profile — generates info JSON from Config.
@@ -115,6 +120,17 @@ private:
 
 } // anonymous namespace
 
+const char* deviceTypeToString(DeviceType t) {
+    switch (t) {
+        case DeviceType::Dryer:       return "dryer";
+        case DeviceType::Heater:      return "heater";
+        case DeviceType::StorageLink: return "storage_link";
+        case DeviceType::IHeaterLink: return "iheater_link";
+        case DeviceType::Unknown:     break;
+    }
+    return "unknown";
+}
+
 // ──────────────────────────────────────────────────────────────────────
 //  Link::Impl — full SDK stack on stack (no heap).
 // ──────────────────────────────────────────────────────────────────────
@@ -162,11 +178,30 @@ struct Link::Impl {
     // Runtime — must be last; depends on cloud/dispatcher/profile/mqtt.
     idryer::IdryerRuntime runtime;
 
+    // Command registry (для onCommand). Stack-array без heap.
+    struct CommandEntry {
+        char name[28];
+        Link::CommandCallback cb;
+    };
+    static constexpr uint8_t MAX_CMDS = 12;
+    CommandEntry commands[MAX_CMDS];
+    uint8_t      commandsCount = 0;
+
+    // Periodic task scheduler (для every/cancel). Stack-array.
+    struct Task {
+        uint32_t periodMs;
+        uint32_t lastRunMs;
+        Link::TaskCallback cb;
+        bool active;
+    };
+    static constexpr uint8_t MAX_TASKS = 8;
+    Task tasks[MAX_TASKS]{};
+
     // User callbacks.
-    Link::RequestCallback           onRequest;
-    Link::ProfileCallback           onProfile;
     Link::IntegrationStatusCallback onIntegrationStatus;
     Link::ClaimPinCallback          onClaimPin;
+    Link::PublishHookCallback       onTelemetryPublish;
+    Link::PublishHookCallback       onStatusPublish;
 
     // Boot state.
     bool logsEnabled = false;
@@ -175,6 +210,8 @@ struct Link::Impl {
     // Auto-publish throttling (millis).
     uint32_t lastTelemetryMs = 0;
     uint32_t lastStatusMs    = 0;
+    uint32_t lastHaStateMs   = 0;
+    static constexpr uint32_t kHaStatePeriodMs = 5000;
 
     // sessionNum tracker: backend status.handler.ts requires sessionNum > 0
     // for active modes (DRYING/STORAGE/PROFILE). Increment on transition
@@ -188,8 +225,12 @@ struct Link::Impl {
 //  Link — facade methods.
 // ──────────────────────────────────────────────────────────────────────
 
-Link::Link(const Config& cfg) : impl_(new Impl(cfg)) {
-    // Zero out the outgoing data structs.
+Link::Link(const Config& cfg) {
+    // Static local — живёт в .bss, нет heap allocation.
+    // Конструктор приватного Impl доступен здесь т.к. мы внутри Link.
+    static Impl s_impl(cfg);
+    impl_ = &s_impl;
+
     for (uint8_t i = 0; i < MAX_UNITS; ++i) {
         telemetry.airTempC[i]       = 0.0f;
         telemetry.airHumidityPct[i] = 0.0f;
@@ -205,7 +246,7 @@ Link::Link(const Config& cfg) : impl_(new Impl(cfg)) {
     }
 }
 
-Link::~Link() { delete impl_; }
+Link::~Link() { impl_ = nullptr; }
 
 bool Link::begin() {
     Serial.begin(115200);
@@ -234,9 +275,12 @@ bool Link::begin() {
 #endif
 
     // Restore saved WiFi credentials if any.
+    // WiFi.begin() called directly so the non-DEV_REPL loop (which returns early
+    // before runtime.loop()) can observe WL_CONNECTED without cloud state machine.
     char ssid[64], pass[64];
     if (impl_->wifiStore.load(ssid, sizeof(ssid), pass, sizeof(pass))) {
         impl_->wifi.begin(ssid, pass);
+        WiFi.begin(ssid, pass);
     }
 
     // Serial number from MAC: `DEVICE_<12HEX_UPPERCASE>` (see %02X in
@@ -266,6 +310,14 @@ bool Link::begin() {
                                         impl_->cfg.unitsCount,
                                         impl_->cfg.hardwareVersion,
                                         impl_->cfg.firmwareVersion);
+        // Capabilities → HA Discovery публикует только реальные sensor entity.
+        idryer::ha::HaCapabilities caps;
+        caps.airTemp     = impl_->cfg.hasAirTemp;
+        caps.airHumidity = impl_->cfg.hasAirHumidity;
+        caps.heaterPower = impl_->cfg.hasHeaterPower;
+        caps.fan         = impl_->cfg.hasFanStatus;
+        caps.weight      = impl_->cfg.hasScales;
+        impl_->intManager.setHaCapabilities(caps);
     }
     // Map facade DeviceType → SDK UartDeviceType.
     switch (impl_->cfg.deviceType) {
@@ -314,41 +366,32 @@ bool Link::begin() {
 }
 
 void Link::loop() {
-    impl_->runtime.loop();
-    if (impl_->localStarted) impl_->local.loop();
-    impl_->intManager.loop();
-
-    // Lazy: mDNS/WS only after WiFi has IP (lwIP requirement).
-    if (!impl_->localStarted && WiFi.status() == WL_CONNECTED) {
-        idryer::DeviceIdentity id;
-        impl_->credentials.load(id);
-        impl_->local.initMdns(id.serialNumber);
-        impl_->local.begin(id.serialNumber, id.token);
-        impl_->localStarted = true;
-    }
-
 #ifndef IDRYER_DEV_REPL
-    // Production: Improv handshake until WiFi connects, then enable HAL logs.
+    // До WiFi: только Improv. runtime.loop() → cloud.loop() →
+    // WiFi.scanNetworks (~5с) переполняет USB CDC FIFO и ломает Improv-RPC.
     if (!impl_->logsEnabled) {
         impl_->improv.handleSerial();
         if (WiFi.status() == WL_CONNECTED) {
             impl_->logsEnabled = true;
             idryer::hal::initArduinoHal(&Serial);
-            // flasher-portal trigger: signals web-side to send START_CLAIM.
-            Serial.println();
-            Serial.println("[BOOT] Logs enabled after WiFi config");
+            Serial.println("[BOOT] WiFi ok, logs enabled");
             Serial.flush();
         }
-    } else {
-        // Listen for flasher-portal commands on Serial.
-        static String s_buf;
+        return;
+    }
+
+    // После WiFi: слушаем flasher-portal команды по Serial.
+    {
+        static char   s_serial_buf[64];
+        static uint8_t s_serial_len = 0;
         while (Serial.available() > 0) {
             char c = (char)Serial.read();
             if (c == '\r' || c == '\n') {
-                if (s_buf.length() > 0) {
-                    String cmd = s_buf; cmd.trim();
-                    if (cmd.equalsIgnoreCase("START_CLAIM") ||
-                        cmd.equalsIgnoreCase("claim")) {
+                if (s_serial_len > 0) {
+                    s_serial_buf[s_serial_len] = '\0';
+                    s_serial_len = 0;
+                    const char* cmd = s_serial_buf;
+                    if (strcmp(cmd, "START_CLAIM") == 0 || strcmp(cmd, "claim") == 0) {
                         if (isOnline()) {
                             idryer::DeviceIdentity id;
                             impl_->credentials.load(id);
@@ -356,20 +399,32 @@ void Link::loop() {
                                           id.hasSerialNumber() ? id.serialNumber : "?");
                         } else {
                             bool ok = requestClaim();
-                            Serial.println(ok ? "CLAIM_STARTED:OK"
-                                              : "CLAIM_STARTED:ERROR");
+                            Serial.println(ok ? "CLAIM_STARTED:OK" : "CLAIM_STARTED:ERROR");
                         }
                         Serial.flush();
                     }
-                    s_buf = "";
                 }
+            } else if (s_serial_len < sizeof(s_serial_buf) - 1) {
+                s_serial_buf[s_serial_len++] = c;
             } else {
-                s_buf += c;
-                if (s_buf.length() > 64) s_buf = "";
+                s_serial_len = 0;  // overflow — сброс
             }
         }
     }
 #endif
+
+    impl_->runtime.loop();
+    if (impl_->localStarted) impl_->local.loop();
+    impl_->intManager.loop();
+
+    // Lazy: mDNS/WS только после WiFi (lwIP requirement).
+    if (!impl_->localStarted && WiFi.status() == WL_CONNECTED) {
+        idryer::DeviceIdentity id;
+        impl_->credentials.load(id);
+        impl_->local.initMdns(id.serialNumber);
+        impl_->local.begin(id.serialNumber, id.token);
+        impl_->localStarted = true;
+    }
 
     // Auto-publish on Config-defined intervals. Period == 0 means disabled
     // (used by products that don't have telemetry or status — e.g. Storage Link
@@ -386,6 +441,32 @@ void Link::loop() {
             now - impl_->lastStatusMs >= impl_->cfg.statusPeriodMs) {
             impl_->lastStatusMs = now;
             publishStatusNow();
+        }
+    }
+
+    // Авто-публикация sensor state в HA. Шлёт ровно поля из HaCapabilities.
+    // Безопасно вызывать всегда — внутри проверка connected/discovery published.
+    // Управляющие entities (controls) — продукт публикует сам.
+    if (now - impl_->lastHaStateMs >= Impl::kHaStatePeriodMs) {
+        impl_->lastHaStateMs = now;
+        const auto& cfg = impl_->cfg;
+        for (uint8_t i = 0; i < cfg.unitsCount && i < MAX_UNITS; ++i) {
+            const float temp     = telemetry.airTempC[i];
+            const float hum      = telemetry.airHumidityPct[i];
+            const int   powerPct = (int)(telemetry.heaterPower01[i] * 100.0f);
+            const bool  fan      = telemetry.fanOn[i];
+            impl_->intManager.publishHaUnitState(i, temp, hum, powerPct, fan);
+        }
+    }
+
+    // Cooperative scheduler — продуктовые задачи зарегистрированные через every().
+    // Защита от wrap millis() через signed-сравнение.
+    for (uint8_t i = 0; i < Impl::MAX_TASKS; ++i) {
+        auto& t = impl_->tasks[i];
+        if (!t.active) continue;
+        if ((int32_t)(now - t.lastRunMs) >= (int32_t)t.periodMs) {
+            t.lastRunMs = now;
+            t.cb();
         }
     }
 }
@@ -406,21 +487,6 @@ uint8_t parseUnitId(const char* s) {
         return static_cast<uint8_t>(s[1] - '1');
     }
     return 0xFF;
-}
-
-// Map MQTT command suffix → facade RequestKind. Returns false for commands
-// the facade doesn't expose:
-//   SDK-internal: get_config, set, invoke, ping, link_integration, bambu_apply
-//   Not yet supported: profile (needs array payload), read_rfid/write_rfid (RPC)
-//   Legacy: pause, resume, update_preset (portal no longer sends these)
-bool mapCommand(const char* command, RequestKind& outKind) {
-    if (!command) return false;
-    if (strcmp(command, "drying")       == 0) { outKind = RequestKind::Start;       return true; }
-    if (strcmp(command, "stop")         == 0) { outKind = RequestKind::Stop;        return true; }
-    if (strcmp(command, "storage")      == 0) { outKind = RequestKind::Storage;     return true; }
-    if (strcmp(command, "find")         == 0) { outKind = RequestKind::Find;        return true; }
-    if (strcmp(command, "clear_errors") == 0) { outKind = RequestKind::ClearErrors; return true; }
-    return false;
 }
 
 // UnitMode → contract string. Mirrors yaml.enums.UartDryerMode + PortalUnitStatus.UNKNOWN.
@@ -470,6 +536,10 @@ void Link::publishTelemetryNow() {
     doc["rssi"]   = WiFi.RSSI();
     doc["uptime"] = millis() / 1000u;
 
+    if (impl_->onTelemetryPublish) {
+        impl_->onTelemetryPublish(doc.as<JsonObject>());
+    }
+
     impl_->pub.publishTelemetry(doc);   // → MQTT + Local WS (timestamp added by SDK)
 }
 
@@ -512,6 +582,10 @@ void Link::publishStatusNow() {
     doc["uptime"] = millis() / 1000u;
     doc["rssi"]   = WiFi.RSSI();   // bonus: free signal info on every status
 
+    if (impl_->onStatusPublish) {
+        impl_->onStatusPublish(doc.as<JsonObject>());
+    }
+
     impl_->pub.publishStatus(doc);
 }
 
@@ -538,80 +612,85 @@ void Link::raiseEvent(EventKind   severity,
     impl_->pub.publishEvent(doc);
 }
 
-void Link::onRequest(RequestCallback cb) {
-    impl_->onRequest = std::move(cb);
-}
-
-void Link::onProfile(ProfileCallback cb) {
-    impl_->onProfile = std::move(cb);
+bool Link::onCommand(const char* name, CommandCallback cb) {
+    if (!name || !name[0] || !cb) return false;
+    // Replace if name already registered.
+    for (uint8_t i = 0; i < impl_->commandsCount; ++i) {
+        if (strcmp(impl_->commands[i].name, name) == 0) {
+            impl_->commands[i].cb = std::move(cb);
+            return true;
+        }
+    }
+    if (impl_->commandsCount >= Impl::MAX_CMDS) return false;
+    auto& slot = impl_->commands[impl_->commandsCount++];
+    strncpy(slot.name, name, sizeof(slot.name) - 1);
+    slot.name[sizeof(slot.name) - 1] = '\0';
+    slot.cb = std::move(cb);
+    return true;
 }
 
 void Link::dispatchCommand(const char* command, JsonObjectConst data) {
-    // commands/profile — separate callback (array payload up to 10 stages).
-    if (command && strcmp(command, "profile") == 0) {
-        if (!impl_->onProfile) return;
+    if (!command || !command[0]) return;
 
-        ProfileSchedule sched{};
-        sched.unitId     = parseUnitId(data["unitId"].as<const char*>());
-        sched.startStage = data["startStage"].as<uint8_t>();   // 0 if absent
-
-        JsonArrayConst arr = data["stages"];
-        uint8_t n = 0;
-        if (arr) {
-            for (JsonVariantConst v : arr) {
-                if (n >= ProfileSchedule::MAX_STAGES) break;
-                sched.stages[n].tempC = v["temp"].as<float>();
-                sched.stages[n].rampS = v["ramp"].as<uint32_t>();
-                sched.stages[n].holdS = v["hold"].as<uint32_t>();
-                ++n;
-            }
-        }
-        sched.stageCount = n;
-        impl_->onProfile(sched);
-        return;
+    // ─── Built-in side-effects (always run) ──────────────────────────────
+    // Эти команды обрабатывает либа сама. Продукт может ДОПОЛНИТЕЛЬНО
+    // подписаться через onCommand(name, ...) — будет вызван post-hook'ом,
+    // например для menu-toggle sync после link_integration.
+    bool builtinHandled = false;
+    if (strcmp(command, "link_integration") == 0) {
+        impl_->intManager.handleLinkIntegrationCommand(data);
+        builtinHandled = true;
+    } else if (strcmp(command, "bambu_apply") == 0) {
+        impl_->intManager.handleBambuApplyCommand(data);
+        builtinHandled = true;
+    } else if (strcmp(command, "ping") == 0) {
+        // Time-sync делает runtime через `timestamp` в payload — здесь no-op.
+        builtinHandled = true;
     }
 
-    // Commands not exposed by the facade (set/get_config/invoke/ping/...) are
-    // handled internally by the runtime/MenuBridge — silently ignored here.
-    RequestKind kind;
-    if (!mapCommand(command, kind)) return;
-
-    if (!impl_->onRequest) return;
-
-    Request req{};
-    req.kind   = kind;
-    req.unitId = parseUnitId(data["unitId"].as<const char*>());
-
-    // Parse optional payload params for kinds that carry them.
-    // Two payload variants in the wild (per yaml):
-    //   new:    { params: { temperature, duration } }
-    //   legacy: { targetTemperature, durationMinutes }
-    // Both supported, new takes precedence.
-    if (kind == RequestKind::Start || kind == RequestKind::Storage) {
-        JsonObjectConst params = data["params"];
-        if (params && params["temperature"].is<float>()) {
-            req.targetTempC = params["temperature"].as<float>();
-        } else if (data["targetTemperature"].is<float>()) {
-            req.targetTempC = data["targetTemperature"].as<float>();
-        }
-
-        if (kind == RequestKind::Start) {
-            // Portal sends `duration` in MINUTES. Convert to seconds for API.
-            uint32_t durMin = 0;
-            if (params && params["duration"].is<uint32_t>()) {
-                durMin = params["duration"].as<uint32_t>();
-            } else if (data["durationMinutes"].is<uint32_t>()) {
-                durMin = data["durationMinutes"].as<uint32_t>();
-            }
-            req.durationS = durMin * 60u;
+    // ─── Registry — продуктовые имена через onCommand(name, cb) ───────────
+    for (uint8_t i = 0; i < impl_->commandsCount; ++i) {
+        if (strcmp(impl_->commands[i].name, command) == 0) {
+            impl_->commands[i].cb(data);
+            return;
         }
     }
 
-    impl_->onRequest(req);
+    if (!builtinHandled) {
+        HAL_LOG_WARN("LINK", "unhandled command: %s", command);
+    }
 }
 
 void Link::onClaimPin(ClaimPinCallback cb) {
     impl_->onClaimPin = std::move(cb);
+}
+
+void Link::onTelemetryPublish(PublishHookCallback cb) {
+    impl_->onTelemetryPublish = std::move(cb);
+}
+
+void Link::onStatusPublish(PublishHookCallback cb) {
+    impl_->onStatusPublish = std::move(cb);
+}
+
+Link::TaskHandle Link::every(uint32_t periodMs, TaskCallback cb) {
+    if (!cb || periodMs == 0) return 0xFF;
+    for (uint8_t i = 0; i < Impl::MAX_TASKS; ++i) {
+        if (!impl_->tasks[i].active) {
+            impl_->tasks[i].periodMs  = periodMs;
+            impl_->tasks[i].lastRunMs = millis();
+            impl_->tasks[i].cb        = std::move(cb);
+            impl_->tasks[i].active    = true;
+            return i;
+        }
+    }
+    return 0xFF;  // overflow
+}
+
+void Link::cancel(TaskHandle handle) {
+    if (handle >= Impl::MAX_TASKS) return;
+    impl_->tasks[handle].active = false;
+    impl_->tasks[handle].cb     = nullptr;
 }
 
 void Link::onIntegrationStatus(IntegrationStatusCallback cb) {
@@ -647,6 +726,10 @@ bool Link::requestClaim() {
 
 idryer::cloud::LinkIntegrationsManager* Link::integrationsManager() {
     return &impl_->intManager;
+}
+
+idryer::ha::HaBuilder& Link::ha() {
+    return impl_->intManager.haBuilder();
 }
 
 idryer::MqttClient* Link::mqttClient() {

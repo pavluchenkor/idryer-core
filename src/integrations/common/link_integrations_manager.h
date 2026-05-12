@@ -41,6 +41,7 @@
 #include "../moonraker/moonraker_client.h"
 #include "../home_assistant/ha_integration_adapter.h"
 #include "../home_assistant/ha_publisher.h"
+#include "../home_assistant/ha_builder.h"
 #include "../../uart/uart_protocol.h"
 
 #if defined(ESP32) || defined(ESP_PLATFORM)
@@ -103,6 +104,25 @@ public:
     /// @brief Returns the currently active integration.
     ActiveIntegration getActive() const { return selection_.active; }
 
+    /**
+     * @brief Публикует sensor-state одного юнита в HA-топики.
+     *
+     * Тонкая обёртка над HaPublisher::publishUnitState. Шлёт ровно те
+     * sensor-поля, что объявлены через HaCapabilities. Управляющие entities
+     * (mode_control / set_temp / ...) — продукт публикует сам.
+     */
+    bool publishHaUnitState(uint8_t unitId,
+                             float temperatureC, float humidityPct,
+                             int heaterPowerPct, bool fanOn) {
+        return haPublisher_.publishUnitState(unitId, temperatureC, humidityPct,
+                                              heaterPowerPct, fanOn);
+    }
+
+    /// Generic HA Discovery builder — продукт регистрирует свои controls
+    /// (button/number/select) через возвращаемый объект. Публикуется при
+    /// HA-коннекте, сообщения роутятся в зарегистрированные колбэки.
+    ha::HaBuilder& haBuilder() { return haBuilder_; }
+
     /// @brief Must be called every iteration of the main loop.
     void loop();
 
@@ -135,6 +155,12 @@ public:
     const char*               bambuLastError()     const { return bambuClient_.lastError(); }
     const BambuConfig&        bambuConfig()        const { return bambu_; }
 
+    /// Включает/выключает логирование сырых payload'ов на обоих клиентах.
+    void setLogPayloads(bool enabled) {
+        bambuClient_.setLogPayloads(enabled);
+        moonrakerClient_.setLogPayloads(enabled);
+    }
+
     // ── Home Assistant ────────────────────────────────────────────────────────
 
     /// @brief Sets the MQTT client ID used for the HA MQTT connection.
@@ -149,6 +175,10 @@ public:
     void setDeviceInfo(const char* deviceId, uint8_t unitsCount,
                        const char* hwVersion = "unknown",
                        const char* fwVersion = "unknown");
+
+    /// @brief Какие sensor entity публиковать в HA Discovery.
+    /// Если не задано — все true (legacy-совместимость).
+    void setHaCapabilities(const ha::HaCapabilities& caps) { haCapabilities_ = caps; }
 
     ha::HaMqttClient* haMqttClient() { return haClient_.mqttClient(); }
 
@@ -197,6 +227,7 @@ private:
     MoonrakerClient         moonrakerClient_;
     HaIntegrationAdapter    haClient_;
     ha::HaPublisher         haPublisher_;
+    ha::HaBuilder           haBuilder_;
 
     UartDeviceType          deviceType_ = UartDeviceType::Dryer;
 
@@ -204,6 +235,7 @@ private:
     uint8_t haUnitsCount_    = 1;
     char    haHwVersion_[16] = {0};
     char    haFwVersion_[16] = {0};
+    ha::HaCapabilities haCapabilities_{};
 
     HaConfig         ha_;
     BambuConfig      bambu_;

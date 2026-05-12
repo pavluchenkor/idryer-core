@@ -17,6 +17,7 @@ GENERATORS=(
     gen_mqtt_topics_h.py
     gen_ts_types.py
     gen_idryer_api_h.py
+    gen_scaffold.py
 )
 
 for gen in "${GENERATORS[@]}"; do
@@ -24,5 +25,24 @@ for gen in "${GENERATORS[@]}"; do
     python3 "$gen"
     echo
 done
+
+PORTAL_CONTRACTS="$(dirname "$0")/../../../../iDryerPortal/frontend-v2/src/contracts"
+if [ -d "$PORTAL_CONTRACTS" ]; then
+    cp _generated/mqtt-api.types.ts "$PORTAL_CONTRACTS/mqtt-api.types.ts"
+    echo "→ Copied mqtt-api.types.ts → frontend-v2/src/contracts/"
+else
+    echo "⚠  Portal not found at expected path — skipping frontend copy"
+fi
+
+PORTAL_I18N="$(dirname "$0")/../../../../iDryerPortal/frontend-v2/src/i18n"
+if [ -d "$PORTAL_I18N" ]; then
+    for f in _generated/roles.*.json; do
+        [ -f "$f" ] || continue
+        cp "$f" "$PORTAL_I18N/$(basename "$f")"
+        echo "→ Copied $(basename "$f") → frontend-v2/src/i18n/"
+    done
+else
+    echo "⚠  Portal i18n not found — skipping roles JSON copy"
+fi
 
 echo "✅ Contracts pipeline OK"

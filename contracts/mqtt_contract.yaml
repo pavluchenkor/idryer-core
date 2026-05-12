@@ -1,10 +1,90 @@
+# =============================================================================
+# ПОСЛЕ ИЗМЕНЕНИЙ В ЭТОМ ФАЙЛЕ — ЗАПУСТИТЬ:
+#
+#   cd contracts && bash regen.sh
+#
+# Что генерируется:
+#   uart_protocol.h          → lib/idryer-core/src/uart/
+#   mqtt_topics.h            → lib/idryer-core/src/mqtt/
+#   iDryer_api.h             → lib/idryer-core/src/_generated/
+#   mqtt-api.types.ts        → iDryerPortal/frontend-v2/src/contracts/
+#   roles.ru.json            → iDryerPortal/frontend-v2/src/i18n/
+#   roles.en.json            → iDryerPortal/frontend-v2/src/i18n/
+#
+# Добавить новый язык (например zh):
+#   1. Добавить zh: "..." к каждой роли в секции canonical_roles → labels
+#   2. bash regen.sh  — появится roles.zh.json рядом с порталом
+# =============================================================================
+
 version: 3
-updated: "2026-04-30"
+updated: "2026-05-08"
 owner: "idryer-core"
 scope: |
   Полный протокол iDryer: MQTT (устройство ↔ облако) + UART (RP2040 ↔ ESP32 bridge).
   Один источник правды для обеих сторон. Каждое сообщение, у которого есть и MQTT-,
   и UART-форма, описано через bindings; чисто-MQTT и чисто-UART — отдельными секциями.
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Словарь capabilities и профили устройств
+# ─────────────────────────────────────────────────────────────────────────────
+#
+# capability_vocabulary — единственный источник правды для:
+#   • iDryer::Config  (has* флаги)          ← gen_idryer_api_h.py
+#   • units[].capabilities в /info (JSON)   ← iDryer.cpp (publishInfo)
+#   • HardwareUnitConfigCapabilities (TS)   ← gen_ts_types.py
+#   • DynamicCard (Portal frontend)         ← читает capabilities, рендерит кирпичики
+#
+# Правило добавления новой периферии:
+#   1. Добавить запись в capability_vocabulary
+#   2. Добавить устройство в device_profiles (если нужно)
+#   3. Запустить regen.sh — Config и TS-типы обновятся автоматически
+#   4. В main.cpp устройства установить новый has* флаг в Config
+#   5. Прошить устройство — портал подхватит capability из /info
+#
+capability_vocabulary:
+  heater:
+    json_key: "heater"
+    config_flag: "hasHeaterPower"
+    telemetry_field: "heaterPower01"
+    telemetry_type: "float"
+    description: "Управляемый нагреватель (targetTempC, durationS)"
+    invoke_actions: ["heat.start", "heat.stop"]
+
+  fan:
+    json_key: "fan"
+    config_flag: "hasFanStatus"
+    telemetry_field: "fanOn"
+    telemetry_type: "bool"
+    description: "Вентилятор (on/off)"
+
+  led:
+    json_key: "led"
+    config_flag: "hasLed"
+    description: "Адресная LED-лента"
+    invoke_actions: ["led.pulse"]
+
+  weight:
+    json_key: "weight"
+    config_flag: "hasScales"
+    telemetry_field: "weightG"
+    telemetry_type: "uint16_t"
+    description: "Весовой датчик (граммы филамента)"
+
+  rfid:
+    json_key: "rfid"
+    config_flag: "hasRfid"
+    description: "RFID-ридер метки катушки"
+
+device_profiles:
+  iheater_link:
+    device_type: "iheater_link"
+    capabilities: ["heater", "fan"]
+  storage_link:
+    device_type: "storage_link"
+    capabilities: ["led", "weight", "rfid"]
+  dryer_v3:
+    device_type: "dryer"
+    capabilities: ["heater", "fan", "weight", "rfid"]
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Источники правды
@@ -134,6 +214,210 @@ rules:
       legacy_behavior: |
         В legacy idryer-protocol парсинг был в CommandHandler::handleMqttCommand (command_handler.cpp:39-40
         → syncTimeIfPresent) — тот же контракт. В iHeater-link/idryer-core поведение восстановлено.
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Статус миграции продуктов на menu_protocol_v1
+# Согласно ___capabilities_and_menu_as_protocol.md §10.6
+# ─────────────────────────────────────────────────────────────────────────────
+migration_status:
+  iheater_link:
+    target:  menu_protocol_v1
+    status:  in_progress
+    actions:
+      - "Добавить r: в menu.yaml для mat_petg/mat_pla/mat_pacf, *_en"
+      - "Удалить ручные обработки link_integration / bambu_apply из main.cpp"
+      - "Команды переезжают в commands/set + commands/invoke"
+
+  storage_link:
+    target:  menu_protocol_v1
+    status:  in_progress
+    actions:
+      - "Добавить r: в menu.yaml для led_count, brightness, animation"
+      - "Добавить пункт act с r: led.pulse, widget: LedPulse"
+      - "Backend mapDeviceType: добавить case 'storage_link'"
+
+  dryer:
+    target:  menu_protocol_v1
+    status:  deferred
+    note: |
+      Сушилка работает в проде. Миграция отдельной задачей после стабилизации
+      iHeater Link и Storage Link на новой модели. До этого момента сушилка
+      продолжает использовать legacy-формат (top-level топики команд:
+      commands/drying, commands/storage, commands/profile, commands/read_rfid,
+      commands/write_rfid и т.п.) и старые messages-секции этого файла.
+    legacy_format_kept:
+      - "commands/drying"
+      - "commands/storage"
+      - "commands/profile"
+      - "commands/stop"
+      - "commands/find"
+      - "commands/clear_errors"
+      - "commands/read_rfid"
+      - "commands/write_rfid"
+      - "weights"
+      - "rfid"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Канонические роли — закрытый словарь menu_protocol_v1
+# Подробности — ___capabilities_and_menu_as_protocol.md §8
+# ─────────────────────────────────────────────────────────────────────────────
+canonical_roles:
+  # Каждая роль описывает:
+  #   type        — тип данных (float/uint/bool/action)
+  #   unit        — единица измерения (опционально, для UI)
+  #   widget      — какой UI-компонент рисовать на портале
+  #                   стандартные: slider | number | toggle | select | button | hidden
+  #                   хардкод: ProfileEditor | RfidWriter | LedPulse | HeaterControl
+  #   labels      — переводы названия для портала (по коду языка ISO 639-1)
+  #                   портал показывает labels[currentLang], fallback → en
+  #                   если роль неизвестна — портал берёт n: от устройства
+  #   args_schema — для actions с runtime-параметрами (опционально)
+
+  # ── Сушилка (Dryer) — в статусе deferred ─────────────────────────────────
+  drying.target_temperature:
+    type: float
+    unit: "°C"
+    widget: slider
+    labels: { ru: "Температура сушки", en: "Drying temperature" }
+
+  drying.duration:
+    type: uint
+    unit: "min"
+    widget: slider
+    labels: { ru: "Длительность сушки", en: "Drying duration" }
+
+  drying.start:
+    type: action
+    widget: button
+    labels: { ru: "Начать сушку", en: "Start drying" }
+
+  drying.stop:
+    type: action
+    widget: button
+    labels: { ru: "Остановить сушку", en: "Stop drying" }
+
+  storage.target_temperature:
+    type: uint
+    unit: "°C"
+    widget: slider
+    labels: { ru: "Температура хранения", en: "Storage temperature" }
+
+  storage.target_humidity:
+    type: uint
+    unit: "%RH"
+    widget: slider
+    labels: { ru: "Влажность хранения", en: "Storage humidity" }
+
+  storage.start:
+    type: action
+    widget: button
+    labels: { ru: "Начать хранение", en: "Start storage" }
+
+  storage.stop:
+    type: action
+    widget: button
+    labels: { ru: "Остановить хранение", en: "Stop storage" }
+
+  profile.start:
+    type: action
+    widget: ProfileEditor
+    args_schema: { stages: array_of_stages }
+    labels: { ru: "Профиль сушки", en: "Drying profile" }
+
+  profile.stop:
+    type: action
+    widget: button
+    labels: { ru: "Остановить профиль", en: "Stop profile" }
+
+  rfid.read:
+    type: action
+    widget: button
+    args_schema: { readerId: int }
+    labels: { ru: "Считать метку", en: "Read tag" }
+
+  rfid.write:
+    type: action
+    widget: RfidWriter
+    args_schema: { tagData: base64_888B }
+    labels: { ru: "Записать метку", en: "Write tag" }
+
+  # ── iHeater Link — в статусе in_progress ─────────────────────────────────
+  # Integration toggles (interlock): только один из трёх активен.
+  # Эксклюзивность обеспечивает MenuBridge::applySetCommand.
+  iheater.bambu_enabled:
+    type: bool
+    widget: toggle
+    labels: { ru: "Bambu Lab", en: "Bambu Lab" }
+
+  iheater.moonraker_enabled:
+    type: bool
+    widget: toggle
+    labels: { ru: "Moonraker", en: "Moonraker" }
+
+  iheater.ha_enabled:
+    type: bool
+    widget: toggle
+    labels: { ru: "Home Assistant", en: "Home Assistant" }
+
+  iheater.heat_start:
+    type: action
+    widget: HeaterControl
+    args_schema: { tempC: float, durationMin: uint }
+    labels: { ru: "Нагрев", en: "Heating" }
+
+  iheater.heat_stop:
+    type: action
+    widget: button
+    labels: { ru: "Остановить нагрев", en: "Stop heating" }
+
+  # Note: 27 пунктов меню «температура материала» (mat_pla, mat_petg,
+  # mat_abs ... mat_psu) пока остаются приватными menu items без
+  # canonical role. Если понадобится UI на портале — отдельный widget
+  # типа MaterialsTable, а не 27 индивидуальных ролей.
+
+  # ── Storage Link — в статусе in_progress ─────────────────────────────────
+  storage.led_count:
+    type: uint
+    widget: number
+    labels: { ru: "Количество светодиодов", en: "LED count" }
+
+  storage.led_brightness:
+    type: uint
+    widget: slider
+    labels: { ru: "Яркость", en: "Brightness" }
+
+  led.pulse:
+    type: action
+    widget: LedPulse
+    args_schema: { ledIndex: int, color: rgb, durationMs: uint }
+    labels: { ru: "Подсветка", en: "LED pulse" }
+
+  # ── Общие действия (для всех продуктов) ──────────────────────────────────
+  common.stop:
+    type: action
+    widget: button
+    labels: { ru: "Стоп", en: "Stop" }
+
+  common.find:
+    type: action
+    widget: button
+    labels: { ru: "Найти устройство", en: "Find device" }
+
+  common.clear_errors:
+    type: action
+    widget: button
+    labels: { ru: "Сбросить ошибки", en: "Clear errors" }
+
+  # ── Системное ────────────────────────────────────────────────────────────
+  system.active_unit:
+    type: uint
+    widget: hidden
+    labels: { ru: "Активный юнит", en: "Active unit" }
+
+  system.language:
+    type: uint
+    widget: select
+    labels: { ru: "Язык", en: "Language" }
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Карта диапазонов UART kind_id (для удобства аудитора)
@@ -1583,23 +1867,65 @@ invoke_actions:
         - "Bulk-вариант (массив zones[]) сознательно не введён: 30 одиночных команд на типичный шкаф укладываются в ~200 мс, нагрузка на брокер пренебрежимая."
 
   # ── iHeater-link (ESP32-only, без UART-MCU) ─────────────────────────────
+  #
+  # ОСНОВНОЙ СПОСОБ РАСШИРЕНИЯ для разработчиков:
+  #   commands/invoke — единственный правильный путь добавить новую операцию
+  #   на iHeater Link, не трогая WS-контракт портала. Добавьте новый action
+  #   в onCommand("invoke", ...) в main.cpp и задокументируйте здесь.
+  #
   iheater_link:
-    - name: "*"
+    - name: heat.start
       direction: backend_to_device
-      purpose: "iHeater-link явно отбрасывает команду 'invoke' целиком."
-      args: { notes: "Любые args игнорируются." }
+      purpose: "Включить нагрев с заданной температурой. durationMin=0 — бесконечно."
+      args:
+        tempC:
+          type: float
+          required: true
+          range: [20, 120]
+          notes: "Целевая температура нагревателя в °C."
+        durationMin:
+          type: int
+          required: false
+          default: 0
+          notes: "Длительность в минутах. 0 = бесконечно (нет дедлайна)."
       bindings:
         mqtt:
           topic_suffix: commands/invoke
           qos: 1
+          payload:
+            examples:
+              infinite_heat:
+                action: heat.start
+                args: { tempC: 65, durationMin: 0 }
+              timed_heat:
+                action: heat.start
+                args: { tempC: 80, durationMin: 30 }
         uart:
           applicable: false
-      status: explicitly_rejected
-      source_ref: "src/heater/command_routing.cpp:206-216 (handleCommand: ветка 'unsupported')"
+      status: implemented
+      source_ref: "src/main.cpp onCommand('invoke') → applyHeating()"
       notes:
-        - "command_routing.cpp:212 явно перечисляет 'invoke' среди команд, для которых пишется лог 'unsupported on iHeater Link, ignored' и происходит return."
-        - "На iHeater-link нет RP2040, поэтому проксирование action в menu по id не имеет смысла."
-        - "Все управляющие операции (нагрев/остановка) идут как top-level commands: drying, stop, set, get_config, link_integration, bambu_apply (см. секцию messages выше)."
+        - "Заменяет top-level команду 'drying'. Старая 'drying' сохранена для обратной совместимости."
+        - "durationMin конвертируется в секунды в прошивке (× 60)."
+
+    - name: heat.stop
+      direction: backend_to_device
+      purpose: "Остановить нагрев, перевести в режим Idle."
+      args: {}
+      bindings:
+        mqtt:
+          topic_suffix: commands/invoke
+          qos: 1
+          payload:
+            example:
+              action: heat.stop
+              args: {}
+        uart:
+          applicable: false
+      status: implemented
+      source_ref: "src/main.cpp onCommand('invoke') → applyStop()"
+      notes:
+        - "Заменяет top-level команду 'stop'. Старая 'stop' сохранена для обратной совместимости."
 
   # ── idryer-link (legacy Storage Link, ESP32 + RP2040 по UART) ──────────
   idryer_link:
@@ -2729,16 +3055,14 @@ known_mismatches:
     found_by: "external audit (cmd_set_bind_variant_contract_gap)"
 
   - id: invoke_split_iheater_vs_storage
-    severity: high
-    summary: "Portal публикует commands/invoke с {id} ИЛИ {action,args}. iHeater-link отвергает любой invoke. iDryer-Storage требует {action} (id-only невозможен)."
-    iheater_link: "iHeater-link/src/heater/command_routing.cpp:206-215 — explicit-ignore"
-    idryer_storage: "iDryer-Storage/src/main.cpp:201-203 + idryer-core/src/cloud/action_dispatcher.cpp:9-20 — требует data['action'].as<const char*>(), id игнорируется"
-    portal: "iDryerPortal/backend/src/devices/devices.service.ts:1330-1349 — допускает любой из id/action"
-    decision_required: |
-      1) Унифицировать: bridge/idryer-link и Storage оба принимают и id, и action (или резолвят action→id через menu);
-      2) ИЛИ: задокументировать invoke per-product (как уже сделано в invoke_actions, но добавить explicit warning что Portal публикует обе формы).
-    status: design_or_partial
-    interop_break: true
+    severity: resolved
+    summary: "iHeater-link теперь принимает commands/invoke с action=heat.start/heat.stop. Storage — action-based (led.pulse). Gap закрыт."
+    resolution: |
+      iHeater-link: onCommand('invoke') расширен — heat.start и heat.stop обрабатываются
+      до MenuBridge. Старые top-level 'drying'/'stop' сохранены как legacy.
+      WS-контракт: добавлен тип INVOKE с полями action + args.
+      Portal gateway: добавлен кейс INVOKE → MQTT commands/invoke.
+    status: implemented
     found_by: "external audit (cmd_invoke_iheater_live_mismatch, cmd_invoke_storage_id_only_mismatch)"
 
   - id: rfid_event_readerId_required_in_portal
