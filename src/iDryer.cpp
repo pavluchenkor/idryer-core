@@ -348,10 +348,10 @@ bool Link::begin() {
         dispatchCommand(command, data);
     });
 
-    // Auto-claim for standalone devices.
-    impl_->cloud.setUnclaimedCallback([](void* ctx) {
-        static_cast<Link::Impl*>(ctx)->cloud.requestClaim();
-    }, impl_);
+    // Auto-claim for standalone devices — отключён: claim только по START_CLAIM от flasher.
+    // impl_->cloud.setUnclaimedCallback([](void* ctx) {
+    //     static_cast<Link::Impl*>(ctx)->cloud.requestClaim();
+    // }, impl_);
 
     // Claim PIN: cloud → user callback (Serial, UI, etc).
     impl_->cloud.setClaimPinCallback([](const char* pin, uint32_t expires, void* ctx) {

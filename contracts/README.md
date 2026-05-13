@@ -85,6 +85,31 @@ alias contract='python3 ~/Projects/iDryerProject/docs/iDryer-Storage/lib/idryer-
 # потом:  contract invoke_actions.storage_link.led.pulse
 ```
 
+## Добавить новое устройство + виджет
+
+Полный воркфлоу (fork → yaml → regen → firmware → widget → UIKit → PR):
+
+→ **[docs/ru/09-add-product/02-add-widget.md](../docs/ru/09-add-product/02-add-widget.md)**
+→ **[docs/en/09-add-product/02-add-widget.md](../docs/en/09-add-product/02-add-widget.md)**
+
+Краткая схема:
+
+```
+mqtt_contract.yaml
+  capability_vocabulary   ← новая периферия → hasXxx в Config
+  canonical_roles         ← роль + имя React-виджета
+  invoke_actions          ← args для команды виджета
+  device_profiles         ← capabilities + invoke_actions устройства
+        │
+        └─► ./regen.sh
+              ├─► _generated/scaffolds/my_device/  (firmware заготовка)
+              ├─► mqtt-api.types.ts                 (TS типы)
+              └─► portal/.../widgets/MyWidget.tsx   (копия виджета)
+                        │
+                        └─► widget-registry.tsx     (добавить вручную)
+                        └─► UiKitPage.tsx           (добавить mock-секцию)
+```
+
 ## Pipeline
 
 ```bash
@@ -92,7 +117,7 @@ alias contract='python3 ~/Projects/iDryerProject/docs/iDryer-Storage/lib/idryer-
 ```
 
 Внутри: `validate_contract.py` → все генераторы подряд. Список генераторов
-держится в массиве `GENERATORS` в `regen.sh` — добавлять новый туда же.
+держится в массивах `FIRMWARE_GENERATORS` / `ALL_GENERATORS` в `regen.sh`.
 
 `pre_commit.sh` зовёт тот же `regen.sh` и проверяет что `_generated/*`
 не разъехались с репо — см. `HOOKS.md`.
