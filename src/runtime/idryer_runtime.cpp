@@ -31,7 +31,8 @@ void IdryerRuntime::loop() {
         HAL_LOG_INFO("RT", "Cloud Online");
         if (profile_) {
             profile_->onOnline();
-            char infoBuf[512];
+            // 1024 bytes: info JSON для 4 юнитов (~780 байт) не помещается в 512.
+            char infoBuf[1024];
             profile_->buildInfoJson(infoBuf, sizeof(infoBuf));
             mqtt_->publishInfoJson(infoBuf);
         }
