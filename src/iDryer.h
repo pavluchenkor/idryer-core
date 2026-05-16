@@ -103,6 +103,11 @@ public:
     /// Force immediate publish (in addition to the periodic timer).
     void publishTelemetryNow();
     void publishStatusNow();
+    void publishInfoNow();
+
+    /// Update the unit count at runtime (e.g. after receiving MCU Hello).
+    /// Triggers a fresh info publish so the backend sees the correct count.
+    void setUnitsCount(uint8_t n);
 
     // ─── Events — fire-and-forget, sent immediately ──────────────────
     /// Publishes to `idryer/{serial}/events`. Payload shape per contract:

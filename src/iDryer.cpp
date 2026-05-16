@@ -143,11 +143,11 @@ struct Link::Impl {
           pub(&mqtt, &local),
           intManager(&mqtt, &intStore),
           improv(&Serial),
-          profile(cfg, credentials),
+          profile(this->cfg, credentials),
           runtime(&cloud, &dispatcher, &profile, &mqtt) {}
 
-    // Saved configuration.
-    const Config cfg;
+    // Saved configuration (mutable — setUnitsCount() updates it at runtime).
+    Config cfg;
 
     // Platform layer.
     idryer::ArduinoWifiStore       wifiStore;
@@ -742,6 +742,17 @@ idryer::DevicePublisher* Link::devicePublisher() {
 
 idryer::IdryerRuntime* Link::runtime() {
     return &impl_->runtime;
+}
+
+void Link::setUnitsCount(uint8_t n) {
+    if (n < 1 || n > MAX_UNITS) return;
+    impl_->cfg.unitsCount = n;
+}
+
+void Link::publishInfoNow() {
+    char infoBuf[1024];
+    impl_->profile.buildInfoJson(infoBuf, sizeof(infoBuf));
+    impl_->pub.publishInfo(infoBuf);
 }
 
 void Link::eraseClaimAndRestart() {
