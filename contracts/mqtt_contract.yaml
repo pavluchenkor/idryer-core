@@ -796,8 +796,8 @@ payloads:
           temp:
             {
               type: uint16,
-              unit: "°C × 10",
-              note: "wire — десятые доли °C (точность 0.1°C, диапазон 0..6553.5). Соглашение протокола: все температуры на UART как °C×10 (см. Status.targetTempC10, Telemetry.temperatureC10). RP2040 делит на 10 при использовании (uart_manager.cpp:427). Комментарий '°C' в uart_protocol.h:317 устарел.",
+              unit: "°C",
+              note: "Целое °C; RP2040 использует напрямую без деления. До 2026-05-16 wire-формат был °C×10 (RP2040 делил на 10, uart_manager.cpp:427); изменено вместе с переходом MQTT-команды на new-формат (params.stages[].temperature).",
             }
           ramp:
             {
@@ -1106,7 +1106,7 @@ messages:
             "units[i].target.humidity": "%RH (если присутствует)"
             "units[i].target.duration": "minutes (соответствует Device.targetDurationMins)"
             "units[i].elapsedTime": "seconds — время текущего юнит-сегмента"
-            "units[i].totalElapsed": "seconds — для PROFILE: с начала профиля"
+            "units[i].profileTotalElapsed": "seconds — суммарное время с начала PROFILE (все этапы)"
             "units[i].totalRemaining": "seconds — для PROFILE: до конца профиля"
             "units[i].currentStage": "только PROFILE"
             "units[i].totalStages": "только PROFILE"
@@ -1465,18 +1465,30 @@ messages:
         qos: 1
         retained: false
         payload:
-          example:
-            unitId: U1
-            startStage: 0
-            stages:
-              - { temp: 60, ramp: 300, hold: 1800 }
-              - { temp: 100, ramp: 600, hold: 6000 }
-            timestamp: "2026-04-28T12:00:00Z"
+          variants:
+            - name: new
+              example:
+                unitId: U1
+                params:
+                  startStage: 0
+                  stages:
+                    - { temperature: 60, ramp: 300, hold: 1800 }
+                    - { temperature: 100, ramp: 600, hold: 6000 }
+                timestamp: "2026-04-28T12:00:00Z"
+            - name: legacy
+              example:
+                unitId: U1
+                startStage: 0
+                stages:
+                  - { temp: 60, ramp: 300, hold: 1800 }
+                  - { temp: 100, ramp: 600, hold: 6000 }
+                timestamp: "2026-04-28T12:00:00Z"
           notes:
             - "Стадий не более 10."
-            - "ramp и hold — СЕКУНДЫ (см. payloads.Profile.fields.stages.item_fields)."
-            - "temp — wire-формат °C × 10 (см. payloads.Profile)."
-            - "Поле 'mode' DECORATIVE: ни portal sender (mqtt-telemetry.service.ts:678-686), ни bridge handler (command_handler.cpp:540-620) его не парсят. Не включать в новые клиенты."
+            - "ramp и hold — СЕКУНДЫ."
+            - "new: temperature в стадиях — °C целое. stages и startStage внутри params."
+            - "legacy: stages на верхнем уровне, поле temp (°C × 10). Только для старых клиентов."
+            - "Поле 'mode' DECORATIVE: ни portal sender, ни bridge handler его не парсят. Не включать в новые клиенты."
       uart:
         kind: Command
         kind_id: 0x20

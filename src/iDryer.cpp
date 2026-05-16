@@ -528,7 +528,7 @@ void Link::publishTelemetryNow() {
         if (cfg.hasAirTemp)     u["temperature"] = telemetry.airTempC[i];
         if (cfg.hasAirHumidity) u["humidity"]    = telemetry.airHumidityPct[i];
         if (cfg.hasHeaterTemp)  u["heaterTemp"]  = telemetry.heaterTempC[i];
-        if (cfg.hasHeaterPower) u["heaterPower"] = telemetry.heaterPower01[i];
+        if (cfg.hasHeaterPower) u["heaterPower"] = (int)roundf(telemetry.heaterPower01[i] * 100.0f);
         if (cfg.hasFanStatus)   u["fanStatus"]   = telemetry.fanOn[i];
         if (cfg.hasScales)      u["weight"]      = telemetry.weightG[i];
     }

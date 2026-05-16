@@ -74,6 +74,9 @@ public:
     /** integrations/status topic (retained). */
     bool publishIntegrationsStatus(JsonDocument& doc);
 
+    /** rfid topic (retained). */
+    bool publishRfid(JsonDocument& doc);
+
     bool isMqttConnected() const  { return mqtt_->isConnected(); }
     bool isLocalConnected() const { return local_ && local_->isClientConnected(); }
 

@@ -63,4 +63,9 @@ bool DevicePublisher::publishIntegrationsStatus(JsonDocument& doc) {
     return mqtt_->publishIntegrationsStatus(doc);
 }
 
+bool DevicePublisher::publishRfid(JsonDocument& doc) {
+    wsPublish("rfid", doc);
+    return mqtt_->publishRfid(doc);
+}
+
 } // namespace idryer

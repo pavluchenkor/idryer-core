@@ -101,6 +101,9 @@ public:
     /// @brief Publishes to @c idryer/{serial}/integrations/status (retained).
     bool publishIntegrationsStatus(JsonDocument& json);
 
+    /// @brief Publishes to @c idryer/{serial}/rfid (retained).
+    bool publishRfid(JsonDocument& json);
+
     /**
      * @brief Publishes a raw JSON string to @c idryer/{serial}/config.
      *
