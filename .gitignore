@@ -17,3 +17,7 @@ __pycache__/
 *.pyc
 .python-version
 .translation-state.json
+prepare-commit-messages.mjs
+apply-commit-messages.mjs
+commit-message-map.json
+commit-message-raw-response.json

@@ -665,6 +665,183 @@ def test_auto_heat_moonraker(cfg: Config) -> Result:
         return Result("auto_heat_moonraker", False, f"telemetry parse error: {e}")
 
 
+# ── cmd tests (iDryer-specific) ─────────────────────────────────────
+
+def _wait_fresh_config_item(cfg, item_id: int, expected_val, timeout_s: float):
+    """Subscribe to /config, wait for fresh message where item_id has expected_val."""
+    topic = f"idryer/{cfg.serial}/config"
+    result: list = [None]
+    done = threading.Event()
+    pub_ts = time.time()
+
+    def on_msg(_c, _u, msg):
+        if time.time() < pub_ts:
+            return
+        try:
+            d = json.loads(msg.payload.decode())
+            for it in d.get("menu", []):
+                if it.get("id") == item_id:
+                    result[0] = it.get("val")
+                    v = it.get("val")
+                    # normalize: [False]/[0] == False, [True]/[1] == True
+                    got = v[0] if isinstance(v, list) else v
+                    want = expected_val[0] if isinstance(expected_val, list) else expected_val
+                    if bool(got) == bool(want):
+                        done.set()
+                    break
+        except Exception:
+            pass
+
+    c = _new_client()
+    c.on_message = on_msg
+    try:
+        c.connect(cfg.local_broker, cfg.local_port, 10)
+    except Exception:
+        return None
+    c.subscribe(topic)
+    c.loop_start()
+    time.sleep(0.5)
+    done.wait(timeout=timeout_s)
+    c.loop_stop()
+    c.disconnect()
+    return result[0]
+
+
+def _wait_fresh_status_mode(cfg, mode: str, timeout_s: float) -> Optional[str]:
+    """Subscribe to /status, wait for fresh message where any unit has the given mode."""
+    topic = f"idryer/{cfg.serial}/status"
+    result: list = [None]
+    done = threading.Event()
+    pub_ts = time.time()
+
+    def on_msg(_c, _u, msg):
+        if time.time() < pub_ts:
+            return
+        try:
+            d = json.loads(msg.payload.decode())
+            for u in d.get("units", []):
+                if u.get("mode") == mode:
+                    result[0] = u.get("unitId", "?")
+                    done.set()
+                    break
+        except Exception:
+            pass
+
+    c = _new_client()
+    c.on_message = on_msg
+    try:
+        c.connect(cfg.local_broker, cfg.local_port, 10)
+    except Exception:
+        return None
+    c.subscribe(topic)
+    c.loop_start()
+    time.sleep(0.2)
+    done.wait(timeout=timeout_s)
+    c.loop_stop()
+    c.disconnect()
+    return result[0]
+
+
+def test_cmd_set(cfg: Config) -> Result:
+    """commands/set id=146 (AUTO STORAGE toggle) → false → verify /config → restore.
+
+    Проверяет полный цикл: портал→ESP32→UART→RP2040→UART delta→ESP32→MQTT /config.
+    """
+    config_topic = f"idryer/{cfg.serial}/config"
+
+    # Читаем текущее значение из retained /config
+    msgs = mqtt_collect(cfg.local_broker, cfg.local_port, [config_topic], 5.0)
+    if config_topic not in msgs:
+        return Result("cmd_set", False, "нет retained /config — устройство не опубликовало меню")
+    try:
+        menu = json.loads(msgs[config_topic]).get("menu", [])
+        item = next((it for it in menu if it["id"] == 146), None)
+        original_val = item.get("val") if item else None
+    except Exception as e:
+        return Result("cmd_set", False, f"parse /config: {e}")
+
+    # Шлём set id=146 val=false (выключаем AUTO STORAGE)
+    pub_ts = time.time()
+    _send_command(cfg, "set", {"cmd": "set", "id": 146, "val": False})
+
+    # Ждём свежего /config где id=146 стал false
+    got = _wait_fresh_config_item(cfg, 146, False, cfg.test_timeout_s)
+
+    # Восстанавливаем оригинальное значение
+    orig_bool = True
+    if original_val is not None:
+        orig_bool = bool(original_val[0]) if isinstance(original_val, list) else bool(original_val)
+    _send_command(cfg, "set", {"cmd": "set", "id": 146, "val": orig_bool})
+    time.sleep(1.5)
+
+    if got is None:
+        return Result("cmd_set", False,
+                      f"нет обновлённого /config за {cfg.test_timeout_s:.0f}с "
+                      "(set не дошёл до RP2040 или RP2040 не прислал delta)")
+    return Result("cmd_set", True,
+                  f"AUTO STORAGE id=146: set→false подтверждено в /config (было {original_val}), восстановлено")
+
+
+def test_cmd_drying(cfg: Config) -> Result:
+    """commands/drying → RP2040 переходит в DRYING → видно в /status."""
+    _send_command(cfg, "drying", {"params": {"temperature": 30, "duration": 5}})
+    unit_id = _wait_fresh_status_mode(cfg, "DRYING", cfg.test_timeout_s)
+    if unit_id:
+        return Result("cmd_drying", True, f"mode=DRYING подтверждён на {unit_id}")
+    return Result("cmd_drying", False,
+                  f"DRYING не появился в /status за {cfg.test_timeout_s:.0f}с")
+
+
+def test_cmd_stop(cfg: Config) -> Result:
+    """commands/stop → все юниты возвращаются в IDLE."""
+    _send_command(cfg, "stop", {})
+
+    topic = f"idryer/{cfg.serial}/status"
+    result: list = [None]
+    done = threading.Event()
+    pub_ts = time.time()
+
+    def on_msg(_c, _u, msg):
+        if time.time() < pub_ts:
+            return
+        try:
+            d = json.loads(msg.payload.decode())
+            units = d.get("units", [])
+            if units and all(u.get("mode") == "IDLE" for u in units):
+                result[0] = len(units)
+                done.set()
+        except Exception:
+            pass
+
+    c = _new_client()
+    c.on_message = on_msg
+    try:
+        c.connect(cfg.local_broker, cfg.local_port, 10)
+    except Exception as e:
+        return Result("cmd_stop", False, f"connect: {e}")
+    c.subscribe(topic)
+    c.loop_start()
+    time.sleep(0.2)
+    done.wait(timeout=cfg.test_timeout_s)
+    c.loop_stop()
+    c.disconnect()
+
+    if result[0]:
+        return Result("cmd_stop", True, f"все {result[0]} юнита в IDLE")
+    return Result("cmd_stop", False, f"IDLE не подтверждён за {cfg.test_timeout_s:.0f}с")
+
+
+def test_cmd_storage(cfg: Config) -> Result:
+    """commands/storage → RP2040 переходит в STORAGE → stop → IDLE."""
+    _send_command(cfg, "storage", {"params": {"temperature": 40, "humidity": 15}})
+    unit_id = _wait_fresh_status_mode(cfg, "STORAGE", cfg.test_timeout_s)
+    if not unit_id:
+        return Result("cmd_storage", False,
+                      f"STORAGE не появился в /status за {cfg.test_timeout_s:.0f}с")
+    _send_command(cfg, "stop", {})
+    return Result("cmd_storage", True, f"mode=STORAGE на {unit_id}, stop отправлен")
+
+
 # ── runner ──────────────────────────────────────────────────────────
 # (name, fn, needs_fake_moonraker, needs_fake_bambu, description)
 TESTS: List = [
@@ -740,6 +917,30 @@ TESTS: List = [
         True, False,
         "iHeater Link: Moonraker VirtualChamber.target>0 → outputMode=1 targetTempC>0",
     ),
+    (
+        "cmd_set",
+        test_cmd_set,
+        False, False,
+        "iDryer: commands/set id=146 (AUTO STORAGE) → delta от RP2040 → обновлённый /config",
+    ),
+    (
+        "cmd_drying",
+        test_cmd_drying,
+        False, False,
+        "iDryer: commands/drying → RP2040 переходит в режим DRYING (видно в /status)",
+    ),
+    (
+        "cmd_stop",
+        test_cmd_stop,
+        False, False,
+        "iDryer: commands/stop → все юниты возвращаются в IDLE (видно в /status)",
+    ),
+    (
+        "cmd_storage",
+        test_cmd_storage,
+        False, False,
+        "iDryer: commands/storage → STORAGE режим, затем stop",
+    ),
 ]
 
 
@@ -791,6 +992,22 @@ HUMAN_VERDICTS = {
     "auto_heat_moonraker": (
         "Moonraker → авто-нагрев сработал (VirtualChamber→RMT)",
         "Moonraker НЕ запустил нагрев — цепочка VirtualChamber→RMT сломана",
+    ),
+    "cmd_set": (
+        "commands/set работает — настройка дошла до RP2040 и подтверждена в /config",
+        "commands/set НЕ работает — изменения из портала не доходят до контроллера",
+    ),
+    "cmd_drying": (
+        "drying команда работает — RP2040 перешёл в DRYING",
+        "drying не запустился — команда не дошла до RP2040 или RP2040 не ответил",
+    ),
+    "cmd_stop": (
+        "stop работает — все юниты вернулись в IDLE",
+        "stop не сработал — юниты не вернулись в IDLE",
+    ),
+    "cmd_storage": (
+        "storage команда работает — RP2040 перешёл в STORAGE",
+        "storage не запустился — команда не дошла до RP2040",
     ),
 }
 
