@@ -519,6 +519,9 @@ void Link::publishTelemetryNow() {
     StaticJsonDocument<512> doc;
 
     JsonArray units = doc.createNestedArray("units");
+    // CONTRACT (mqtt_contract.yaml §telemetry.units): итерируем только по
+    // cfg.unitsCount — реально подтверждённых MCU юнитов. Нулевые данные
+    // для несуществующих слотов в эфир не идут (см. setUnitsCount).
     for (uint8_t i = 0; i < cfg.unitsCount && i < MAX_UNITS; ++i) {
         char uid[3]; formatUnitId(i, uid);
         JsonObject u = units.createNestedObject();
@@ -548,6 +551,8 @@ void Link::publishStatusNow() {
     StaticJsonDocument<512> doc;
 
     JsonArray units = doc.createNestedArray("units");
+    // CONTRACT (mqtt_contract.yaml §status.units): то же ограничение — только
+    // реально существующие юниты. Нулевые статусы несуществующих слотов не шлём.
     for (uint8_t i = 0; i < cfg.unitsCount && i < MAX_UNITS; ++i) {
         char uid[3]; formatUnitId(i, uid);
         JsonObject u = units.createNestedObject();
@@ -746,6 +751,9 @@ idryer::IdryerRuntime* Link::runtime() {
 
 void Link::setUnitsCount(uint8_t n) {
     if (n < 1 || n > MAX_UNITS) return;
+    // CONTRACT (mqtt_contract.yaml §units): MCU Hello — авторитетный источник
+    // числа юнитов; вызывается из onHello(). Config.unitsCount в firmware должен
+    // совпадать с реальным числом физических слотов, а не быть потолком MAX.
     impl_->cfg.unitsCount = n;
 }
 
