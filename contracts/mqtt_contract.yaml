@@ -1393,7 +1393,9 @@ messages:
                 targetTemperature: 55.0
                 durationMinutes: 240
           notes:
-            - "Без unitId — команда применяется ко всем юнитам."
+            - "unitId обязателен (U1..UN). Broadcast (unitId отсутствует / unitId=0xFF) НЕ реализован —
+              RP2040 отклоняет unitId=0xFF как InvalidPayload. Реализовать broadcast можно когда
+              появится реальная потребность (сценарий: одинаковый материал во всех камерах)."
             - "iHeater-link парсит и params.*, и legacy targetTemperature/durationMinutes."
       uart:
         kind: Command
