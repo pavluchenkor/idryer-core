@@ -164,6 +164,8 @@ rules:
   uart_cmd_timeout_ms: 700
   uart_heartbeat_interval_ms: 5000
   uart_link_loss_ms: 20000
+  uart_hello_interval_ms: 5000
+  uart_hello_max_attempts: 12
 
   compatibility_policy:
     - "Любое изменение MQTT/UART — сначала в этом файле, потом в коде."
@@ -709,6 +711,7 @@ payloads:
           weightGramsC10: { type: uint16, unit: "g × 10" }
 
   Rfid:
+    cpp_name: UartRfidPayload
     description: "Событие RFID-ридера: метка обнаружена / снята / ридер недоступен."
     source_ref:
       uart_struct: "lib/idryer-core/src/uart/uart_protocol.h:300-306 (UartRfidPayload — есть в core)"
@@ -813,6 +816,7 @@ payloads:
             }
 
   Config:
+    cpp_name: UartConfigPayload
     description: "Целевые параметры одного юнита (legacy ConfigPush; не фрагментированный). LEGACY/BROKEN — не использовать."
     status: legacy_broken
     source_ref:
@@ -838,6 +842,7 @@ payloads:
       data: { type: "uint8[194]" }
 
   LogPayload:
+    cpp_name: UartLogPayload
     description: "Структурированное лог-сообщение от MCU. Fixed-size binary struct (legacy DryerUart::LogPayload)."
     source_ref: "idryer-link/lib/idryer-protocol/src/uart/uart_protocol.h:301-309"
     fields:

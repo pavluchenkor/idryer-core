@@ -27,6 +27,36 @@ sys.path.insert(0, str(Path(__file__).parent))
 from validate_contract import sum_fields_size, normalize_kind_id, PRIMITIVE_SIZES, ARRAY_RE, NESTED_ARRAY_RE  # type: ignore
 
 
+# ── cpp_name resolution ─────────────────────────────────────────────
+# Priority: yaml payload.cpp_name → parse source_ref → yaml key (fallback)
+
+def _cpp_name_from_source_ref(ref) -> str | None:
+    """Extracts C++ struct name from source_ref string, e.g. 'uart_protocol.h:UartHelloPayload'."""
+    import re
+    if not isinstance(ref, str):
+        return None
+    m = re.search(r"uart_protocol\.h:(\w+)", ref)
+    if m and not m.group(1)[0].isdigit():
+        return m.group(1)
+    return None
+
+
+def get_cpp_name(yaml_key: str, pdef: dict) -> str:
+    """Returns the C++ struct name for a payload definition."""
+    explicit = pdef.get("cpp_name")
+    if explicit:
+        return str(explicit)
+    from_ref = _cpp_name_from_source_ref(pdef.get("source_ref"))
+    if from_ref:
+        return from_ref
+    return yaml_key
+
+
+def build_cpp_name_map(payloads: dict) -> dict[str, str]:
+    """Returns {yaml_key: cpp_struct_name} for all payloads."""
+    return {k: get_cpp_name(k, v) for k, v in payloads.items()}
+
+
 # ── Type mapping yaml → C++ ──────────────────────────────────────────
 
 CPP_PRIMITIVE = {
@@ -44,7 +74,8 @@ CPP_PRIMITIVE = {
 }
 
 
-def cpp_type(field_spec, field_name: str, enums: dict, payloads: dict) -> str:
+def cpp_type(field_spec, field_name: str, enums: dict, payloads: dict,
+             cpp_name_map: dict | None = None) -> str:
     """Возвращает C++-объявление поля (без имени переменной)."""
     if isinstance(field_spec, str):
         return f"/* TODO: free-form '{field_spec}' */ uint8_t /*{field_name}*/[1]"
@@ -94,9 +125,10 @@ def cpp_type(field_spec, field_name: str, enums: dict, payloads: dict) -> str:
             return f"char     {field_name}[{count}]"
         return f"char     {field_name}"
 
-    # Reference to a struct from payloads
+    # Reference to a struct from payloads — use cpp_name if available
     if t in payloads:
-        return f"{t} {field_name}"
+        resolved = (cpp_name_map or {}).get(t, t)
+        return f"{resolved} {field_name}"
 
     # Unknown type — emit comment
     return f"/* TYPE? '{t}' */ uint8_t {field_name}[1]"
@@ -183,14 +215,15 @@ def collect_inline_entry_structs(payloads: dict) -> list[tuple[str, dict, int | 
     return [(name, fdict, sz) for name, (fdict, sz) in seen.items()]
 
 
-def render_entry_struct(name: str, item_fields: dict, per_size: int | None, enums: dict, payloads: dict) -> str:
+def render_entry_struct(name: str, item_fields: dict, per_size: int | None,
+                        enums: dict, payloads: dict, cpp_name_map: dict | None = None) -> str:
     """Рендерит вспомогательную struct'у для UartXxxEntry."""
     out = [f"/// Entry-record для inline-массивов в payload'ах."]
     out.append(f"struct {name} {{")
     for fname, fspec in item_fields.items():
         if fname in SKIP_FIELDS:
             continue
-        decl = cpp_type(fspec, fname, enums, payloads)
+        decl = cpp_type(fspec, fname, enums, payloads, cpp_name_map)
         note = ""
         if isinstance(fspec, dict):
             n = fspec.get("note")
@@ -206,22 +239,23 @@ def render_entry_struct(name: str, item_fields: dict, per_size: int | None, enum
     return "\n".join(out)
 
 
-def render_payload(name: str, definition: dict, enums: dict, payloads: dict, computed_size: int | None) -> str:
+def render_payload(yaml_key: str, definition: dict, enums: dict, payloads: dict,
+                   computed_size: int | None, cpp_name_map: dict | None = None) -> str:
+    cpp_name = (cpp_name_map or {}).get(yaml_key, yaml_key)
     fields = definition.get("fields", {})
     if not isinstance(fields, dict):
-        return f"// TODO: payload '{name}' has no fields block"
+        return f"// TODO: payload '{yaml_key}' has no fields block"
 
     out = []
     desc = definition.get("description", "").strip()
     if desc:
         for line in desc.splitlines():
             out.append(f"/// {line}".rstrip())
-    out.append(f"struct {name} {{")
+    out.append(f"struct {cpp_name} {{")
     for fname, fspec in fields.items():
         if fname in SKIP_FIELDS:
             continue
-        decl = cpp_type(fspec, fname, enums, payloads)
-        # Inline note as comment
+        decl = cpp_type(fspec, fname, enums, payloads, cpp_name_map)
         note = ""
         if isinstance(fspec, dict):
             n = fspec.get("note")
@@ -231,8 +265,8 @@ def render_payload(name: str, definition: dict, enums: dict, payloads: dict, com
     out.append("} __attribute__((packed));")
     if computed_size is not None:
         out.append(
-            f"static_assert(sizeof({name}) == {computed_size}, "
-            f'"{name} must be {computed_size} bytes (yaml-computed)");'
+            f"static_assert(sizeof({cpp_name}) == {computed_size}, "
+            f'"{cpp_name} must be {computed_size} bytes (yaml-computed)");'
         )
     return "\n".join(out)
 
@@ -267,24 +301,82 @@ def collect_kinds(doc: dict) -> dict[str, int]:
 
 
 def render_rules(rules: dict) -> str:
-    """Из rules.uart_* → constexpr-константы."""
-    if not isinstance(rules, dict):
-        return ""
-    mapping = [
-        ("uart_baud",                  "uint32_t", "UART_BAUD"),
-        ("uart_protocol_version",      "uint8_t",  "UART_PROTOCOL_VER"),
-        ("uart_max_payload_bytes",     "uint8_t",  "UART_MAX_PAYLOAD"),
-        ("uart_max_retries",           "uint8_t",  "UART_MAX_RETRIES"),
-        ("uart_cmd_timeout_ms",        "uint16_t", "UART_CMD_TIMEOUT_MS"),
-        ("uart_heartbeat_interval_ms", "uint16_t", "UART_HEARTBEAT_MS"),
-        ("uart_link_loss_ms",          "uint32_t", "UART_LINK_LOSS_MS"),
-    ]
+    """Из rules.uart_* → constexpr-константы + hardcoded frame flags."""
     lines = []
-    for yaml_key, cpp_type_name, c_name in mapping:
-        v = rules.get(yaml_key)
-        if v is not None:
-            lines.append(f"constexpr {cpp_type_name:<10} {c_name:<22} = {v};")
+
+    # Constants from yaml rules
+    if isinstance(rules, dict):
+        mapping = [
+            ("uart_baud",                  "uint32_t", "UART_BAUD"),
+            ("uart_protocol_version",      "uint8_t",  "UART_PROTOCOL_VER"),
+        ]
+        for yaml_key, cpp_type_name, c_name in mapping:
+            v = rules.get(yaml_key)
+            if v is not None:
+                lines.append(f"constexpr {cpp_type_name:<9} {c_name:<24} = {v};")
+
+    # Frame flags — stable protocol constants, hardcoded.
+    lines += [
+        "",
+        "/// @name UART frame flags",
+        "/// @{",
+        "constexpr uint8_t  UART_FLAG_ACK_REQ       = 0x01;  ///< Sender expects ACK.",
+        "constexpr uint8_t  UART_FLAG_IS_ACK        = 0x02;  ///< This frame is an ACK.",
+        "constexpr uint8_t  UART_FLAG_ERROR         = 0x04;  ///< Payload carries error.",
+        "constexpr uint8_t  UART_FLAG_FRAGMENT      = 0x08;  ///< Part of fragmented transfer.",
+        "constexpr uint8_t  UART_FLAG_LAST_FRAGMENT = 0x10;  ///< Last fragment of transfer.",
+        "/// @}",
+        "constexpr uint8_t  UART_SOF               = 0xAA;  ///< Start-of-frame byte.",
+    ]
+
+    # Remaining transport constants from yaml rules
+    if isinstance(rules, dict):
+        mapping2 = [
+            ("uart_max_payload_bytes",     "uint8_t",  "UART_MAX_PAYLOAD"),
+            ("uart_max_retries",           "uint8_t",  "UART_MAX_RETRIES"),
+            ("uart_cmd_timeout_ms",        "uint16_t", "UART_CMD_TIMEOUT_MS"),
+            ("uart_heartbeat_interval_ms", "uint16_t", "UART_HEARTBEAT_MS"),
+            ("uart_link_loss_ms",          "uint32_t", "UART_LINK_LOSS_MS"),
+            ("uart_hello_interval_ms",     "uint16_t", "UART_HELLO_INTERVAL_MS"),
+            ("uart_hello_max_attempts",    "uint8_t",  "UART_HELLO_MAX_ATTEMPTS"),
+        ]
+        for yaml_key, cpp_type_name, c_name in mapping2:
+            v = rules.get(yaml_key)
+            if v is not None:
+                lines.append(f"constexpr {cpp_type_name:<9} {c_name:<24} = {v};")
+
     return "\n".join(lines)
+
+
+def render_frame_structs() -> str:
+    """Hardcoded frame-envelope structs: UartFrameHeader, UartFrame, UartConfigChunkHeader.
+    These are stable protocol infrastructure not easily expressed in payload yaml."""
+    return """\
+struct UartFrameHeader {
+    uint8_t     sof;
+    uint8_t     version;
+    uint8_t     flags;
+    UartMsgKind kind;
+    uint8_t     sequence;
+    uint8_t     payloadLength;
+} __attribute__((packed));
+static_assert(sizeof(UartFrameHeader) == 6, "UartFrameHeader must be 6 bytes");
+
+struct UartFrame {
+    UartFrameHeader header;
+    uint8_t         payload[UART_MAX_PAYLOAD];
+    uint16_t        crc;
+} __attribute__((packed));
+
+/// 6-byte header embedded at the start of every UartConfigChunkPayload.
+struct UartConfigChunkHeader {
+    uint16_t transferId;
+    uint16_t totalSize;
+    uint8_t  chunkIndex;
+    uint8_t  pad;
+} __attribute__((packed));
+static_assert(sizeof(UartConfigChunkHeader) == 6, "UartConfigChunkHeader must be 6 bytes");
+constexpr uint8_t UART_CONFIG_CHUNK_HEADER_SIZE = sizeof(UartConfigChunkHeader);"""
 
 
 # ── Main render ──────────────────────────────────────────────────────
@@ -296,6 +388,9 @@ def render_header(doc: dict) -> str:
     rules = doc.get("rules") or {}
     today = datetime.date.today().isoformat()
     yaml_version = doc.get("version", "?")
+
+    # Build yaml_key → C++ struct name mapping once for the whole render pass.
+    cpp_name_map = build_cpp_name_map(payloads)
 
     out = []
     out.append("// ============================================================================")
@@ -314,10 +409,10 @@ def render_header(doc: dict) -> str:
     out.append("namespace idryer {")
     out.append("")
 
-    # Constants
+    # Constants + flags
     rules_block = render_rules(rules)
     if rules_block:
-        out.append("// ── UART transport constants (из rules.*) ──────────────────────────")
+        out.append("// ── UART transport constants + frame flags (из rules.*) ────────────")
         out.append(rules_block)
         out.append("")
 
@@ -342,22 +437,27 @@ def render_header(doc: dict) -> str:
     out.append("#pragma pack(push, 1)")
     out.append("")
 
-    # Сначала auxiliary entry-structs (UartTelemetryEntry, UartStatusEntry, UartWeightEntry, etc.)
-    # — они referenced через 'TypeName[N]' с inline item_fields в parent payload'ах.
+    # Frame-envelope structs (hardcoded — stable protocol infrastructure)
+    out.append("// — Frame envelope structs —")
+    out.append(render_frame_structs())
+    out.append("")
+
+    # Auxiliary entry-structs (UartTelemetryEntry, UartStatusEntry, etc.)
     entry_structs = collect_inline_entry_structs(payloads)
     if entry_structs:
         out.append("// — Auxiliary entry-structs (для inline массивов в parent payload'ах) —")
         for ename, efields, esize in entry_structs:
-            out.append(render_entry_struct(ename, efields, esize, enums, payloads))
+            out.append(render_entry_struct(ename, efields, esize, enums, payloads, cpp_name_map))
             out.append("")
 
-    # Затем сами payloads
-    for pname, pdef in payloads.items():
+    # Main payloads
+    for yaml_key, pdef in payloads.items():
         size = sum_fields_size(pdef.get("fields", {}), enums, payloads)
         status = pdef.get("status")
+        cpp_name = cpp_name_map.get(yaml_key, yaml_key)
         if status == "legacy_broken":
-            out.append(f"// LEGACY/BROKEN: {pname} — см. yaml notes; не использовать в новом коде.")
-        out.append(render_payload(pname, pdef, enums, payloads, size))
+            out.append(f"// LEGACY/BROKEN: {cpp_name} — см. yaml notes; не использовать в новом коде.")
+        out.append(render_payload(yaml_key, pdef, enums, payloads, size, cpp_name_map))
         out.append("")
     out.append("#pragma pack(pop)")
     out.append("")
