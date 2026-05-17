@@ -440,6 +440,10 @@ uart_kind_ranges:
 # Перечисления (enum) — копируются 1:1 из uart_protocol.h
 # ─────────────────────────────────────────────────────────────────────────────
 enums:
+  UartRfidEvent:
+    TagDetected: 0x01
+    TagRemoved:  0x02
+
   UartRole:
     Rp2040Controller: 0x01
     EspBridge: 0x02

@@ -1,10 +1,10 @@
-#if defined(ESP32) || defined(ESP_PLATFORM)
-
 #include "uart_bridge.h"
-#include "../hal/hal_types.h"
+#include <hal/hal_types.h>
 #include <string.h>
 
 namespace idryer {
+
+uint16_t uartCalculateCrc(const uint8_t* data, size_t length);
 
 namespace {
     constexpr uint8_t HEADER_SIZE = sizeof(UartFrameHeader);
@@ -116,6 +116,10 @@ bool UartBridge::sendLog(const char* cstr) {
     size_t len = strlen(cstr);
     if (len > UART_MAX_PAYLOAD) len = UART_MAX_PAYLOAD;
     return transmit(UartMsgKind::Log, reinterpret_cast<const uint8_t*>(cstr), static_cast<uint8_t>(len), 0);
+}
+
+bool UartBridge::sendLog(const UartLogPayload& p) {
+    return transmit(UartMsgKind::Log, reinterpret_cast<const uint8_t*>(&p), sizeof(p), 0);
 }
 
 bool UartBridge::sendRfidWriteData(const UartRfidDataPayload& p, uint8_t flags) {
@@ -634,5 +638,3 @@ void UartBridge::resetParser() {
 uint8_t UartBridge::nextSequence() { return seqCounter_++; }
 
 } // namespace idryer
-
-#endif // ESP32 || ESP_PLATFORM

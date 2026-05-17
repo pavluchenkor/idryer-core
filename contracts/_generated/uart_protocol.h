@@ -35,6 +35,11 @@ constexpr uint16_t  UART_HELLO_INTERVAL_MS   = 5000;
 constexpr uint8_t   UART_HELLO_MAX_ATTEMPTS  = 12;
 
 // ── Enums ──────────────────────────────────────────────────────────
+enum class UartRfidEvent : uint8_t {
+    TagDetected    = 0x01,
+    TagRemoved     = 0x02,
+};
+
 enum class UartRole : uint8_t {
     Rp2040Controller = 0x01,
     EspBridge      = 0x02,

@@ -1,4 +1,5 @@
 #include "uart_protocol.h"
+#include <cstddef>
 
 namespace idryer {
 

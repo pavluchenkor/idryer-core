@@ -1,7 +1,7 @@
 #pragma once
 
 #include <functional>
-#include "../hal/hal_types.h"
+#include <hal/hal_types.h>
 #include "uart_protocol.h"
 
 namespace idryer {
@@ -91,6 +91,7 @@ public:
     bool sendConfigAck(uint8_t sequence, UartErrCode status = UartErrCode::None);
     bool sendError(const UartErrorPayload& p);
     bool sendLog(const char* cstr);
+    bool sendLog(const UartLogPayload& p);
     bool sendRfidWriteData(const UartRfidDataPayload& p, uint8_t flags = 0);
     /// @}
 
