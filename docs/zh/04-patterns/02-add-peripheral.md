@@ -1,31 +1,107 @@
-# 新增周邊設備
+# 添加外围设备
 
-## 何時使用
+## 何时使用
 
-如果裝置需要根據來自雲端或 LAN 的命令控制硬體（繼電器、加熱器、LED 條、馬達），請使用此配方。
+如果设备需要响应来自云或 LAN 的命令控制硬件——继电器、加热器、LED 条、马达——使用这个配方。
 
-## 現成可用的代碼
+## 现成代码
 
-（相同的 C++ 代碼，不翻譯）
+```cpp
+// main.cpp
+#include <iDryer.h>
+#include <runtime/idryer_runtime.h>
 
-[見英文版本的代碼]
+static const iDryer::Config CFG = {
+    .deviceType      = iDryer::DeviceType::StorageLink,
+    .unitsCount      = 1,
+    .hardwareVersion = "1.0",
+    .firmwareVersion = "1.0.0",
+};
 
-## 說明
+static iDryer::Link s_link(CFG);
 
-`s_link.runtime()->setCommandHandler(handleCommand)` 是命令處理程式的單一連線點。在此呼叫後，所有傳入的 MQTT 命令（`invoke`、`set`、`drying`、`stop`、`ping`、`get_config` 等）直接到達 `handleCommand`。
+static void handleCommand(const char* cmd, JsonObjectConst data) {
+    if (!cmd) return;
 
-`s_link.publishStatusNow()` — 在每次變更 `s_link.status.*` 後呼叫。這立即將新狀態發送到入口網站和 LAN 客戶端，而無需等待 `statusPeriodMs` 計時器。
+    if (strcmp(cmd, "invoke") == 0) {
+        const char* action = data["action"] | "";
 
-永遠不要在 `handleCommand` 內呼叫 `delay()`。此呼叫是從 MQTT 回呼同步的；阻止它會中斷工作階段。將計時器放在產品物件的 `loop()` 中。
+        if (strcmp(action, "fan.on") == 0) {
+            myFan.on();
+            s_link.publishStatusNow();  // 立即反映新状态
+            return;
+        }
+        if (strcmp(action, "fan.off") == 0) {
+            myFan.off();
+            s_link.publishStatusNow();
+            return;
+        }
+    }
+
+    if (strcmp(cmd, "drying") == 0) {
+        float targetTempC  = data["targetTempC"]  | 45.0f;
+        uint32_t durationS = data["durationS"]    | 0;
+        myHeater.start(targetTempC, durationS);
+        s_link.status.mode[0]        = iDryer::UnitMode::Drying;
+        s_link.status.targetTempC[0] = targetTempC;
+        s_link.status.durationS[0]   = durationS;
+        s_link.publishStatusNow();
+        return;
+    }
+
+    if (strcmp(cmd, "stop") == 0) {
+        myHeater.stop();
+        s_link.status.mode[0] = iDryer::UnitMode::Idle;
+        s_link.publishStatusNow();
+        return;
+    }
+}
+
+void setup() {
+    myFan.begin();
+    myHeater.begin();
+    s_link.begin();
+    // 重要：setCommandHandler — 严格在 begin() 之后。
+    // begin() 安装其自己的调度程序；我们的 handleCommand 必须覆盖它。
+    s_link.runtime()->setCommandHandler(handleCommand);
+}
+
+void loop() {
+    s_link.loop();
+    myFan.tick();
+    myHeater.tick();
+}
+```
+
+## 解释
+
+`s_link.runtime()->setCommandHandler(handleCommand)` 是命令处理程序的单一连接点。在此调用后，所有传入的 MQTT 命令（`invoke`、`set`、`drying`、`stop`、`ping`、`get_config` 等）直接到达 `handleCommand`。
+
+`s_link.publishStatusNow()` — 在每次更改 `s_link.status.*` 后调用。这立即将新状态发送到门户和 LAN 客户端，无需等待 `statusPeriodMs` 计时器。
+
+永远不要在 `handleCommand` 中调用 `delay()` — 该调用来自 MQTT 回调的同步；阻塞它会破坏会话。将计时器放在产品对象的 `loop()` 中。
 
 ### 替代方案：`link.onRequest()`
 
-對於標準命令（`Start`、`Stop`、`Storage`、`Find`、`ClearErrors`），更簡單的 `onRequest()` 回呼就足夠了 — 無需解析原始 JSON：
+对于标准命令（`Start`、`Stop`、`Storage`、`Find`、`ClearErrors`），通过 `onRequest()` 的更简单的回调就足够了——无需解析原始 JSON：
 
-[見英文版本的代碼]
+```cpp
+s_link.onRequest([](const iDryer::Request& r) {
+    switch (r.kind) {
+        case iDryer::RequestKind::Start:
+            myHeater.start(r.targetTempC, r.durationS);
+            break;
+        case iDryer::RequestKind::Stop:
+            myHeater.stop();
+            break;
+        default:
+            break;
+    }
+});
+```
 
-`onRequest()` 不能與 `setCommandHandler` 同時運作 — 如果設定了完整處理程式，則不會呼叫 `onRequest` 回呼。詳情請參閱 [03-public-api/01-link-api-reference.md](../03-public-api/01-link-api-reference.md)。
+`onRequest()` 不能与 `setCommandHandler` 并存——如果设置了完整处理程序，`onRequest` 回调不会被调用。有关详细信息，请参阅 [03-public-api/01-link-api-reference.md](../03-public-api/01-link-api-reference.md)。
 
-## 儲存庫中的完整示例
+## 仓库中的完整示例
 
-參考實現：`iHeater-link/src/main.cpp` 中的 `handleCommand` 處理 `drying` / `stop`。
+参考实现：在 `iHeater-link/src/main.cpp` 中处理 `drying` / `stop` 的 `handleCommand`。

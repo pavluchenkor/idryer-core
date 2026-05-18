@@ -1,8 +1,8 @@
-# 快速開始
+# 快速开始
 
-在 5 分鐘內，您將擁有一個工作設備：ESP32-C3 將上線並出現在門戶中。
+在 5 分钟内，您将拥有一个工作设备：ESP32-C3 将上线并出现在门户中。
 
-您將需要：ESP32 主機板（ESP32-C3 DevKit、Super Mini 或相容），USB 線纜、PlatformIO、WiFi 2.4 GHz，以及 [portal.idryer.org](https://portal.idryer.org/) 帳戶。
+您将需要：ESP32 主板（ESP32-C3 DevKit、Super Mini 或兼容），USB 电缆、PlatformIO、WiFi 2.4 GHz，以及 [portal.idryer.org](https://portal.idryer.org/) 帐户。
 
-- [5 分鐘快速開始](01-five-minutes.md) — 逐步演練您的第一個工作示例。
-- [詳細設置](99-detailed-setup.md) — 完整環境分解、開發 REPL、首次啟動前的故障排除。
+- [5 分钟快速开始](01-five-minutes.md) — 逐步演练您的第一个工作示例。
+- [详细设置](99-detailed-setup.md) — 完整环境分解、开发 REPL、首次启动前的故障排除。

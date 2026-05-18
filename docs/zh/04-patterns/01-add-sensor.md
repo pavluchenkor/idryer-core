@@ -1,22 +1,22 @@
-# 新增感測器
+# 添加传感器
 
-## 何時使用
+## 何时使用
 
-如果裝置需要定期讀取物理感測器（溫度、濕度、重量等），並將讀數發佈到雲端或 LAN 客戶端，請使用此配方。
+如果设备需要定期读取物理传感器（温度、湿度、重量等）并将读数发布到云或 LAN 客户端——使用这个配方。
 
-## 現成可用的代碼
+## 现成代码
 
-複製到您的專案中，並將 `MyClimate` 替換為您的類別名稱：
+复制到您的项目中并将 `MyClimate` 替换为您的类名：
 
 ```cpp
-// MyClimate.h — product sensor driver
+// MyClimate.h — 产品传感器驱动程序
 #pragma once
 #include <stdint.h>
 
 class MyClimate {
 public:
     bool  begin();
-    void  tick(uint32_t nowMs);  // non-blocking, no delay()
+    void  tick(uint32_t nowMs);  // 非阻塞，无 delay()
     float temperature() const;
     float humidity()    const;
     bool  ok()          const;
@@ -57,20 +57,20 @@ void loop() {
             s_link.telemetry.airHumidityPct[0] = s_climate.humidity();
         }
     }
-    // Publishing is automatic, on the telemetryPeriodMs timer from Config.
+    // 发布是自动的，按 Config 中的 telemetryPeriodMs 计时器。
 }
 ```
 
-## 說明
+## 解释
 
-產品只在 `loop()` 中填充 `s_link.telemetry.*` 欄位。門面在 `Config.telemetryPeriodMs` 毫秒後自動將它們發佈到 MQTT 和 Local WS。這與手動 MQTT 不同，無需呼叫 `publishTelemetryNow()` 手動呼叫。這是與手動 MQTT 的關鍵區別：沒有 `StaticJsonDocument`、沒有 `publishTelemetry`、沒有單獨的發佈者類別。
+产品仅在 `loop()` 中填充 `s_link.telemetry.*` 字段。外观每 `Config.telemetryPeriodMs` 毫秒自动将它们发布到 MQTT 和 Local WS——无需手动调用 `publishTelemetryNow()`。这是与手动 MQTT 的关键区别：无 `StaticJsonDocument`、无 `publishTelemetry`、无单独的发布者类。
 
-如果需要在計時器外立即發佈讀數，請呼叫 `s_link.publishTelemetryNow()`。
+如果需要立即发布读数在计时器外——调用 `s_link.publishTelemetryNow()`。
 
-`Config` 中的 `hasAirTemp` / `hasAirHumidity` 標誌控制 JSON 中出現哪些欄位。標誌為 `false` 的欄位不會發佈。
+`Config` 中的 `hasAirTemp` / `hasAirHumidity` 标志控制哪些字段出现在 JSON 中。标志为 `false` 的字段不被发布。
 
-遙測欄位的完整清單：[遙測欄位](../03-public-api/01-link-api-reference.md#telemetry-fields)。
+完整的遥测字段列表：[遥测字段](../03-public-api/01-link-api-reference.md#telemetry-fields)。
 
-## 儲存庫中的完整示例
+## 仓库中的完整示例
 
-參考實現：`Sht31ClimateSensor` + 在 `iDryer-Storage/src/main.cpp` 中填充 `s_link.telemetry.airTempC[0]` / `s_link.telemetry.airHumidityPct[0]`。
+参考实现：`Sht31ClimateSensor` + 在 `iDryer-Storage/src/main.cpp` 中填充 `s_link.telemetry.airTempC[0]` / `s_link.telemetry.airHumidityPct[0]`。

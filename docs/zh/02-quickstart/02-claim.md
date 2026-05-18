@@ -1,36 +1,36 @@
-# 步驟 02 — 聲稱：綁定到門戶
+# 步骤 02 — 声称：绑定到门户
 
-完成此步驟後，您的設備將在您的 [portal.idryer.org](https://portal.idryer.org/) 帳戶中顯示為線上狀態。所有後續重啟都是自動的 — 不需要重新聲稱。
+完成此步骤后，您的设备将在您的 [portal.idryer.org](https://portal.idryer.org/) 帐户中显示为在线状态。所有后续重启都是自动的 — 不需要重新声称。
 
-## 什麼是聲稱
+## 什么是声称
 
-聲稱是一個一次性的過程，其中 ESP32 向 idryer.org 雲端註冊並綁定到您的帳戶。設備生成一個有效期為 10 分鐘的 7 位數 PIN。您在門戶中輸入 PIN — 綁定完成。
+声称是一个一次性的过程，其中 ESP32 向 idryer.org 云端注册并绑定到您的帐户。设备生成一个有效期为 10 分钟的 7 位数 PIN。您在门户中输入 PIN — 绑定完成。
 
-聲稱後，`deviceId` 被保存在 NVS 中 — 設備在雲中的唯一標識符。在後續重啟時，ESP32 直接連接到 MQTT，無需重複聲稱流程。
+声称后，`deviceId` 被保存在 NVS 中 — 设备在云中的唯一标识符。在后续重启时，ESP32 直接连接到 MQTT，无需重复声称流程。
 
-## 您需要什麼
+## 您需要什么
 
-- 從 [步驟 01](01-wifi.md) 刷新並連接到 WiFi 的 ESP32
-- [portal.idryer.org](https://portal.idryer.org/) 上的帳戶
-- USB 線纜和打開的串行監視器
+- 从 [步骤 01](01-wifi.md) 刷新并连接到 WiFi 的 ESP32
+- [portal.idryer.org](https://portal.idryer.org/) 上的帐户
+- USB 电缆和打开的串行监视器
 
-## 步驟
+## 步骤
 
-**1. 驗證草圖包含自動聲稱。** 以下行必須在 `setup()` 中（它已經在 `03_with_improv` 示例中存在）：
+**1. 验证草图包含自动声称。** 以下行必须在 `setup()` 中（它已经在 `03_with_improv` 示例中存在）：
 
 ```cpp
 s_cloud.setUnclaimedCallback([](void*) { s_cloud.requestClaim(); }, nullptr);
 ```
 
-當設備連接到互聯網並檢測到尚未被聲稱時，此回調會自動觸發。
+当设备连接到互联网并检测到尚未被声称时，此回调会自动触发。
 
-**2. 打開串行監視器**並重啟主機板：
+**2. 打开串行监视器**并重启主板：
 
 ```bash
 pio device monitor -b 115200
 ```
 
-**3. 在日誌中等待 PIN。** 在 WiFi → 佈建 → 等待聲稱之後：
+**3. 在日志中等待 PIN。** 在 WiFi → 配置 → 等待声称之后：
 
 ```
 [CLOUD] WiFi connected, IP: 192.168.1.42, RSSI: -47 dBm
@@ -40,13 +40,13 @@ pio device monitor -b 115200
 [CLOUD] PIN: 3847291 (expires in 600s)
 ```
 
-設備正在等待。PIN 有效期為 10 分鐘。
+设备正在等待。PIN 有效期为 10 分钟。
 
-**4. 轉到 [portal.idryer.org](https://portal.idryer.org/)**並導航到**添加設備**。
+**4. 转到 [portal.idryer.org](https://portal.idryer.org/)**并导航到**添加设备**。
 
-**5. 從串行監視器輸入 PIN**（7 位數字，無空格）。
+**5. 从串行监视器输入 PIN**（7 位数字，无空格）。
 
-**6. 在門戶中確認綁定**。串行監視器將顯示：
+**6. 在门户中确认绑定**。串行监视器将显示：
 
 ```
 [CLOUD] Device claimed! deviceId=...
@@ -55,17 +55,17 @@ pio device monitor -b 115200
 [RT] Cloud Online
 ```
 
-## 驗證
+## 验证
 
-打開門戶上的設備列表 — 設備應顯示為**線上**狀態。內置 LED 將每 500 毫秒閃爍一次（如果您正在使用 `01_blink_status` 示例）。
+打开门户上的设备列表 — 设备应显示为**在线**状态。内置 LED 将每 500 毫秒闪烁一次（如果您正在使用 `01_blink_status` 示例）。
 
 !!! note
-    如果 PIN 過期（已超過 10 分鐘） — 重啟主機板。自動聲稱將生成新 PIN。
+    如果 PIN 过期（已超过 10 分钟） — 重启主板。自动声称将生成新 PIN。
 
 !!! warning
-    如果設備已被另一個帳戶聲稱，在啟用 `IDRYER_DEV_REPL=1` 的串行監視器中輸入 `wipe` 命令。NVS 將被擦除，主機板將重啟，聲稱將從新開始。
+    如果设备已被另一个帐户声称，在启用 `IDRYER_DEV_REPL=1` 的串行监视器中输入 `wipe` 命令。NVS 将被擦除，主板将重启，声称将从新开始。
 
 ## 下一步
 
-- [03-telemetry.md](03-telemetry.md) — 連接傳感器並將讀數發布到門戶。
-- [02-onboarding.md](02-onboarding.md) — REPL 和 Improv 路徑的詳細登錄文檔。
+- [03-telemetry.md](03-telemetry.md) — 连接传感器并将读数发布到门户。
+- [02-onboarding.md](02-onboarding.md) — REPL 和 Improv 路径的详细登录文档。

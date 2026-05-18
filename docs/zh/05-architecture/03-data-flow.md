@@ -1,19 +1,19 @@
-# 數據流
+# 数据流
 
-Description of how data moves inside a running device. The goal is to show that `idryer-core` uses neither an event bus nor a service locator: participants are connected by explicit pointers in the composition root, and each data direction is a separate, readable path.
+对运行中的设备内部数据移动方式的描述。目标是显示 `idryer-core` 既不使用事件总线也不使用服务定位器：参与者通过组合根中的显式指针连接，每个数据方向是一个单独的、可读的路径。
 
-Detailed patterns for "how to route data between my parts" are in [04-patterns/99-data-flow.md](../04-patterns/99-data-flow.md).
+关于"如何在我的部分之间路由数据"的详细模式在 [04-patterns/99-data-flow.md](../04-patterns/99-data-flow.md) 中。
 
 ## 主要方向
 
 ```
-                Backend / app
+                后端 / 应用
                      │
                      │ MQTT commands/*
                      ▼
         ┌──────────────────────────────┐
         │  MqttClient                  │
-        │  parses topic + payload      │
+        │  解析主题 + 有效负载          │
         └──────────────┬───────────────┘
                        │
                        │ CommandCallback
@@ -27,70 +27,70 @@ Detailed patterns for "how to route data between my parts" are in [04-patterns/9
                        │ commandHandler_(cmd, data)
                        ▼
         ┌──────────────────────────────┐
-        │  Product handleCommand()     │
+        │  产品 handleCommand()        │
         │  invoke / set / get_config / │
         │  product-specific commands   │
         └──────┬───────────────┬───────┘
                │               │
                ▼               ▼
-   ActionDispatcher        IProfile             Sensor / Peripheral TODO:
-   handleInvoke / Set      getConfig            (product code)
+   ActionDispatcher        IProfile
+   handleInvoke / Set      getConfig
                            applyConfig
                            buildInfoJson
 ```
 
 ```
-       Sensor (product)            Profile / executor
+       传感器（产品）          配置文件 / 执行器
             │                           │
-            │ tick() / read             │ updates state
+            │ tick() / read             │ 更新状态
             ▼                           ▼
        ┌───────────────────────────────────────┐
-       │  Product Publisher                    │
+       │  产品发布者                           │
        │  (StorageTelemetryPublisher, …)       │
-       │  builds JsonDocument                  │
+       │  构建 JsonDocument                    │
        └────────────────┬──────────────────────┘
                         │
                         │ pub.publishX(doc)
                         ▼
        ┌───────────────────────────────────────┐
-       │  DevicePublisher (optional)           │
-       │  dual-publish helper: MQTT + Local WS │
+       │  DevicePublisher（可选）             │
+       │  双发布助手：MQTT + 本地 WS          │
        └─────────┬─────────────────────┬───────┘
                  │                     │
                  ▼                     ▼
             MqttClient            LocalAccess (WS)
-            broker                LAN client
+            broker                LAN 客户端
 ```
 
-## 傳入命令
+## 传入命令
 
-1. **MQTT** delivers a message in topic `idryer/{serial}/commands/{cmd}`.
-2. `MqttClient::handleMessage` parses the payload as JSON and calls `CommandCallback`.
-3. `CommandCallback` is registered by `IdryerRuntime` in `begin()` — it accepts `(command, data)`, where `command` is the suffix after `commands/`.
-4. `IdryerRuntime::onMqttCommand`:
-   - If `command == "ping"` — syncs time and publishes info. Not passed further.
-   - If a `commandHandler_` is registered — passes everything else to the product.
-   - Otherwise — fallback built-in path: `invoke` → `ActionDispatcher`, `set` → `ActionDispatcher`, `device.getConfig` → `IProfile::getConfig`.
+1. **MQTT** 在主题 `idryer/{serial}/commands/{cmd}` 中传递消息。
+2. `MqttClient::handleMessage` 解析有效负载为 JSON 并调用 `CommandCallback`。
+3. `CommandCallback` 由 `IdryerRuntime` 在 `begin()` 中注册——它接受 `(command, data)`，其中 `command` 是 `commands/` 后的后缀。
+4. `IdryerRuntime::onMqttCommand`：
+   - 如果 `command == "ping"` — 同步时间并发布信息。不进一步传递。
+   - 如果注册了 `commandHandler_` — 将其他一切传递给产品。
+   - 否则 — 回退内置路径：`invoke` → `ActionDispatcher`、`set` → `ActionDispatcher`、`device.getConfig` → `IProfile::getConfig`。
 
-5. **Local WS** (if used) accepts `{"type":"command","command":"...","data":{...}}`, unwraps the envelope, and calls the same `CommandSink` registered for the MQTT path. One handler — two transports.
+5. **本地 WS**（如果使用）接受 `{"type":"command","command":"...","data":{...}}`、展开信封、并调用为 MQTT 路径注册的相同 `CommandSink`。一个处理程序——两个传输。
 
-## 傳出數據
+## 传出数据
 
-The library publishes nothing unless asked. All outgoing messages are initiated by the product:
+库不发布任何内容除非被要求。所有传出消息都由产品启动：
 
-| What | Initiated by | Via which API |
-|------|-------------|--------------|
-| `info` | `IdryerRuntime` (once when Online and on `ping`) | `MqttClient::publishInfoJson` |
-| `telemetry` | product publisher | `MqttClient::publishTelemetry` or `DevicePublisher::publishTelemetry` |
-| `status` | product code on state change | `MqttClient::publishStatus` or `DevicePublisher::publishStatus` |
-| `config` | `handleCommand` on `device.getConfig` or `get_config` | `MqttClient::publishConfig` |
-| `events` | product code on an event | `MqttClient::publishEvent` |
+| 什么 | 由谁启动 | 通过哪个 API |
+|------|---------|-----------|
+| `info` | `IdryerRuntime`（在线时一次，在 `ping` 上） | `MqttClient::publishInfoJson` |
+| `telemetry` | 产品发布者 | `MqttClient::publishTelemetry` 或 `DevicePublisher::publishTelemetry` |
+| `status` | 产品代码在状态更改时 | `MqttClient::publishStatus` 或 `DevicePublisher::publishStatus` |
+| `config` | `handleCommand` 在 `device.getConfig` 或 `get_config` 时 | `MqttClient::publishConfig` |
+| `events` | 产品代码在事件时 | `MqttClient::publishEvent` |
 | `integrations/status` | `LinkIntegrationsManager` | `MqttClient::publishIntegrationsStatus` |
-| `offline` | broker automatically (LWT) | device never publishes this |
+| `offline` | 代理自动（LWT） | 设备从不发布此 |
 
-## 組合根中的對象連接
+## 组合根中的对象连接
 
-References between participants are passed explicitly through constructors and setters. No global registries.
+参与者之间的引用通过构造函数和设置器明确传递。没有全局注册表。
 
 ```
 ArduinoWifiManager     ─┐
@@ -101,25 +101,25 @@ MqttClient             ─┘                              ▲
                                 ActionDispatcher ──────┤
                                 IProfile         ──────┘
 
-                LocalAccess  ──── (setCommandSink) ────→ same handleCommand
+                LocalAccess  ──── (setCommandSink) ────→ 相同 handleCommand
                 DevicePublisher (&MqttClient, &LocalAccess)
 
-                Sensor  ──→ Publisher  ──→ DevicePublisher  ──→ MqttClient + LocalAccess
-                Executor ←── ActionDispatcher (invoke)  ←── handleCommand
+                传感器  ──→ 发布者  ──→ DevicePublisher  ──→ MqttClient + LocalAccess
+                执行器 ←── ActionDispatcher (invoke)  ←── handleCommand
 ```
 
-Each connection is one line in `main.cpp`. This is the "explicit composition root".
+每个连接都是 `main.cpp` 中的一行。这是"显式组合根"。
 
-## 為什麼選擇這種設計
+## 为什么选择这个设计
 
-- **No magic**: to understand how data travels from a sensor to the cloud, the reader sees the pointer chain in `main.cpp`. No data flow is hidden behind a facade.
-- **Flexibility**: the product chooses whether to use `DevicePublisher` (MQTT + WS), publish only to MQTT, or use its own publisher with additional logic.
-- **Testability**: each node is a separate class with explicit dependencies. Nodes can be replaced with mocks without changing the rest of the stack.
+- **没有魔法**：要理解数据如何从传感器传到云，读者看到 `main.cpp` 中的指针链。没有数据流隐藏在外观后面。
+- **灵活性**：产品选择是否使用 `DevicePublisher`（MQTT + WS）、仅发布到 MQTT 或使用具有额外逻辑的自己的发布者。
+- **可测试性**：每个节点都是一个具有显式依赖的单独类。节点可以被替换为模拟而不改变堆栈的其余部分。
 
-## 故意缺失的內容
+## 故意缺少什么
 
-- No global event bus or message broker inside the device.
-- No automatic detection of "I have a sensor, I will publish its data on my own".
-- No type registry of "device knows all its telemetry providers".
+- 没有设备内的全局事件总线或消息代理。
+- 没有自动检测"我有传感器，我会自己发布其数据"。
+- 没有"设备知道所有其遥测提供者"的类型注册表。
 
-If such connections are needed by the product — the product adds them in its own product code. The library does not impose them.
+如果产品需要这样的连接——产品在其自己的产品代码中添加它们。库不施加它们。

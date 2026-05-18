@@ -1,19 +1,19 @@
-# 參與者之間的數據流
+# 参与者之间的数据流
 
-Applied section: how sensors, peripherals, profile, transports, and publishers are connected in real product code. The architectural data flow description is in [05-architecture/03-data-flow.md](../05-architecture/03-data-flow.md).
+应用部分：传感器、外围设备、配置文件、传输和发布者如何在真实产品代码中连接。架构数据流说明在 [05-architecture/03-data-flow.md](../05-architecture/03-data-flow.md) 中。
 
-## 原理
+## 原则
 
-`idryer-core` deliberately does not provide an internal event bus. All connections between participants are **explicit pointers** passed through constructors in the composition root. This means:
+`idryer-core` 有意不提供内部事件总线。所有参与者之间的连接都是通过组合根中的构造函数传递的**显式指针**。这意味着：
 
-- Any data flow can be read as a chain of pointers in `main.cpp`.
-- No "magic" participant discovery.
-- The product decides who passes what to whom.
+- 任何数据流都可以读作 `main.cpp` 中的指针链。
+- 没有"魔法"参与者发现。
+- 产品决定谁传递什么给谁。
 
-## Typical connection map for Storage Link
+## 存储链接的典型连接图
 
 ```
-   Sensor (Sht31ClimateSensor)
+   传感器（Sht31ClimateSensor）
         │
         │ tick(now), get()
         ▼
@@ -31,7 +31,7 @@ Applied section: how sensors, peripherals, profile, transports, and publishers a
         └──→  IProfile::applyConfig (via onSetCommand)
 ```
 
-Each arrow is one pointer-passing line in `main.cpp`. For example:
+每个箭头都是 `main.cpp` 中的一条指针传递线。例如：
 
 ```cpp
 static Sht31ClimateSensor        s_sensor(&Wire);
@@ -40,12 +40,12 @@ static StorageTelemetryPublisher s_telemetry(&s_sensor, &s_pub);
 //                                            sensor     publisher
 ```
 
-## Recipe 1 — Sensor publishes to the cloud
+## 配方 1 — 传感器发布到云
 
-**Goal**: temperature sensor → MQTT.
+**目标**：温度传感器 → MQTT。
 
 ```
-Sensor → Publisher → DevicePublisher → MqttClient + LocalAccess
+传感器 → 发布者 → DevicePublisher → MqttClient + LocalAccess
 ```
 
 ```cpp
@@ -60,11 +60,11 @@ void loop() {
 }
 ```
 
-`MyTelemetryPublisher::loop` decides when to publish (by interval). See [01-add-sensor.md](01-add-sensor.md).
+`MyTelemetryPublisher::loop` 决定何时发布（按间隔）。请参阅 [01-add-sensor.md](01-add-sensor.md)。
 
-## Recipe 2 — Cloud command → peripheral
+## 配方 2 — 云命令 → 外围设备
 
-**Goal**: `commands/invoke {"action":"led.pulse",...}` → turn on LED.
+**目标**：`commands/invoke {"action":"led.pulse",...}` → 打开 LED。
 
 ```
 MqttClient → IdryerRuntime → handleCommand → ActionDispatcher → onInvoke → LedStripExecutor
@@ -87,23 +87,23 @@ void setup() {
 }
 ```
 
-See [02-add-peripheral.md](02-add-peripheral.md).
+请参阅 [02-add-peripheral.md](02-add-peripheral.md)。
 
-## Recipe 3 — LAN app command → peripheral (same path)
+## 配方 3 — LAN 应用程序命令 → 外围设备（相同路径）
 
-**Goal**: WS client on LAN sends `{"type":"command","command":"invoke","data":{"action":"led.pulse",...}}` → the same LED turns on.
+**目标**：LAN 上的 WS 客户端发送 `{"type":"command","command":"invoke","data":{"action":"led.pulse",...}}` → 同一个 LED 打开。
 
 ```
 WS-client → LocalAccess → CommandSink → handleCommand → ActionDispatcher → ...
 ```
 
-No new code needed — `s_local.setCommandSink(handleCommand)` already merges both transports into one handler.
+不需要新代码 — `s_local.setCommandSink(handleCommand)` 已经将两个传输合并到一个处理程序中。
 
-## Recipe 4 — Sensor → Peripheral (internal loop)
+## 配方 4 — 传感器 → 外围设备（内部循环）
 
-**Goal**: sensor reads humidity → if above threshold, fan turns on.
+**目标**：传感器读取湿度 → 如果超过阈值，风扇打开。
 
-This is internal product logic; `idryer-core` has no API for such connections. Do it directly:
+这是内部产品逻辑；`idryer-core` 没有这样连接的 API。直接做：
 
 ```cpp
 class HumidityController {
@@ -128,7 +128,7 @@ private:
 };
 ```
 
-Connecting in the composition root:
+在组合根中连接：
 
 ```cpp
 static HumidityController s_humCtrl(&s_sensor, &s_fan, 60.0f);
@@ -140,11 +140,11 @@ void loop() {
 }
 ```
 
-`idryer-core` knows nothing about this class and should not.
+`idryer-core` 不知道这个类，也不应该知道。
 
-## Recipe 5 — Config change → peripheral reinitialization
+## 配方 5 — 配置更改 → 外围设备重新初始化
 
-**Goal**: backend sends `commands/set {"id":CFG_BRIGHTNESS,"val":150}` → LED brightness changes immediately.
+**目标**：后端发送 `commands/set {"id":CFG_BRIGHTNESS,"val":150}` → LED 亮度立即改变。
 
 ```
 MqttClient → IdryerRuntime → handleCommand → ActionDispatcher → onSetCommand → IProfile::applyConfig → Peripheral
@@ -159,7 +159,7 @@ public:
         if (id == CFG_BRIGHTNESS) {
             menu.brightness = val;
             menu.saveToNVS();
-            device_->setBrightness(val);   // immediate apply
+            device_->setBrightness(val);   // 立即应用
             return true;
         }
         return false;
@@ -170,18 +170,18 @@ private:
 };
 ```
 
-The `profile → peripheral` connection is built in the composition root:
+`profile → peripheral` 连接在组合根中构建：
 
 ```cpp
 static MyDevice s_device;
 static MyProfile  s_profile(&s_device);
 ```
 
-## Recipe 6 — New event → events topic
+## 配方 6 — 新事件 → 事件主题
 
-**Goal**: peripheral catches an error → event in `idryer/{serial}/events`.
+**目标**：外围设备捕获错误 → `idryer/{serial}/events` 中的事件。
 
-The peripheral does not publish on its own. It notifies the product; the product publishes:
+外围设备不自己发布。它通知产品；产品发布：
 
 ```cpp
 class MyDevice {
@@ -196,7 +196,7 @@ private:
     }
 };
 
-// in main.cpp
+// 在 main.cpp 中
 s_device.setErrorCallback([](int code, const char* msg) {
     StaticJsonDocument<128> doc;
     doc["code"] = code;
@@ -205,16 +205,16 @@ s_device.setErrorCallback([](int code, const char* msg) {
 });
 ```
 
-Alternatively, the peripheral can accept a `DevicePublisher*` through its constructor. The key point: the connection is explicit.
+或者，外围设备可以通过其构造函数接受 `DevicePublisher*`。关键点：连接是明确的。
 
-## 我們不做的事
+## 我们不做什么
 
-- We do not introduce an internal event bus. This would lead to hidden connections and debugging complexity.
-- We do not collect sensor/peripheral/publisher into a shared `IDeviceContainer`. Connections are built precisely in the composition root.
-- We do not use name-based subscriptions ("publisher 'telemetry' listens to sensor 'sht31'"). All connections are typed pointers.
+- 我们不引入内部事件总线。这会导致隐藏的连接和调试复杂性。
+- 我们不将传感器/外围设备/发布者收集到共享的 `IDeviceContainer` 中。连接在组合根中精确构建。
+- 我们不使用基于名称的订阅（"发布者 'telemetry' 监听传感器 'sht31'"）。所有连接都是类型化指针。
 
-## 相關文檔
+## 相关文档
 
-- [05-architecture/01-composition-root.md](../05-architecture/01-composition-root.md) — creation and assembly order.
-- [05-architecture/03-data-flow.md](../05-architecture/03-data-flow.md) — architectural diagram.
-- [04-patterns/01-add-sensor.md](01-add-sensor.md), [02-add-peripheral.md](02-add-peripheral.md), [03-add-transport.md](03-add-transport.md) — concrete component recipes.
+- [05-architecture/01-composition-root.md](../05-architecture/01-composition-root.md) — 创建和组装顺序。
+- [05-architecture/03-data-flow.md](../05-architecture/03-data-flow.md) — 架构图。
+- [04-patterns/01-add-sensor.md](01-add-sensor.md)、[02-add-peripheral.md](02-add-peripheral.md)、[03-add-transport.md](03-add-transport.md) — 具体组件配方。

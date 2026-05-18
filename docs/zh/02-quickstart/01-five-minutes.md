@@ -1,21 +1,21 @@
-# 5分鐘快速開始
+# 5分钟快速开始
 
-完成此頁面後，您的ESP32將被刷入，將連接到WiFi，並在[portal.idryer.org](https://portal.idryer.org/)上顯示為線上狀態。需求：ESP32-C3（DevKit、Super Mini 或相容）、USB線纜、VS Code中的PlatformIO。
+完成此页面后，您的ESP32将被刷入，将连接到WiFi，并在[portal.idryer.org](https://portal.idryer.org/)上显示为在线状态。要求：ESP32-C3（DevKit、Super Mini 或兼容）、USB 电缆、VS Code 中的 PlatformIO。
 
-## 1. 準備 secrets.h
+## 1. 准备 secrets.h
 
-將[`examples/secrets.h.example`](https://github.com/pavluchenkor/idryer-core/blob/main/examples/secrets.h.example)複製到您項目的`include/secrets.h`並設置您的WiFi SSID和密碼（僅2.4 GHz）：
+将[`examples/secrets.h.example`](https://github.com/pavluchenkor/idryer-core/blob/main/examples/secrets.h.example)复制到您项目的`include/secrets.h`并设置您的WiFi SSID和密码（仅2.4 GHz）：
 
 ```cpp
 #define WIFI_SSID      "your-ssid"
 #define WIFI_PASSWORD  "your-password"
 ```
 
-將`include/secrets.h`添加到`.gitignore`。
+将`include/secrets.h`添加到`.gitignore`。
 
 ## 2. 配置 platformio.ini
 
-在項目根目錄中創建`platformio.ini`：
+在项目根目录中创建`platformio.ini`：
 
 ```ini
 [env:blink-demo]
@@ -33,11 +33,11 @@ build_flags =
     -DMQTT_USE_TLS=1
 ```
 
-將`board`更改為匹配您的主機板。將`path/to/idryer-core`替換為庫的實際路徑。
+将`board`更改为匹配您的主板。将`path/to/idryer-core`替换为库的实际路径。
 
-## 3. 複製01_blink_status示例
+## 3. 复制01_blink_status示例
 
-將[`examples/01_blink_status/01_blink_status.ino`](https://github.com/pavluchenkor/idryer-core/blob/main/examples/01_blink_status/01_blink_status.ino)的內容複製到您項目的`src/main.cpp`。此示例不需要傳感器或其他依賴項 — 只需要一個最小的組合根。
+将[`examples/01_blink_status/01_blink_status.ino`](https://github.com/pavluchenkor/idryer-core/blob/main/examples/01_blink_status/01_blink_status.ino)的内容复制到您项目的`src/main.cpp`。此示例不需要传感器或其他依赖项 — 只需要一个最小的组合根。
 
 ## 4. 刷入
 
@@ -45,13 +45,13 @@ build_flags =
 pio run -e blink-demo -t upload
 ```
 
-## 5. 打開串行監視器
+## 5. 打开串行监视器
 
 ```bash
 pio device monitor -b 115200
 ```
 
-預期日誌序列：
+预期日志序列：
 
 ```
 [CLOUD] Init: serial=DEVICE_XXXXXXXXXXXX deviceId=
@@ -63,7 +63,7 @@ pio device monitor -b 115200
 [CLOUD] PIN: 1234567 (expires in 600s)
 ```
 
-在門戶中輸入PIN（步驟6）後：
+在门户中输入PIN（步骤6）后：
 
 ```
 [CLOUD] Device claimed! deviceId=...
@@ -72,17 +72,17 @@ pio device monitor -b 115200
 [RT] Cloud Online
 ```
 
-如果設備在`PIN: ...`消息處停止 — 這是正常的；繼續執行步驟6。
+如果设备在`PIN: ...`消息处停止 — 这是正常的；继续执行步骤6。
 
-## 6. 在門戶中聲稱設備
+## 6. 在门户中声称设备
 
-打開[portal.idryer.org](https://portal.idryer.org/)，轉到**添加設備**，然後輸入串行監視器中的PIN。成功聲稱後，設備將轉變為`線上`，內置LED將每500毫秒閃爍一次。
+打开[portal.idryer.org](https://portal.idryer.org/)，转到**添加设备**，然后输入串行监视器中的PIN。成功声称后，设备将转变为`在线`，内置LED将每500毫秒闪烁一次。
 
-詳細的聲稱流程：[登錄](02-onboarding.md)。
+详细的声称流程：[登录](02-onboarding.md)。
 
-## 接下來做什麼
+## 接下来做什么
 
-- 添加傳感器 — [04-patterns/01-add-sensor.md](../04-patterns/01-add-sensor.md)
-- 添加外圍設備 — [04-patterns/02-add-peripheral.md](../04-patterns/02-add-peripheral.md)
-- 完整API參考 — [03-public-api/01-link-api-reference.md](../03-public-api/01-link-api-reference.md)
-- 內部工作原理 — [05-architecture/01-composition-root.md](../05-architecture/01-composition-root.md)
+- 添加传感器 — [04-patterns/01-add-sensor.md](../04-patterns/01-add-sensor.md)
+- 添加外围设备 — [04-patterns/02-add-peripheral.md](../04-patterns/02-add-peripheral.md)
+- 完整API参考 — [03-public-api/01-link-api-reference.md](../03-public-api/01-link-api-reference.md)
+- 内部工作原理 — [05-architecture/01-composition-root.md](../05-architecture/01-composition-root.md)

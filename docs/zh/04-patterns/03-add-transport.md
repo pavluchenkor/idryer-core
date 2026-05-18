@@ -1,42 +1,42 @@
-# 通過 devicePublisher 發佈
+# 通过 devicePublisher 发布
 
-## 何時使用
+## 何时使用
 
-`iDryer::Link` 已包含兩個內置傳輸：MQTT（雲）和本地 WebSocket (LAN)。大多數任務不需要額外的傳輸。
+`iDryer::Link` 已包含两个内置传输：MQTT（云）和本地 WebSocket（LAN）。大多数任务不需要额外的传输。
 
-當產品組裝自己的有效負載並必須同時將其發送到兩個通道時，使用 `s_link.devicePublisher()` — 例如，在響應 `commands/get_config` 時發佈菜單配置。
+当产品组装其自己的有效负载并必须同时将其发送到两个通道时，使用 `s_link.devicePublisher()` ——例如，当响应 `commands/get_config` 发布菜单配置时。
 
-## 現成代碼
+## 现成代码
 
 ```cpp
-// main.cpp (片段)
+// main.cpp（片段）
 #include <iDryer.h>
 
 static iDryer::Link s_link(CFG);
 
-// 通過單一調用將任意 JSON 有效負載發佈到 MQTT 和本地 WS。
+// 在单个调用中将任意 JSON 有效负载发布到 MQTT 和本地 WS。
 static void publishConfig() {
     static char buf[1024];
-    size_t len = buildConfigJson(buf, sizeof(buf));  // 產品函數
+    size_t len = buildConfigJson(buf, sizeof(buf));  // 产品函数
     if (len == 0) return;
     s_link.devicePublisher()->publishConfigRaw(buf, len);
 }
 ```
 
-單一的 `publishConfigRaw` 調用將有效負載傳遞到 MQTT 主題 `idryer/{serial}/config` 和所有活動的 LAN WS 客戶端。無需創建額外的客戶端或主題。
+单个 `publishConfigRaw` 调用将有效负载传递到 MQTT 主题 `idryer/{serial}/config` 和所有活动的 LAN WS 客户端。无需创建其他客户端或主题。
 
-## 說明
+## 解释
 
-`devicePublisher()` 是外觀的雙發佈幫助程序。除非您需要發佈到非標準主題，否則使用它代替直接調用 `mqttClient()` 或 `LocalAccess`。
+`devicePublisher()` 是外观的双重发布助手。使用它而不是直接调用 `mqttClient()` 或 `LocalAccess`，除非需要发布到非标准主题。
 
-遙測和狀態由外觀在計時器上自動發佈 — `devicePublisher()` 不需要用於這些。
+遥测和状态由外观在计时器上自动发布——`devicePublisher()` 不需要用于这些。
 
-## 何時需要第三種傳輸
+## 何时需要第三个传输
 
-添加第三個通道（BLE、Serial JSON、UART 代理）是外觀的架構擴展，而不是配方模式。絕大多數設備不需要這個。
+添加第三个通道（BLE、串行 JSON、UART 代理）是外观的架构扩展，而不是配方模式。绝大多数设备不需要这个。
 
-如果您確實需要它 — 進入點在 `lib/idryer-core/src/cloud/`（雲狀態機、MQTT）和 `lib/idryer-core/src/`（本地訪問）。在繼續之前，確認內置的 MQTT 和本地 WS 對您的用例不夠。
+如果确实需要——入口点在 `lib/idryer-core/src/cloud/`（云状态机、MQTT）和 `lib/idryer-core/src/`（本地访问）。在继续之前，确认内置的 MQTT 和本地 WS 对您的使用情况不足。
 
-## 存儲庫中的完整示例
+## 仓库中的完整示例
 
-`iDryer-Storage/src/main.cpp:171` 中的 `publishFullMenu()` — 通過 `s_link.devicePublisher()->publishConfigRaw(buf, len)` 發佈完整的 JSON 菜單。
+`iDryer-Storage/src/main.cpp:171` 中的 `publishFullMenu()` ——通过 `s_link.devicePublisher()->publishConfigRaw(buf, len)` 发布完整的 JSON 菜单。

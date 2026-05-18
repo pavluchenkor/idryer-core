@@ -1,27 +1,27 @@
-# UART 層
+# UART 层
 
-The UART module implements a binary frame protocol for bidirectional communication between ESP32 (Link) and RP2040 (Controller). Used in dual-MCU devices: iDryer LINK, iHeater LINK.
+UART 模块实现了一个二进制帧协议，用于 ESP32（Link）和 RP2040（Controller）之间的双向通信。用于双 MCU 设备：iDryer LINK、iHeater LINK。
 
-**Storage Link does not use the UART module** — it is a standalone ESP32-C3 device without a second MCU.
+**存储链接不使用 UART 模块**——它是一个没有第二个 MCU 的独立 ESP32-C3 设备。
 
-Include separately:
+单独包含：
 
 ```cpp
 #include <idryer_uart.h>
 ```
 
-## 物理層
+## 物理层
 
-- UART 8N1, 115200 baud (default), no hardware flow control.
-- Maximum frame payload: 200 bytes.
-- CRC-16/CCITT (poly 0x1021, init 0xFFFF) per frame.
+- UART 8N1、115200 波特率（默认）、无硬件流控制。
+- 最大帧有效负载：200 字节。
+- 每帧的 CRC-16/CCITT（多项式 0x1021、初始值 0xFFFF）。
 
-## 幀結構
+## 帧结构
 
 ```
 byte 0  : SOF = 0xAA
 byte 1  : version = 1
-byte 2  : flags   (ACK required | is ACK | error | fragment | last fragment)
+byte 2  : flags   (需要 ACK | 是 ACK | 错误 | 片段 | 最后片段)
 byte 3  : message kind (UartMsgKind)
 byte 4  : sequence number (0..255, wrap)
 byte 5  : payload length
@@ -29,57 +29,57 @@ payload : data (0..200 bytes)
 crc16   : CRC, low byte + high byte
 ```
 
-## 類
+## 类
 
 ### UartBridge
 
-Main class of the module. Processes the incoming stream byte by byte, builds frames, verifies CRC, manages ACK/retry, and dispatches frames to registered callbacks.
+模块的主要类。逐字节处理传入流、构建帧、验证 CRC、管理 ACK/重试，并将帧分派到注册的回调。
 
 ```cpp
 UartBridge bridge;
 bridge.begin(&Serial1, 115200);
 
-// Register handlers before begin()
+// 在 begin() 之前注册处理程序
 bridge.setHelloHandler([&](const UartHelloPayload& p, const UartFrameHeader&) {
     cloud.setMcuSerial(p.mcuSerial);
     UartHelloAckPayload ack{};
     bridge.sendHelloAck(ack);
 });
 
-// in loop():
+// 在 loop() 中：
 bridge.loop();
 ```
 
-Send methods are split into two groups:
+发送方法分为两组：
 
-- ESP32 → RP2040: `sendHelloAck`, `sendCommand`, `sendProfileCommand`, `sendConfigPush`, `sendHeartbeat`, `sendClaimStatus`, `sendClaimComplete`, `sendWsStatus`, `sendTelemetryAck`, `sendCommandAck`, `sendConfigAck`.
-- RP2040 → ESP32 (or for tests): `sendHello`, `sendTelemetry`, `sendStatus`, `sendWeights`, `sendRfid`.
+- ESP32 → RP2040：`sendHelloAck`、`sendCommand`、`sendProfileCommand`、`sendConfigPush`、`sendHeartbeat`、`sendClaimStatus`、`sendClaimComplete`、`sendWsStatus`、`sendTelemetryAck`、`sendCommandAck`、`sendConfigAck`。
+- RP2040 → ESP32（或用于测试）：`sendHello`、`sendTelemetry`、`sendStatus`、`sendWeights`、`sendRfid`。
 
-ACK/retry: frames with the `UART_FLAG_ACK_REQ` flag are retried up to 3 times with a 700 ms timeout. If no ACK is received — `send*` returns `false`.
+ACK/重试：具有 `UART_FLAG_ACK_REQ` 标志的帧重试最多 3 次，超时 700 毫秒。如果未收到 ACK — `send*` 返回 `false`。
 
-### 消息類型
+### 消息类型
 
-| Kind | Code | Direction | Purpose |
-|------|------|-----------|---------|
-| `Hello` | 0x01 | RP2040 → ESP32 | Announcement at startup; contains MCU serial, device type, capabilities |
-| `HelloAck` | 0x02 | ESP32 → RP2040 | Response with IP address and SSID |
-| `Telemetry` | 0x10 | RP2040 → ESP32 | Temperature, humidity, heater power |
-| `Weights` | 0x12 | RP2040 → ESP32 | Scale readings |
-| `Status` | 0x13 | RP2040 → ESP32 | Current drying mode, session progress |
-| `Rfid` | 0x14 | RP2040 → ESP32 | RFID event (tag detected/removed) |
-| `Command` | 0x20 | ESP32 → RP2040 | Command from backend (start, stop, find...) |
-| `ConfigPush` | 0x30 | ESP32 → RP2040 | Configuration (simple or chunked) |
-| `Heartbeat` | 0x40 | ESP32 → RP2040 | Uptime, RSSI, cloud state |
-| `Error` | 0x50 | both | Protocol error |
-| `ClaimStart..Complete` | 0x70–0x72 | both | Claiming lifecycle |
-| `WsEnable..StatusRequest` | 0x73–0x76 | both | WebSocket server control on RP2040 |
+| 种类 | 代码 | 方向 | 目的 |
+|------|------|------|------|
+| `Hello` | 0x01 | RP2040 → ESP32 | 启动时公告；包含 MCU 序列号、设备类型、功能 |
+| `HelloAck` | 0x02 | ESP32 → RP2040 | 响应 IP 地址和 SSID |
+| `Telemetry` | 0x10 | RP2040 → ESP32 | 温度、湿度、加热器功率 |
+| `Weights` | 0x12 | RP2040 → ESP32 | 秤读数 |
+| `Status` | 0x13 | RP2040 → ESP32 | 当前干燥模式、会话进度 |
+| `Rfid` | 0x14 | RP2040 → ESP32 | RFID 事件（标签检测/移除） |
+| `Command` | 0x20 | ESP32 → RP2040 | 来自后端的命令（启动、停止、查找...） |
+| `ConfigPush` | 0x30 | ESP32 → RP2040 | 配置（简单或分块） |
+| `Heartbeat` | 0x40 | ESP32 → RP2040 | 正常运行时间、RSSI、云状态 |
+| `Error` | 0x50 | 两个 | 协议错误 |
+| `ClaimStart..Complete` | 0x70–0x72 | 两个 | 声称生命周期 |
+| `WsEnable..StatusRequest` | 0x73–0x76 | 两个 | RP2040 上的 WebSocket 服务器控制 |
 
 ### ConfigReceiver / ConfigSender
 
-Utility classes for transferring large JSON configs over UART in fragments (each fragment ≤ 194 bytes of data).
+用于通过 UART 在片段中传输大型 JSON 配置的实用程序类（每个片段 ≤ 194 字节数据）。
 
 ```cpp
-// Receive (ESP32 ← RP2040)
+// 接收（ESP32 ← RP2040）
 ConfigReceiver rx;
 bridge.setConfigChunkHandler([&rx, &mqtt](const UartConfigChunkPayload& p, uint8_t len, const UartFrameHeader& hdr) {
     if (rx.processFragment(p, len, hdr.flags) == ConfigFragResult::Complete) {
@@ -88,7 +88,7 @@ bridge.setConfigChunkHandler([&rx, &mqtt](const UartConfigChunkPayload& p, uint8
     }
 });
 
-// Send (ESP32 → RP2040)
+// 发送（ESP32 → RP2040）
 ConfigSender tx;
 uint16_t tid = ConfigSender::generateTransferId();
 tx.send(json, length, tid, [&](const UartConfigChunkPayload& p, uint8_t payloadLen, uint8_t flags) {
@@ -96,9 +96,9 @@ tx.send(json, length, tid, [&](const UartConfigChunkPayload& p, uint8_t payloadL
 });
 ```
 
-## 與 CloudStateMachine 的集成
+## 与 CloudStateMachine 的集成
 
-Dual-MCU devices require the serial number from RP2040 before provisioning:
+双 MCU 设备需要从 RP2040 获取序列号才能配置：
 
 ```cpp
 idryer::cloud::CloudConfig cfg;
@@ -111,4 +111,4 @@ bridge.setHelloHandler([&](const UartHelloPayload& p, const UartFrameHeader&) {
 });
 ```
 
-The state machine stays in `WaitingForMcuSerial` until `setMcuSerial()` is called.
+状态机保持在 `WaitingForMcuSerial` 直到调用 `setMcuSerial()`。

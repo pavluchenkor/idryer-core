@@ -1,6 +1,6 @@
-# 設置文件模型
+# 配置文件模型
 
-A profile is an implementation of the `IProfile` interface, which describes the behaviour of a specific device. The library interacts with the product only through this interface.
+配置文件是 `IProfile` 接口的实现，它描述特定设备的行为。库仅通过该接口与产品交互。
 
 ## IProfile 接口
 
@@ -17,19 +17,19 @@ public:
 };
 ```
 
-### 庫何時調用每個方法
+### 库调用每个方法的时间
 
-| Method | When called | What it must do |
-|--------|------------|----------------|
-| `onOnline()` | On the first `CloudStateMachine` transition to `Online` | Load config from NVS, apply to hardware |
-| `loop()` | Every iteration of `IdryerRuntime::loop()` | Timers, animations, sensor polling |
-| `buildInfoJson(buf, len)` | On transition to Online; on `ping` | Serialize device info payload |
-| `getConfig(out)` | On `invoke device.getConfig` | Fill doc with current config |
-| `applyConfig(id, val)` | On `commands/set` | Apply parameter, save to NVS |
+| 方法 | 调用时间 | 它必须做什么 |
+|------|---------|-----------|
+| `onOnline()` | 在第一次 `CloudStateMachine` 转换到 `Online` 时 | 从 NVS 加载配置，应用到硬件 |
+| `loop()` | `IdryerRuntime::loop()` 的每次迭代 | 计时器、动画、传感器轮询 |
+| `buildInfoJson(buf, len)` | 转换到在线时；在 `ping` 时 | 序列化设备信息有效负载 |
+| `getConfig(out)` | 在 `invoke device.getConfig` 时 | 用当前配置填充文档 |
+| `applyConfig(id, val)` | 在 `commands/set` 时 | 应用参数，保存到 NVS |
 
 ## 示例：LedStripProfile
 
-`LedStripProfile` is the profile implementation for Storage Link. Located in `src/storage/led_strip/`.
+`LedStripProfile` 是存储链接的配置文件实现。位于 `src/storage/led_strip/` 中。
 
 ```cpp
 class LedStripProfile : public IProfile {
@@ -42,7 +42,7 @@ public:
     bool applyConfig(int id, int val) override;
     void buildInfoJson(char* buf, size_t len) const override;
 
-    static void normalizeGroups();        // fix NVS state of toggle groups
+    static void normalizeGroups();        // 修复切换组的 NVS 状态
     static uint8_t selectedStripType();   // 0=WS2812B, 1=APA102
     static uint8_t selectedColorOrder();  // 0=GRB, 1=RGB, 2=BRG, 3=BGR
 
@@ -55,11 +55,11 @@ private:
 };
 ```
 
-`onOnline()` applies the current LED strip configuration (LED count, brightness) to `LedStripExecutor`.
+`onOnline()` 应用当前 LED 条配置（LED 计数、亮度）到 `LedStripExecutor`。
 
-`applyConfig(id, val)` accepts a parameter ID from `menu_ids.h` and a new value. Saves to NVS via the `menu` object. Parameters such as `strip_type` and `color_order` require a reboot — FastLED is initialized once at startup.
+`applyConfig(id, val)` 接受来自 `menu_ids.h` 的参数 ID 和新值。通过 `menu` 对象保存到 NVS。诸如 `strip_type` 和 `color_order` 之类的参数需要重启——FastLED 在启动时初始化一次。
 
-`buildInfoJson` builds the payload for `idryer/{serial}/info`. Field composition is defined by the product. Storage Link publishes:
+`buildInfoJson` 构建 `idryer/{serial}/info` 的有效负载。字段组成由产品定义。存储链接发布：
 
 ```json
 {
@@ -70,30 +70,30 @@ private:
 }
 ```
 
-For devices with multiple chamber units (iDryer LINK), it is typical to add `workTimeCounter`, `unitsCount`, and a `units` array describing capabilities.
+对于具有多个舱室单元的设备（iDryer LINK），添加 `workTimeCounter`、`unitsCount` 和描述功能的 `units` 数组是典型的。
 
 ## ActionDispatcher
 
-`ActionDispatcher` routes two command types without std::function (plain function pointers to conserve heap):
+`ActionDispatcher` 路由两种命令类型而不使用 std::function（普通函数指针以节省堆）：
 
 ```cpp
-// Invoke: action with name and arguments
+// Invoke：具有名称和参数的操作
 using InvokeHandler = bool (*)(const char* action, JsonObjectConst args, void* ctx);
 
-// Set: setting a single parameter
+// Set：设置单个参数
 using SetCallback = void (*)(JsonObjectConst data, void* ctx);
 ```
 
-Registration in `setup()`:
+在 `setup()` 中注册：
 
 ```cpp
-// Invoke — delegates to LedStripExecutor
+// Invoke — 委托给 LedStripExecutor
 dispatcher.setInvokeHandler(
     [](const char* action, JsonObjectConst args, void* /*ctx*/) -> bool {
         return s_executor.execute(action, args);
     }, nullptr);
 
-// Set — passes id/val to LedStripProfile
+// Set — 将 id/val 传递给 LedStripProfile
 dispatcher.setSetCallback(
     [](JsonObjectConst data, void* /*ctx*/) {
         int id  = data["id"]  | -1;
@@ -102,13 +102,13 @@ dispatcher.setSetCallback(
     }, nullptr);
 ```
 
-`IdryerRuntime` calls `dispatcher.handleInvoke(data)` and `dispatcher.handleSet(data)` when the corresponding MQTT commands arrive.
+当相应的 MQTT 命令到达时，`IdryerRuntime` 调用 `dispatcher.handleInvoke(data)` 和 `dispatcher.handleSet(data)`。
 
-## 創建新設置文件
+## 创建新配置文件
 
-1. Create a class inheriting from `IProfile`.
-2. Implement all five methods.
-3. Pass a pointer to the profile into the `IdryerRuntime` constructor.
-4. Register handlers in `ActionDispatcher` for `invoke` and `set` commands.
+1. 创建一个继承自 `IProfile` 的类。
+2. 实现所有五个方法。
+3. 将指向配置文件的指针传递到 `IdryerRuntime` 构造函数中。
+4. 在 `ActionDispatcher` 中为 `invoke` 和 `set` 命令注册处理程序。
 
-There are no restrictions on what the profile does inside its methods — it has full visibility into the product context.
+对于配置文件在其方法内做什么没有限制——它对产品上下文具有完全的可见性。

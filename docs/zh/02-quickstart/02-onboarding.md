@@ -1,60 +1,60 @@
-# 登錄：首次設備聲稱
+# 登录：首次设备声称
 
-登錄是一個一次性的過程，其中 ESP32 向 iDryer 雲端註冊並被聲稱到您的帳戶。完成後，設備出現在門戶中，狀態為線上，狀態為就緒，所有後續開機都是自動的。
+登录是一个一次性的过程，其中 ESP32 向 iDryer 云端注册并被声称到您的帐户。完成后，设备出现在门户中，状态为在线，状态为就绪，所有后续开机都是自动的。
 
-## 您將需要什麼
+## 您将需要什么
 
-- 一個用 REPL 構建閃存的 ESP32 設備：env `esp32c3-super-mini-dev`（參見 [5 分鐘快速開始](01-five-minutes.md)）或任何帶有 `IDRYER_DEV_REPL=1` 標誌的開發構建。
-- USB 線纜。
-- [portal.idryer.org](https://portal.idryer.org/) 帳戶（用於開發 — [staging.idryer.org](https://staging.idryer.org/)）。
+- 一个用 REPL 构建刷新的 ESP32 设备：env `esp32c3-super-mini-dev`（参见 [5 分钟快速开始](01-five-minutes.md)）或任何带有 `IDRYER_DEV_REPL=1` 标志的开发构建。
+- USB 电缆。
+- [portal.idryer.org](https://portal.idryer.org/) 帐户（用于开发 — [staging.idryer.org](https://staging.idryer.org/)）。
 
-## 路徑 1. 通過串行 REPL（推薦）
+## 路径 1. 通过串行 REPL（推荐）
 
-REPL 僅在帶有 `IDRYER_DEV_REPL=1` 標誌的構建中可用。打開串行監視器，輸入三個命令 — 設備連接到 WiFi，請求 PIN，並準備就緒聲稱。
+REPL 仅在带有 `IDRYER_DEV_REPL=1` 标志的构建中可用。打开串行监视器，输入三个命令 — 设备连接到 WiFi，请求 PIN，并准备声称。
 
-### 1. 刷新開發構建
+### 1. 刷新开发构建
 
 ```bash
 pio run -e esp32c3-super-mini-dev -t upload
 ```
 
-或使用設置了 `-DIDRYER_DEV_REPL=1` 的任何 env。
+或使用设置了 `-DIDRYER_DEV_REPL=1` 的任何 env。
 
-### 2. 打開串行監視器
+### 2. 打开串行监视器
 
 ```bash
 pio device monitor -b 115200
 ```
 
-啟動後您將看到提示：
+启动后您将看到提示：
 
 ```
 [boot] iDryer dev REPL ready — type 'help'
 ```
 
-之後，雲堆棧消息立即開始出現在日誌中：
+之后，云堆栈消息立即开始出现在日志中：
 
 ```
 [CLOUD] Init: serial=DEVICE_XXXXXXXXXXXX deviceId=(none)
 [CLOUD] Connecting to WiFi...
 ```
 
-### 3. 連接 WiFi
+### 3. 连接 WiFi
 
-在串行監視器控制台中輸入：
+在串行监视器控制台中输入：
 
 ```
 wifi MyHomeWiFi MySecretPass
 ```
 
-回應：
+回应：
 
 ```
 > wifi MyHomeWiFi MySecretPass
 [wifi] saving 'MyHomeWiFi' / '****'
 ```
 
-認證被寫入 NVS。主機板立即調用 `WiFi.begin()`。日誌將顯示：
+凭证被写入 NVS。主板立即调用 `WiFi.begin()`。日志将显示：
 
 ```
 [CLOUD] WiFi connected, IP: 192.168.1.42, RSSI: -51 dBm
@@ -64,15 +64,15 @@ wifi MyHomeWiFi MySecretPass
 [CLOUD] PIN: 3847291 (expires in 600s)
 ```
 
-### 4. 獲得 PIN 並在門戶中聲稱
+### 4. 获得 PIN 并在门户中声称
 
-設備會自動佈建並註冊一個 7 位數 PIN。PIN 有效期為 10 分鐘。
+设备会自动配置并注册一个 7 位数 PIN。PIN 有效期为 10 分钟。
 
-1. 打開 [portal.idryer.org](https://portal.idryer.org/)（或 staging）。
-2. 轉到**添加設備**。
-3. 從串行監視器輸入 PIN。
+1. 打开 [portal.idryer.org](https://portal.idryer.org/)（或 staging）。
+2. 转到**添加设备**。
+3. 从串行监视器输入 PIN。
 
-成功聲稱後，日誌顯示：
+成功声称后，日志显示：
 
 ```
 [CLOUD] Device claimed! deviceId=...
@@ -81,61 +81,61 @@ wifi MyHomeWiFi MySecretPass
 [RT] Cloud Online
 ```
 
-如果 PIN 在您輸入前過期 — 運行 `claim` 命令以獲得新 PIN。
+如果 PIN 在您输入前过期 — 运行 `claim` 命令以获得新 PIN。
 
 ### 有用的 REPL 命令
 
-| 命令 | 功能 | 何時使用 |
+| 命令 | 功能 | 何时使用 |
 |---------|-------------|-------------|
-| `help` | 顯示命令列表 | 提醒自己的語法 |
-| `status` | 當前狀態：WiFi、IP、RSSI、線上、串行 | 連接診斷 |
-| `wifi <ssid> <password>` | 將 WiFi 認證保存到 NVS 並重新連接 | 首次登錄或網絡變化 |
-| `claim` | 手動啟動聲稱流程，獲得新 PIN | PIN 過期或需要重新聲稱 |
-| `wipe` | 擦除 NVS（認證、聲稱、菜單）並重啟 | 出廠重置 |
-| `restart` | ESP 的軟件重啟 | 無需物理斷開連接的快速重啟 |
+| `help` | 显示命令列表 | 提醒自己的语法 |
+| `status` | 当前状态：WiFi、IP、RSSI、在线、串行 | 连接诊断 |
+| `wifi <ssid> <password>` | 将 WiFi 凭证保存到 NVS 并重新连接 | 首次登录或网络变化 |
+| `claim` | 手动启动声称流程，获得新 PIN | PIN 过期或需要重新声称 |
+| `wipe` | 擦除 NVS（凭证、声称、菜单）并重启 | 出厂重置 |
+| `restart` | ESP 的软件重启 | 无需物理断开连接的快速重启 |
 
-## 路徑 2. 通過 Improv-WiFi（Web 串行）
+## 路径 2. 通过 Improv-WiFi（Web 串行）
 
-Improv-WiFi 內置於所有構建中，不依賴 `IDRYER_DEV_REPL` 標誌。適合將設備移交給用戶或當終端不方便時。需要 Chrome 或 Edge — Safari 或 Firefox 不支持 Web Serial API。
+Improv-WiFi 内置于所有构建中，不依赖 `IDRYER_DEV_REPL` 标志。适合将设备移交给用户或当终端不方便时。需要 Chrome 或 Edge — Safari 或 Firefox 不支持 Web Serial API。
 
-### 1. 驗證主機板已刷新
+### 1. 验证主板已刷新
 
-任何 prod 構建都可以。Improv-WiFi 總是活躍的。
+任何 prod 构建都可以。Improv-WiFi 总是活跃的。
 
-### 2. 打開網頁
+### 2. 打开网页
 
-轉到 [https://www.improv-wifi.com/serial/](https://www.improv-wifi.com/serial/)，點擊**連接**，並在瀏覽器對話框中選擇設備的 USB 端口。
+转到 [https://www.improv-wifi.com/serial/](https://www.improv-wifi.com/serial/)，点击**连接**，并在浏览器对话框中选择设备的 USB 端口。
 
-### 3. 輸入 SSID 和密碼
+### 3. 输入 SSID 和密码
 
-該頁面將要求網絡名稱和密碼，通過 Serial-Improv 將其傳輸到主機板。主機板將認證保存到 NVS 並連接到 WiFi。佈建和 PIN 檢索自動進行 — 與路徑 1 相同。
+该页面将要求网络名称和密码，通过 Serial-Improv 将其传输到主板。主板将凭证保存到 NVS 并连接到 WiFi。配置和 PIN 检索自动进行 — 与路径 1 相同。
 
 !!! note
-    Improv-WiFi 無法運行 `claim`、`wipe` 或檢查 `status`。使用 REPL 進行手動聲稱流程和 NVS 管理。
+    Improv-WiFi 无法运行 `claim`、`wipe` 或检查 `status`。使用 REPL 进行手动声称流程和 NVS 管理。
 
-### 何時使用每條路徑
+### 何时使用每条路径
 
-| 情況 | 推薦 |
+| 情况 | 推荐 |
 |-----------|---------------|
-| 帶有終端打開的嵌入式開發人員 | REPL |
-| 將設備交給用戶 | Improv-WiFi |
-| 需要手動 `wipe` 或重複 `claim` | REPL |
-| Safari 或 Firefox 瀏覽器 | REPL |
-| 未安裝 PlatformIO | Improv-WiFi |
+| 带有终端打开的嵌入式开发人员 | REPL |
+| 将设备交给用户 | Improv-WiFi |
+| 需要手动 `wipe` 或重复 `claim` | REPL |
+| Safari 或 Firefox 浏览器 | REPL |
+| 未安装 PlatformIO | Improv-WiFi |
 
-## 如果出現問題
+## 如果出现问题
 
-**PIN 未出現在日誌中。** 檢查設備是否連接到 WiFi：輸入 `status` 並驗證回應中的 `ip=` 字段不為空。沒有 WiFi，佈建不會啟動。
+**PIN 未出现在日志中。** 检查设备是否连接到 WiFi：输入 `status` 并验证回应中的 `ip=` 字段不为空。没有 WiFi，配置不会启动。
 
-**PIN 過期。** 輸入 `claim` 命令 — 設備請求新的註冊並打印新 PIN。
+**PIN 过期。** 输入 `claim` 命令 — 设备请求新的注册并打印新 PIN。
 
-**設備已被聲稱到另一個帳戶。** 輸入 `wipe` — NVS 將被擦除，主機板將重啟並從頭開始登錄。
+**设备已被声称到另一个帐户。** 输入 `wipe` — NVS 将被擦除，主板将重启并从头开始登录。
 
-**PIN 不被門戶接受。** 驗證您複製了所有 7 位數字且沒有空格，並且自 PIN 出現以來已經過了不到 10 分鐘。
+**PIN 不被门户接受。** 验证您复制了所有 7 位数字且没有空格，并且自 PIN 出现以来已经过了不到 10 分钟。
 
-**Improv-WiFi 在瀏覽器中看不到設備。** 確保您使用的是 Chrome 或 Edge，並且 ESP32 USB 驅動程序已安裝。
+**Improv-WiFi 在浏览器中看不到设备。** 确保您使用的是 Chrome 或 Edge，并且 ESP32 USB 驱动程序已安装。
 
 ## 下一步
 
 - 完整 Link API：[../03-public-api/01-link-api-reference.md](../03-public-api/01-link-api-reference.md)
-- 添加傳感器或外設：[../04-patterns/](../04-patterns/)
+- 添加传感器或外设：[../04-patterns/](../04-patterns/)

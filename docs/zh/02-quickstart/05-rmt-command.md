@@ -1,21 +1,21 @@
-# 第 05 步 — 入口網站命令：RMT 輸出
+# 步骤 05 — 门户命令：RMT 输出
 
-完成本步驟後，在入口網站上按下「開始」按鈕將在 ESP32 輸出引腳上產生 RMT 脈衝。本示例遵循 iHeater Link，其中引腳通過光耦合器驅動 iHeater STM32。
+完成此步骤后，在门户上按下开始按钮将在 ESP32 输出引脚上生成 RMT 脉冲。该示例遵循 iHeater Link，其中引脚通过光耦极驱动 iHeater STM32。
 
 ## 工作原理
 
-入口網站將 `invoke` 命令發佈到 MQTT 主題 `idryer/{serial}/commands/invoke`。庫反序列化 JSON 並調用已註冊的處理程序。處理程序將命令傳遞給 `RmtOutputAdapter`，後者在選定的引腳上生成脈衝幀。
+门户将 `invoke` 命令发布到 MQTT 主题 `idryer/{serial}/commands/invoke`。库反序列化 JSON 并调用注册的处理程序。处理程序将命令传递给 `RmtOutputAdapter`，它在选定的引脚上生成脉冲帧。
 
-處理程序獨立於特定的引腳或協議 — 它是一個普通的回調函數。RMT 是一種實現；PWM 是另一種實現，請參閱 [06-pwm.md](06-pwm.md)。
+处理程序独立于特定的引脚或协议——它是一个普通的回调函数。RMT 是一个实现；PWM 是另一个，请参阅 [06-pwm.md](06-pwm.md)。
 
-## 所需條件
+## 需要什么
 
-- ESP32-C3 或 ESP32（RMT 在所有 GPIO 引腳上可用）
-- 輸出引腳上的負載（在 iHeater Link 中 — 通過光耦合器連接的 STM32）
+- ESP32-C3 或 ESP32（RMT 在所有 GPIO 引脚上可用）
+- 输出引脚上的负载（在 iHeater Link 中——通过光耦极的 STM32）
 
-## 步驟
+## 步骤
 
-**1. 在 `main.cpp` 中聲明 RmtOutputAdapter**。基於 [`iHeater-link/src/main.cpp`](../../../../iHeater-link/src/main.cpp)：
+**1. 在 `main.cpp` 中声明 RmtOutputAdapter**。基于 [`iHeater-link/src/main.cpp`](../../../../iHeater-link/src/main.cpp)：
 
 ```cpp
 #include "controller/RmtOutputAdapter.h"
@@ -23,7 +23,7 @@
 static iheaterlink::RmtOutputAdapter s_output{iheaterlink::RmtOutputConfig{}};
 ```
 
-默認輸出引腳是 `IHEATER_TRIGGER_OUTPUT_PIN`。通過 `build_flags` 設定它：
+默认输出引脚是 `IHEATER_TRIGGER_OUTPUT_PIN`。通过 `build_flags` 设置它：
 
 ```ini
 build_flags =
@@ -36,9 +36,9 @@ build_flags =
 s_output.begin();
 ```
 
-`begin()` 配置 RMT 通道並啟動一個發送保活幀的後臺 FreeRTOS 任務。
+`begin()` 配置 RMT 通道并启动发送保活帧的后台 FreeRTOS 任务。
 
-**3. 在 `setup()` 中註冊命令處理程序**：
+**3. 在 `setup()` 中注册命令处理程序**：
 
 ```cpp
 device().onCommand("invoke", [](JsonObjectConst data) {
@@ -70,7 +70,7 @@ device().onCommand("invoke", [](JsonObjectConst data) {
 });
 ```
 
-**4. 在 `loop()` 中 — 僅調用 `device().loop()`：**
+**4. 在 `loop()` 中——仅调用 `device().loop()`**：
 
 ```cpp
 void loop() {
@@ -78,11 +78,11 @@ void loop() {
 }
 ```
 
-RMT 幀從 `s_output` 內的 FreeRTOS 任務發送，獨立於 `loop()`。
+RMT 帧从 `s_output` 内的 FreeRTOS 任务发送，独立于 `loop()`。
 
-## 入口網站如何發送命令
+## 门户如何发送命令
 
-入口網站發佈到 MQTT 主題 `idryer/{serial}/commands/invoke`：
+门户发布到 MQTT 主题 `idryer/{serial}/commands/invoke`：
 
 ```json
 {
@@ -91,21 +91,21 @@ RMT 幀從 `s_output` 內的 FreeRTOS 任務發送，獨立於 `loop()`。
 }
 ```
 
-庫接收此消息並使用反序列化的 `JsonObjectConst data` 調用已註冊的回調。`action` 字段確定要執行的操作。
+库接收此消息并使用反序列化的 `JsonObjectConst data` 调用已注册的回调。`action` 字段确定要执行的操作。
 
-每種設備類型的操作列表在 [`contracts/mqtt_contract.yaml`](../../../contracts/mqtt_contract.yaml) 中的 `invoke_actions` 下定義。
+每个设备类型的操作列表在 [`contracts/mqtt_contract.yaml`](../../../contracts/mqtt_contract.yaml) 的 `invoke_actions` 下定义。
 
-## 驗證
+## 验证
 
-打開入口網站 → 設備頁面 → 按下 **Heat** 按鈕。在串行監視器中：
+打开门户 → 设备页面 → 按下 **Heat** 按钮。在串行监视器中：
 
 ```
 [CMD] invoke:heat.start temp=55.0 duration=7200s
 ```
 
-RMT 脈衝將出現在輸出引腳上（用示波器或邏輯分析儀驗證）。
+RMT 脉冲将出现在输出引脚上（用示波器或逻辑分析仪验证）。
 
-## 後續步驟
+## 接下来
 
-- [06-pwm.md](06-pwm.md) — 用 PWM 取代 RMT（MOSFET、DC 調光器）。
-- [RmtOutputAdapter.h](../../../../iHeater-link/src/controller/RmtOutputAdapter.h) — RMT 配置：脈衝頻率、Off 代碼、溫度範圍。
+- [06-pwm.md](06-pwm.md) — 用 PWM 替换 RMT（MOSFET、DC 调光器）。
+- [RmtOutputAdapter.h](../../../../iHeater-link/src/controller/RmtOutputAdapter.h) — RMT 配置：脉冲频率、关闭代码、温度范围。

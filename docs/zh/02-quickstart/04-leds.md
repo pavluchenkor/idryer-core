@@ -1,25 +1,25 @@
-# 步驟 04 — 指示：由傳感器數據驅動的 LED 條帶
+# 步骤 04 — 指示：由传感器数据驱动的 LED 条带
 
-完成此步驟後，WS2812B 條帶將根據濕度改變顏色，亮度將可通過 `set` 命令從門戶控制。
+完成此步骤后，WS2812B 条带将根据湿度改变颜色，亮度将可通过 `set` 命令从门户控制。
 
-## 您需要什麼
+## 您需要什么
 
 **硬件：**
 
-- WS2812B LED 條帶（或 WS2811/SK6812）
-- 數據線上的 330–470 Ω 電阻
-- 5 V 電源（電流取決於條帶長度；300 個 LED 可吸引高達 18 A）
+- WS2812B LED 条带（或 WS2811/SK6812）
+- 数据线上的 330–470 Ω 电阻
+- 5 V 电源（电流取决于条带长度；300 个 LED 可吸引高达 18 A）
 
-**軟件：**
+**软件：**
 
-- 庫 `fastled/FastLED @ ^3.6.0`
+- 库 `fastled/FastLED @ ^3.6.0`
 
 !!! warning
-    從專用 5 V 電源為條帶供電。通過主機板的 3.3 V 或 5 V 引腳供電僅適用於幾個 LED 的快速冒煙測試。
+    从专用 5 V 电源为条带供电。通过主板的 3.3 V 或 5 V 引脚供电仅适用于几个 LED 的快速冒烟测试。
 
-## 步驟
+## 步骤
 
-**1. 將 FastLED 添加**到 `platformio.ini`：
+**1. 将 FastLED 添加**到 `platformio.ini`：
 
 ```ini
 lib_deps =
@@ -27,7 +27,7 @@ lib_deps =
     ; ... other dependencies
 ```
 
-**2. 在 `main.cpp` 中聲明緩衝區和執行器**。基於 [`iDryer-Storage/src/main.cpp`](../../../../iDryer-Storage/src/main.cpp)：
+**2. 在 `main.cpp` 中声明缓冲区和执行器**。基于 [`iDryer-Storage/src/main.cpp`](../../../../iDryer-Storage/src/main.cpp)：
 
 ```cpp
 #include <FastLED.h>
@@ -40,7 +40,7 @@ static CRGB             s_leds[STORAGE_MAX_LEDS];
 static LedStripExecutor s_executor(s_leds, STORAGE_MAX_LEDS);
 ```
 
-**3. 在 `setup()` 中初始化條帶**：
+**3. 在 `setup()` 中初始化条带**：
 
 ```cpp
 FastLED.addLeds<WS2812B, STORAGE_LED_PIN, GRB>(s_leds, 60);
@@ -48,9 +48,9 @@ FastLED.setBrightness(128);
 FastLED.clear(true);
 ```
 
-將 `60` 替換為條帶的實際 LED 數量。
+将 `60` 替换为条带的实际 LED 数量。
 
-**4. 在 `loop()` 中根據濕度改變顏色**。顏色刻度：藍色（干燥）→ 黃色 → 紅色（潮濕）：
+**4. 在 `loop()` 中根据湿度改变颜色**。颜色刻度：蓝色（干燥）→ 黄色 → 红色（潮湿）：
 
 ```cpp
 if (s_sensorOk) {
@@ -68,7 +68,7 @@ if (s_sensorOk) {
 }
 ```
 
-**5. 從門戶控制亮度。** 在 `setup()` 中註冊一個 `set` 命令處理程序：
+**5. 从门户控制亮度。** 在 `setup()` 中注册一个 `set` 命令处理程序：
 
 ```cpp
 s_link.onCommand("set", [](JsonObjectConst data) {
@@ -81,15 +81,15 @@ s_link.onCommand("set", [](JsonObjectConst data) {
 });
 ```
 
-`MENU_BRIGHTNESS` 是來自 [`iDryer-Storage/src/menu/menu_ids.h`](../../../../iDryer-Storage/src/menu/menu_ids.h) 的常數，由 `regen.sh` 從 `menu.yaml` 生成。在您自己的產品中，名稱和值將有所不同 — 檢查您項目的 `menu_ids.h`。
+`MENU_BRIGHTNESS` 是来自 [`iDryer-Storage/src/menu/menu_ids.h`](../../../../iDryer-Storage/src/menu/menu_ids.h) 的常数，由 `regen.sh` 从 `menu.yaml` 生成。在您自己的产品中，名称和值将有所不同 — 检查您项目的 `menu_ids.h`。
 
-## 驗證
+## 验证
 
-刷新後，條帶應根據當前濕度以相應的顏色點亮。如果沒有傳感器，條帶保持關閉（執行器未收到數據）。
+刷新后，条带应根据当前湿度以相应的颜色点亮。如果没有传感器，条带保持关闭（执行器未收到数据）。
 
-打開門戶上的設備設置並調整亮度滑塊 — 條帶立即響應。
+打开门户上的设备设置并调整亮度滑块 — 条带立即响应。
 
 ## 下一步
 
-- [05-rmt-command.md](05-rmt-command.md) — 從門戶命令驅動執行器（RMT 輸出）。
-- [led_strip_executor.h](../../../../iDryer-Storage/src/storage/led_strip/led_strip_executor.h) — 執行器 API：區域脈衝、動畫、亮度。
+- [05-rmt-command.md](05-rmt-command.md) — 从门户命令驱动执行器（RMT 输出）。
+- [led_strip_executor.h](../../../../iDryer-Storage/src/storage/led_strip/led_strip_executor.h) — 执行器 API：区域脉冲、动画、亮度。

@@ -1,10 +1,10 @@
-# MQTT 主題和消息
+# MQTT 主题和消息
 
-All topics have the form `idryer/{serial}/{suffix}`, where `{serial}` is the device serial number.
+所有主题的形式为 `idryer/{serial}/{suffix}`，其中 `{serial}` 是设备序列号。
 
-This document describes the topics and commands implemented by `MqttClient` from `idryer-core`. The full platform interface (all backend commands for all device types) is in `contracts/portal_backend_status.md`.
+本文档描述由 `idryer-core` 中的 `MqttClient` 实现的主题和命令。完整的平台界面（所有设备类型的所有后端命令）在 `contracts/portal_backend_status.md` 中。
 
-## 設備 → 後端
+## 设备 → 后端
 
 ### info
 
@@ -12,11 +12,11 @@ This document describes the topics and commands implemented by `MqttClient` from
 idryer/{serial}/info    retained=true    publish QoS=0
 ```
 
-Published once when the device first goes Online, and again on receiving a `ping` command.
+在设备首次上线时发布一次，收到 `ping` 命令时再发布一次。
 
-The payload is defined by the product via `IProfile::buildInfoJson()`. Fields expected by the backend at a minimum: `hardwareVersion`, `firmwareVersion`, `timestamp`.
+有效负载由产品通过 `IProfile::buildInfoJson()` 定义。后端至少期望的字段：`hardwareVersion`、`firmwareVersion`、`timestamp`。
 
-Example for Storage Link:
+存储链接的示例：
 
 ```json
 {
@@ -33,9 +33,9 @@ Example for Storage Link:
 idryer/{serial}/telemetry    retained=false    interval ~10 s
 ```
 
-Published by the product via `pub.publishTelemetry()`. The library does not publish automatically.
+由产品通过 `pub.publishTelemetry()` 发布。库不自动发布。
 
-Example for Storage Link (climate sensor):
+存储链接的示例（气候传感器）：
 
 ```json
 {
@@ -51,7 +51,7 @@ Example for Storage Link (climate sensor):
 idryer/{serial}/status    retained=true    published on change
 ```
 
-Published by the product on state change via `pub.publishStatus()`. Payload is defined by the product.
+由产品在状态改变时通过 `pub.publishStatus()` 发布。有效负载由产品定义。
 
 ### config
 
@@ -59,9 +59,9 @@ Published by the product on state change via `pub.publishStatus()`. Payload is d
 idryer/{serial}/config    retained=false    on request
 ```
 
-Published on receipt of `device.getConfig` (invoke) or in response to `get_config`. Called via `pub.publishConfig()` or `pub.publishConfigRaw()`.
+收到 `device.getConfig`（invoke）时发布或响应 `get_config` 时发布。通过 `pub.publishConfig()` 或 `pub.publishConfigRaw()` 调用。
 
-For large payloads (> 16000 bytes), published in chunks: each chunk contains `tid`, `idx`, `total`, `last`, `d`.
+对于大有效负载（> 16000 字节），分块发布：每个块包含 `tid`、`idx`、`total`、`last`、`d`。
 
 ### config/delta
 
@@ -69,7 +69,7 @@ For large payloads (> 16000 bytes), published in chunks: each chunk contains `ti
 idryer/{serial}/config/delta    retained=false    on change
 ```
 
-Partial config update via `pub.publishConfigDelta()`. The backend expects a `d` field (an object with the changes).
+通过 `pub.publishConfigDelta()` 的部分配置更新。后端期望一个 `d` 字段（一个包含更改的对象）。
 
 ### events
 
@@ -77,7 +77,7 @@ Partial config update via `pub.publishConfigDelta()`. The backend expects a `d` 
 idryer/{serial}/events    retained=false    on event
 ```
 
-Published by the product via `pub.publishEvent()`. The library does not generate events automatically.
+由产品通过 `pub.publishEvent()` 发布。库不自动生成事件。
 
 ### integrations/status
 
@@ -85,7 +85,7 @@ Published by the product via `pub.publishEvent()`. The library does not generate
 idryer/{serial}/integrations/status    retained=true    on change
 ```
 
-Published by `LinkIntegrationsManager`. Contains the active integration connection state.
+由 `LinkIntegrationsManager` 发布。包含活跃的集成连接状态。
 
 ### offline (LWT)
 
@@ -93,11 +93,11 @@ Published by `LinkIntegrationsManager`. Contains the active integration connecti
 idryer/{serial}/offline    retained=false    on unexpected disconnect
 ```
 
-Set by the broker automatically when the TCP connection drops. The device never publishes this topic manually.
+当 TCP 连接断开时由代理自动设置。设备从不手动发布此主题。
 
-## 後端 → 設備
+## 后端 → 设备
 
-The device subscribes to `idryer/{serial}/commands/#`.
+设备订阅 `idryer/{serial}/commands/#`。
 
 ### commands/ping
 
@@ -105,7 +105,7 @@ The device subscribes to `idryer/{serial}/commands/#`.
 idryer/{serial}/commands/ping
 ```
 
-Handled directly by `IdryerRuntime` — syncs system time via `settimeofday()` and re-publishes info.
+由 `IdryerRuntime` 直接处理——通过 `settimeofday()` 同步系统时间并重新发布信息。
 
 ```json
 {"timestamp": "2026-04-28T10:00:00Z"}
@@ -117,13 +117,13 @@ Handled directly by `IdryerRuntime` — syncs system time via `settimeofday()` a
 idryer/{serial}/commands/invoke
 ```
 
-Preferred path for product actions. The library passes the command to the product's `CommandHandler` (recommended path). If no `CommandHandler` is registered, the command falls through to the built-in `ActionDispatcher` (fallback).
+产品动作的首选路径。库将命令传递给产品的 `CommandHandler`（推荐路径）。如果没有注册 `CommandHandler`，命令通过到内置 `ActionDispatcher`（回退）。
 
 ```json
 {"action": "led.pulse", "args": {"color": "FF0000", "duration": 500}}
 ```
 
-The built-in action `device.getConfig` is handled by the runtime or the product handler — calls `IProfile::getConfig()` and publishes the result.
+内置操作 `device.getConfig` 由运行时或产品处理程序处理——调用 `IProfile::getConfig()` 并发布结果。
 
 ### commands/set
 
@@ -131,7 +131,7 @@ The built-in action `device.getConfig` is handled by the runtime or the product 
 idryer/{serial}/commands/set
 ```
 
-Sets a single configuration parameter. Passed to the product's `CommandHandler` (recommended path). Fallback — built-in `ActionDispatcher::handleSet()` if no `CommandHandler` is registered.
+设置单个配置参数。传递给产品的 `CommandHandler`（推荐路径）。回退——如果没有注册 `CommandHandler`，内置 `ActionDispatcher::handleSet()`。
 
 ```json
 {"id": 3, "val": 55}
@@ -143,7 +143,7 @@ Sets a single configuration parameter. Passed to the product's `CommandHandler` 
 idryer/{serial}/commands/link_integration
 ```
 
-Integration management. Handled by `LinkIntegrationsManager` via the product's `CommandHandler`.
+集成管理。由 `LinkIntegrationsManager` 通过产品的 `CommandHandler` 处理。
 
 ```json
 {"type": "bambu", "enabled": true, "ip": "192.168.1.50", "serial": "...", "lanAccessCode": "..."}
@@ -155,21 +155,21 @@ Integration management. Handled by `LinkIntegrationsManager` via the product's `
 idryer/{serial}/commands/bambu_apply
 ```
 
-Apply filament parameters to an AMS slot on a Bambu printer. Handled by `LinkIntegrationsManager`.
+对 Bambu 打印机上的 AMS 插槽应用耗材参数。由 `LinkIntegrationsManager` 处理。
 
 ### 其他平台命令
 
-Commands `drying`, `storage`, `profile`, `stop`, `get_config`, `read_rfid`, `write_rfid`, and others are part of the full iDryer platform interface. They are not handled by `idryer-core` directly; they are delivered to the product's `CommandHandler`. Reference: `contracts/portal_backend_status.md`.
+命令 `drying`、`storage`、`profile`、`stop`、`get_config`、`read_rfid`、`write_rfid` 等是完整 iDryer 平台接口的一部分。它们不由 `idryer-core` 直接处理；它们传递给产品的 `CommandHandler`。参考：`contracts/portal_backend_status.md`。
 
-## Topic format
+## 主题格式
 
 ```c
-// Topic construction
+// 主题构造
 idryer_make_topic(buf, sizeof(buf), serialNumber, "telemetry");
 // → "idryer/DEVICE_AABBCCDDEEFF/telemetry"
 ```
 
-Suffix constants are defined in `mqtt/idryer_topics.h`:
+后缀常数在 `mqtt/idryer_topics.h` 中定义：
 
 ```c
 #define IDRYER_TOPIC_INFO               "info"

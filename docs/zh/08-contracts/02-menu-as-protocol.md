@@ -1,55 +1,55 @@
-# 協議形式的菜單: menu.yaml ↔ mqtt_contract.yaml ↔ 門戶
+# 菜单作为协议：menu.yaml ↔ mqtt_contract.yaml ↔ Portal
 
 ---
 
-## 三個文件 — 三個角色
+## 三个文件 — 三个角色
 
 | 文件 | 所有者 | 描述 |
-|------|-------|-----------|
-| `src/menu/menu.yaml` | 你的產品 | 設備菜單: 參數、操作、結構 |
-| `contracts/mqtt_contract.yaml` | idryer-core | 已知含義的列表: 每個 `role:` 的含義以及門戶如何顯示它 |
-| `frontend-v2/src/contracts/mqtt-api.types.ts` | 生成 | 門戶的 TypeScript 類型 |
+|------|--------|------|
+| `src/menu/menu.yaml` | 你的产品 | 设备菜单：参数、动作、结构 |
+| `contracts/mqtt_contract.yaml` | idryer-core | 已知含义的列表：每个 `role:` 是什么意思以及门户如何显示它 |
+| `frontend-v2/src/contracts/mqtt-api.types.ts` | 生成 | 门户的 TypeScript 类型 |
 
-**`role:`** — 菜單項的語義名稱。韌體說 "I have `iheater.heat_start`" 而不是 "I have button number 35"。這是設備和門戶之間的穩定合約 — 內部韌體名稱可以改變，`role:` 保持固定。
+**`role:`** — 菜单项的语义名称。固件说"我有 `iheater.heat_start`"而不是"我有按钮号 35"。这是设备和门户之间的稳定合约 — 内部固件名称可以更改，`role:` 保持固定。
 
-**小部件** — 門戶如何顯示此項: 按鈕、滑塊、開關或複雜的組件 (調色板、配置文件編輯器)。通過 `role:` 由合約決定，而不是由韌體決定。
+**小部件** — 门户如何显示此项：按钮、滑块、切换开关或复杂组件(色彩选择器、个人资料编辑器)。由合约通过 `role:` 确定，不由固件确定。
 
-帶有 `role:` 的菜單項對門戶可見。沒有 `role:` — 私有，僅在設備顯示屏上顯示。
-
----
-
-## 1. 韌體構建 (`pio run`)
-
-`menu.yaml` → `pre_gen_menu.py` 根據合約中的 `canonical_roles` 驗證每個 `role:` → 如果角色未知，構建失敗並出現錯誤和有效角色列表 → `menu_gen.py` 生成 C++ 文件到 `src/menu/`
-
-驗證內置在構建步驟中 — 不可能無聲地使用不存在的角色。
-
-## 2. 更新門戶的 TypeScript (`regen.sh`)
-
-`mqtt_contract.yaml` → `gen_ts_types.py` 生成 `mqtt-api.types.ts` → 文件被複製到 `frontend-v2/src/contracts/`
-
-在合約更改時手動運行。提交結果。
-
-## 3. 運行時: 設備 ↔ 門戶
-
-設備連接 → 發佈菜單到 MQTT 主題 `config` → 門戶讀取帶有字段 `r:` 的每一項 → 查找 `CanonicalRoles[r].widget` → 從 `WIDGET_REGISTRY` 渲染小部件。
-
-參數 (`min`, `max`, `val`) 來自菜單項本身 — 韌體知道當前值。
+带有 `role:` 的菜单项对门户可见。没有 `role:` — 私有，仅在设备显示屏上显示。
 
 ---
 
-## 如何向門戶儀表板添加新操作
+## 1. 固件构建(`pio run`)
 
-`role:` 不是自由形式字段。該值必須來自合約中 `canonical_roles` 的閉合列表。你不能臨時發明角色 — 構建將失敗。請參閱 `contracts/mqtt_contract.yaml` → `canonical_roles` 部分或 `menu.template.yaml` 中的可用角色。
+`menu.yaml` → `pre_gen_menu.py` 验证每个 `role:` 与合约中的 `canonical_roles` → 如果角色未知，构建失败并显示错误和有效角色列表 → `menu_gen.py` 生成 C++ 文件到 `src/menu/`
 
-**1. 從合約中選擇一個角色。** 如果沒有合適的 — 首先將其添加到 `mqtt_contract.yaml` → `canonical_roles`，然後運行 `regen.sh`:
+验证内置于构建步骤中 — 不可能无声地使用不存在的角色。
+
+## 2. 为门户更新 TypeScript(`regen.sh`)
+
+`mqtt_contract.yaml` → `gen_ts_types.py` 生成 `mqtt-api.types.ts` → 文件复制到 `frontend-v2/src/contracts/`
+
+合约更改时手动运行。提交结果。
+
+## 3. 运行时：设备 ↔ 门户
+
+设备连接 → 发布菜单到 MQTT 主题 `config` → 门户读取每个带有字段 `r:` 的项 → 查找 `CanonicalRoles[r].widget` → 从 `WIDGET_REGISTRY` 呈现小部件。
+
+参数(`min`、`max`、`val`)来自菜单项本身 — 固件知道当前值。
+
+---
+
+## 如何向门户仪表板添加新动作
+
+`role:` 不是自由格式的字段。该值必须来自合约中 `canonical_roles` 的闭合列表。你不能即时发明角色 — 构建会失败。查看 `contracts/mqtt_contract.yaml` → `canonical_roles` 部分中的可用角色，或在 `menu.template.yaml` 中。
+
+**1. 从合约中选择角色。** 如果没有合适的 — 首先将其添加到 `mqtt_contract.yaml` → `canonical_roles`，然后运行 `regen.sh`：
 
 ```yaml
 canonical_roles:
   my.action: { type: action, widget: button }
 ```
 
-**2. 向 `menu.yaml` 添加一個項:**
+**2. 向 `menu.yaml` 添加项：**
 
 ```yaml
 - id: my_action
@@ -58,41 +58,42 @@ canonical_roles:
   title: { ru: "МОЁ ДЕЙСТВИЕ", en: "MY ACTION" }
 ```
 
-**3. 在韌體中處理它 (`main.cpp`)**:
+**3. 在固件中处理它(`main.cpp`)：**
 
 ```cpp
 if (action == "my.action") { /* do the thing */ }
 ```
 
-`pio run` → 驗證 → C++ → 韌體發佈 `r: "my.action"` → 門戶呈現按鈕。
+`pio run` → 验证 → C++ → 固件发布 `r: "my.action"` → 门户呈现按钮。
 
 ---
 
-## 如何添加設置 (NVS 參數)
+## 如何添加设置(NVS 参数)
 
 ```yaml
 - id: my_param
   type: value
-  role: my.param        # 僅當它應在門戶上顯示時; 對於僅顯示則省略
+  role: my.param        # 仅当它应该出现在门户上；对于仅显示则省略
   title: { ru: "ПАРАМЕТР", en: "PARAM" }
   unit: { ru: "°C", en: "°C" }
   vtype: uint16
   min: 0
   max: 100
   step: 1
-  bind: my_param        # NVS 鍵 (≤ 15 個字符)
+  bind: my_param        # NVS 密钥(≤ 15 个字符)
   persist: true
   scope: global
   default: 50
 ```
 
-`bind` = NVS 鍵。`persist: true` = 值在重啟後仍然存在。
-門戶通過 `commands/set { "id": <id>, "val": <value> }` 改變值。
+`bind` = NVS 密钥。`persist: true` = 值在重启后保留。
+
+门户通过 `commands/set { "id": <id>, "val": <value> }` 更改值。
 
 ---
 
-## 不要做什麼
+## 不要做什么
 
-- 不要向 `menu.yaml` 添加 `widget:` — 小部件由合約通過 `role:` 決定，而不是由韌體決定
-- 不要手動編輯 `mqtt-api.types.ts` — 它由 `regen.sh` 生成
-- 不要觸碰新操作的 `Config.hasXxx` 標誌 — 這些僅用於遙測 (傳感器、狀態)
+- 不要向 `menu.yaml` 添加 `widget:` — 小部件由合约通过 `role:` 确定，不由固件确定
+- 不要手动编辑 `mqtt-api.types.ts` — 它由 `regen.sh` 生成
+- 不要为新动作触及 `Config.hasXxx` 标志 — 那些仅用于遥测(传感器、状态)

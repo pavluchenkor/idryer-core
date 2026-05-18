@@ -1,24 +1,24 @@
-# 添加小部件和新設備
+# 添加小部件和新设备
 
-Complete cycle: from forking the repository to a merged PR. Covers firmware, contract, React widget, and portal testing.
+完整周期：从 fork 存储库到合并 PR。涵盖固件、合约、React 小部件和门户测试。
 
-If you only need firmware without a new widget — see [01-add-new-product.md](01-add-new-product.md).
+如果你只需要没有新小部件的固件 — 参看 [01-add-new-product.md](01-add-new-product.md)。
 
 ---
 
-## 先決條件
+## 前置条件
 
-- Python 3.9+ with `pip install pyyaml jsonschema`
+- Python 3.9+ 并 `pip install pyyaml jsonschema`
 - Node.js 18+
 - PlatformIO CLI
-- Access to the iDryer portal for UIKit testing
+- 访问 iDryer 门户以进行 UIKit 测试
 
 ---
 
-## Step 1. Fork and Clone
+## 第 1 步。Fork 和 Clone
 
-1. Fork the `idryer-core` repository on GitHub.
-2. Clone your fork locally:
+1. 在 GitHub 上 fork `idryer-core` 存储库。
+2. 在本地 clone 你的 fork：
 
     ```bash
     git clone https://github.com/<your-username>/idryer-core.git
@@ -26,7 +26,7 @@ If you only need firmware without a new widget — see [01-add-new-product.md](0
     git checkout -b feature/my-new-device
     ```
 
-3. Verify the contract passes validation in the current state:
+3. 验证合约在当前状态下通过验证：
 
     ```bash
     cd contracts
@@ -35,16 +35,16 @@ If you only need firmware without a new widget — see [01-add-new-product.md](0
 
 ---
 
-## Step 2. Edit the Contract
+## 第 2 步。编辑合约
 
-All changes go into `contracts/mqtt_contract.yaml`. Keep everything in a single changeset.
+所有更改进入 `contracts/mqtt_contract.yaml`。保持一个单独的变更集中的所有内容。
 
 !!! warning
-    Do not edit files in `_generated/` — they are overwritten by generators.
+    不要编辑 `_generated/` 中的文件 — 它们由生成器覆盖。
 
-### 2a. Capability vocabulary (new peripheral type)
+### 2a. 能力词汇(新外设类型)
 
-If the device has a new hardware type (e.g., a CO2 sensor), add an entry to the `capability_vocabulary` section:
+如果设备具有新的硬件类型(例如，CO2 传感器)，向 `capability_vocabulary` 部分添加条目：
 
 ```yaml
 capability_vocabulary:
@@ -54,11 +54,11 @@ capability_vocabulary:
     telemetry_field: airCo2Ppm
 ```
 
-This automatically adds the field `hasAirCo2: bool` to `iDryer::Config` on the next regeneration.
+这自动在下一次重生时向 `iDryer::Config` 添加字段 `hasAirCo2: bool`。
 
-### 2b. Canonical roles (new role + widget)
+### 2b. 规范角色(新角色 + 小部件)
 
-If the device exposes a new menu item, register the role in `canonical_roles`:
+如果设备公开新菜单项，在 `canonical_roles` 中注册角色：
 
 ```yaml
 canonical_roles:
@@ -71,11 +71,11 @@ canonical_roles:
       en: "CO₂"
 ```
 
-The `widget` value is the name of the React component you will write in Step 5.
+`widget` 值是你将在第 5 步中编写的 React 组件的名称。
 
-### 2c. Invoke actions (if the widget sends commands)
+### 2c. Invoke 动作(如果小部件发送命令)
 
-If the widget triggers an action on the device, describe it in `invoke_actions`:
+如果小部件在设备上触发动作，在 `invoke_actions` 中描述它：
 
 ```yaml
 invoke_actions:
@@ -89,9 +89,9 @@ invoke_actions:
           required: true
 ```
 
-### 2d. Device profile (new device type)
+### 2d. 设备个人资料(新设备类型)
 
-Add the profile to `device_profiles`:
+将个人资料添加到 `device_profiles`：
 
 ```yaml
 device_profiles:
@@ -101,65 +101,65 @@ device_profiles:
     invoke_actions: [co2.calibrate]
 ```
 
-Capability values come from the `capability_vocabulary` defined in step 2a.
+能力值来自第 2a 步中定义的 `capability_vocabulary`。
 
 ---
 
-## Step 3. Validate and Regenerate
+## 第 3 步。验证和重生
 
 ```bash
 cd contracts
 ./regen.sh
 ```
 
-Flags:
+标志：
 
-| Flag | Effect |
-|---|---|
-| (none) | Validate + all generators + copy to portal |
-| `--firmware-only` | Firmware generators only, skip portal copy |
-| `--help` | Show help |
+| 标志 | 效果 |
+|------|------|
+| (none) | 验证 + 所有生成器 + 复制到门户 |
+| `--firmware-only` | 仅固件生成器，跳过门户复制 |
+| `--help` | 显示帮助 |
 
-On success, `_generated/` is updated with:
+成功时，`_generated/` 使用以下内容更新：
 
-- `uart_protocol.h`, `mqtt_topics.h` — C++ headers
-- `iDryer_api.h` — Config/DeviceType facade
-- `mqtt-api.types.ts` — TypeScript types
-- `scaffolds/my_device/` — PlatformIO project skeleton
-- On the portal: files in `src/components/widgets/`
+- `uart_protocol.h`、`mqtt_topics.h` — C++ 头文件
+- `iDryer_api.h` — Config/DeviceType 外观
+- `mqtt-api.types.ts` — TypeScript 类型
+- `scaffolds/my_device/` — PlatformIO 项目骨架
+- 在门户上：`src/components/widgets/` 中的文件
 
-If `regen.sh` exits with an error, fix the problem before continuing.
+如果 `regen.sh` 以错误退出，在继续前修复问题。
 
 ---
 
-## Step 4. Implement Firmware
+## 第 4 步。实现固件
 
-Use the generated scaffold project:
+使用生成的骨架项目：
 
 ```bash
 cp -r contracts/_generated/scaffolds/my_device/ ~/my_device_fw/
 cd ~/my_device_fw
 ```
 
-Fill in the TODO sections in `src/main.cpp`:
+填充 `src/main.cpp` 中的 TODO 部分：
 
-- `onOnline()` — load config from NVS, initialize hardware.
-- `loop()` — poll sensors, call `s_runtime.publishTelemetry(tel)`.
-- `buildInfoJson()` — already populated by the generator from capabilities.
-- `onInvoke()` — handle `co2.calibrate`.
+- `onOnline()` — 从 NVS 加载配置，初始化硬件。
+- `loop()` — 轮询传感器，调用 `s_runtime.publishTelemetry(tel)`。
+- `buildInfoJson()` — 已由生成器从能力填充。
+- `onInvoke()` — 处理 `co2.calibrate`。
 
-For details, see [01-add-new-product.md](01-add-new-product.md).
+有关详细信息，参看 [01-add-new-product.md](01-add-new-product.md)。
 
 ---
 
-## Step 5. Create the React Widget
+## 第 5 步。创建 React 小部件
 
-Widgets live in `contracts/widgets/` and are copied to the portal by `regen.sh`.
+小部件位于 `contracts/widgets/` 中，由 `regen.sh` 复制到门户。
 
 !!! note
-    Do not edit widgets directly in `portal/src/components/widgets/` — they will be overwritten on the next `regen.sh` run. Edit only in `contracts/widgets/`.
+    不要直接在 `portal/src/components/widgets/` 中编辑小部件 — 它们将在下一次 `regen.sh` 运行中被覆盖。仅在 `contracts/widgets/` 中编辑。
 
-### Create the widget file
+### 创建小部件文件
 
 ```tsx
 // contracts/widgets/Co2Display.tsx
@@ -176,16 +176,16 @@ export function Co2DisplayWidget({ device }: WidgetProps) {
 }
 ```
 
-### Register in index.ts
+### 在 index.ts 中注册
 
 ```ts
 // contracts/widgets/index.ts
 export { Co2DisplayWidget } from "./Co2Display";
 ```
 
-### Register in widget-registry.tsx (on the portal)
+### 在 widget-registry.tsx 中注册(在门户上)
 
-After the next `regen.sh` run the file will appear at `portal/src/components/widgets/Co2Display.tsx`. Add an entry to `widget-registry.tsx` manually:
+下一次 `regen.sh` 运行后，文件将出现在 `portal/src/components/widgets/Co2Display.tsx`。手动向 `widget-registry.tsx` 添加条目：
 
 ```tsx
 import { Co2DisplayWidget } from "./Co2Display";
@@ -198,9 +198,9 @@ export const WIDGET_REGISTRY: Record<WidgetName, React.ComponentType<WidgetProps
 
 ---
 
-## Step 6. Test in UIKit
+## 第 6 步。在 UIKit 中测试
 
-Open `portal/src/pages/UiKitPage.tsx` and add a section with mock data inside the **Device Dashboard Widgets** group:
+打开 `portal/src/pages/UiKitPage.tsx`，在**Device Dashboard Widgets** 组中添加带有模拟数据的部分：
 
 ```tsx
 <KitSection title="Co2Display">
@@ -208,35 +208,35 @@ Open `portal/src/pages/UiKitPage.tsx` and add a section with mock data inside th
 </KitSection>
 ```
 
-Open the portal locally and navigate to `/uikit` — the widget should render without a login.
+在本地打开门户并导航到 `/uikit` — 小部件应该无需登录即可呈现。
 
 ---
 
-## Step 7. PR Checklist
+## 第 7 步。PR 检查清单
 
-Before submitting the PR, verify that:
+在提交 PR 前，验证：
 
-- [ ] `./contracts/regen.sh` completes without errors
-- [ ] `_generated/*` is committed (not in `.gitignore`)
-- [ ] `contracts/widgets/` — new widget file added
-- [ ] `contracts/widgets/index.ts` — widget exported
-- [ ] `widget-registry.tsx` on the portal — widget registered
-- [ ] Widget renders at `/uikit` without console errors
-- [ ] Scaffold in `_generated/scaffolds/my_device/` correctly reflects capabilities
-- [ ] PR description states: device purpose, capabilities, widget name
+- [ ] `./contracts/regen.sh` 完成无错误
+- [ ] `_generated/*` 已提交(不在 `.gitignore` 中)
+- [ ] `contracts/widgets/` — 添加了新小部件文件
+- [ ] `contracts/widgets/index.ts` — 小部件已导出
+- [ ] 门户上的 `widget-registry.tsx` — 小部件已注册
+- [ ] 小部件在 `/uikit` 呈现无控制台错误
+- [ ] `_generated/scaffolds/my_device/` 中的骨架正确反映能力
+- [ ] PR 描述说明：设备目的、能力、小部件名称
 
-Submit the PR against the `main` branch of the `idryer-core` repository.
+针对 `idryer-core` 存储库的 `main` 分支提交 PR。
 
 ---
 
-## 一個 PR 中的所有更改
+## 一个 PR 中的所有更改
 
-| File | Change type |
-|---|---|
-| `contracts/mqtt_contract.yaml` | Source of truth |
-| `contracts/_generated/*` | Auto-generated — committed in full |
-| `contracts/widgets/MyWidget.tsx` | New file |
-| `contracts/widgets/index.ts` | +1 export line |
-| *(portal, after `regen.sh`)* | `src/components/widgets/MyWidget.tsx` — copy |
-| *(portal, manual)* | `src/components/widgets/widget-registry.tsx` — +1 entry |
-| *(portal, manual)* | `src/pages/UiKitPage.tsx` — +1 section in KitGroup |
+| 文件 | 更改类型 |
+|------|---------|
+| `contracts/mqtt_contract.yaml` | 真实来源 |
+| `contracts/_generated/*` | 自动生成 — 完全提交 |
+| `contracts/widgets/MyWidget.tsx` | 新文件 |
+| `contracts/widgets/index.ts` | +1 导出行 |
+| *(门户，在 `regen.sh` 之后)* | `src/components/widgets/MyWidget.tsx` — 复制 |
+| *(门户，手动)* | `src/components/widgets/widget-registry.tsx` — +1 条目 |
+| *(门户，手动)* | `src/pages/UiKitPage.tsx` — KitGroup 中 +1 部分 |
