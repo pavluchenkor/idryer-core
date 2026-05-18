@@ -132,13 +132,13 @@ public:
     // ── Moonraker callbacks ───────────────────────────────────────────────────
 
     /// @brief Called when Moonraker sets a new virtual chamber target temperature.
-    void setChamberTargetCallback(MoonrakerClient::ChamberTargetCallback cb);
+    void setChamberTargetCallback(MoonrakerClient::ChamberTargetCallback::FnPtr fn, void* ctx = nullptr);
 
     /// @brief Called when the Moonraker connection state changes.
-    void setMoonrakerStatusCallback(MoonrakerClient::StatusChangeCallback cb);
+    void setMoonrakerStatusCallback(MoonrakerClient::StatusChangeCallback::FnPtr fn, void* ctx = nullptr);
 
     /// @brief Called when Moonraker sends virtual chamber data.
-    void setVirtualChamberCallback(MoonrakerClient::VirtualChamberCallback cb);
+    void setVirtualChamberCallback(MoonrakerClient::VirtualChamberCallback::FnPtr fn, void* ctx = nullptr);
 
     const MoonrakerStatus&    moonrakerStatus()    const { return moonrakerClient_.status(); }
     MoonrakerConnectionState  moonrakerState()     const { return moonrakerClient_.state();  }
@@ -148,7 +148,7 @@ public:
     // ── Bambu callbacks ───────────────────────────────────────────────────────
 
     /// @brief Called when the Bambu printer status changes.
-    void setBambuPrinterStatusCallback(BambuClient::PrinterStatusCallback cb);
+    void setBambuPrinterStatusCallback(BambuClient::PrinterStatusCallback::FnPtr fn, void* ctx = nullptr);
 
     const BambuPrinterStatus& bambuPrinterStatus() const { return bambuClient_.printerStatus(); }
     BambuConnectionState      bambuState()         const { return bambuClient_.state();  }

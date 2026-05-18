@@ -2,7 +2,6 @@
 
 #include <cstdint>
 #include <cstring>
-#include <functional>
 #include "../uart/uart_protocol.h"
 
 namespace idryer {
@@ -60,21 +59,19 @@ public:
      */
     ConfigFragResult processFragment(const UartConfigChunkPayload& payload,
                                       uint8_t dataLen, uint8_t flags) {
-        const auto& hdr = payload.header;
-
-        if (hdr.chunkIndex == 0) {
-            transferId_   = hdr.transferId;
-            totalSize_    = hdr.totalSize;
+        if (payload.chunkIndex == 0) {
+            transferId_   = payload.transferId;
+            totalSize_    = payload.totalSize;
             receivedSize_ = 0;
             nextChunk_    = 0;
             active_       = true;
             if (totalSize_ > CONFIG_BUFFER_SIZE) { reset(); return ConfigFragResult::ErrorOverflow; }
         } else {
-            if (!active_ || hdr.transferId != transferId_)
+            if (!active_ || payload.transferId != transferId_)
                 return ConfigFragResult::ErrorTransferId;
         }
 
-        if (hdr.chunkIndex != nextChunk_) return ConfigFragResult::ErrorSequence;
+        if (payload.chunkIndex != nextChunk_) return ConfigFragResult::ErrorSequence;
 
         if (receivedSize_ + dataLen > CONFIG_BUFFER_SIZE) {
             reset(); return ConfigFragResult::ErrorOverflow;
@@ -133,24 +130,16 @@ private:
 class ConfigSender {
 public:
     /**
-     * @brief Function called for each outgoing chunk.
-     * @param payload    The chunk to send.
-     * @param payloadLen Total payload length (header + data).
-     * @param flags      Frame flags (@c UART_FLAG_FRAGMENT, optionally @c UART_FLAG_LAST_FRAGMENT).
-     * @return @c true to continue, @c false to abort the transfer.
-     */
-    using SendFn = std::function<bool(const UartConfigChunkPayload&, uint8_t payloadLen, uint8_t flags)>;
-
-    /**
      * @brief Sends @p json as a series of config chunks via @p sendFn.
      * @param json       JSON string to send.
      * @param length     Length of @p json in bytes.
      * @param transferId Transfer identifier (use @c generateTransferId()).
-     * @param sendFn     Function that transmits each chunk.
+     * @param sendFn     Callable: bool(const UartConfigChunkPayload&, uint8_t payloadLen, uint8_t flags).
      * @return Number of chunks sent, or @c 0 on failure.
      */
-    uint16_t send(const char* json, uint16_t length, uint16_t transferId, SendFn sendFn) {
-        if (!json || length == 0 || !sendFn) return 0;
+    template<typename F>
+    uint16_t send(const char* json, uint16_t length, uint16_t transferId, F&& sendFn) {
+        if (!json || length == 0) return 0;
 
         uint16_t offset     = 0;
         uint16_t chunkIndex = 0;
@@ -158,13 +147,14 @@ public:
 
         while (offset < length) {
             UartConfigChunkPayload payload{};
-            payload.header.transferId  = transferId;
-            payload.header.totalSize   = (chunkIndex == 0) ? length : 0;
-            payload.header.chunkIndex  = chunkIndex;
+            payload.transferId  = transferId;
+            payload.totalSize   = (chunkIndex == 0) ? length : 0;
+            payload.chunkIndex  = chunkIndex;
 
+            constexpr uint8_t kDataSize = sizeof(UartConfigChunkPayload::data);
             uint16_t remaining = length - offset;
-            uint8_t  dataLen   = (remaining > UART_CONFIG_CHUNK_DATA_SIZE)
-                                 ? UART_CONFIG_CHUNK_DATA_SIZE
+            uint8_t  dataLen   = (remaining > kDataSize)
+                                 ? kDataSize
                                  : static_cast<uint8_t>(remaining);
 
             memcpy(payload.data, json + offset, dataLen);

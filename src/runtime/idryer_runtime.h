@@ -4,7 +4,7 @@
 #include "../cloud/action_dispatcher.h"
 #include "../profiles/IProfile.h"
 #include "../mqtt/mqtt_client.h"
-#include <functional>
+#include "core/callback.h"
 
 namespace idryer {
 
@@ -76,8 +76,8 @@ public:
      * @c command — suffix after @c commands/ (e.g. @c "invoke", @c "set", @c "get_config").
      * @c data    — parsed JSON payload.
      */
-    using CommandHandler = std::function<void(const char* command, JsonObjectConst data)>;
-    void setCommandHandler(CommandHandler handler);
+    using CommandHandler = Callback<void(const char*, JsonObjectConst)>;
+    void setCommandHandler(CommandHandler::FnPtr fn, void* ctx = nullptr);
 
 private:
     void onMqttCommand(const char* command, JsonObjectConst data);

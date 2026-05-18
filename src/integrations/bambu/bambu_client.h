@@ -25,7 +25,7 @@
 #include <Arduino.h>
 #include <WiFiClientSecure.h>
 #include <PubSubClient.h>
-#include <functional>
+#include "core/callback.h"
 
 namespace idryer {
 namespace cloud {
@@ -82,8 +82,8 @@ enum class BambuMode : uint8_t
 class BambuClient
 {
 public:
-    using StateChangeCallback  = std::function<void(BambuConnectionState)>;
-    using PrinterStatusCallback = std::function<void(const BambuPrinterStatus&)>;
+    using StateChangeCallback   = Callback<void(BambuConnectionState)>;
+    using PrinterStatusCallback = Callback<void(const BambuPrinterStatus&)>;
 
     BambuClient();
     ~BambuClient();
@@ -116,10 +116,10 @@ public:
     void setLogPayloads(bool enabled) { logPayloads_ = enabled; }
 
     /// Колбэк при смене состояния (для обновления `integrations/status`).
-    void setStateChangeCallback(StateChangeCallback cb) { stateCallback_ = std::move(cb); }
+    void setStateChangeCallback(StateChangeCallback::FnPtr fn, void* ctx = nullptr) { stateCallback_.set(fn, ctx); }
 
     /// Колбэк при обновлении статуса принтера (Reader-режим).
-    void setPrinterStatusCallback(PrinterStatusCallback cb) { printerStatusCallback_ = std::move(cb); }
+    void setPrinterStatusCallback(PrinterStatusCallback::FnPtr fn, void* ctx = nullptr) { printerStatusCallback_.set(fn, ctx); }
 
     /// Последний снимок статуса принтера.
     const BambuPrinterStatus& printerStatus() const { return printerStatus_; }

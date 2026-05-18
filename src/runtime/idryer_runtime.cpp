@@ -15,9 +15,10 @@ IdryerRuntime::IdryerRuntime(cloud::CloudStateMachine* cloud,
 {}
 
 void IdryerRuntime::begin() {
-    mqtt_->setCommandCallback([this](const char* command, JsonObjectConst data) {
-        this->onMqttCommand(command, data);
-    });
+    mqtt_->setCommandCallback(
+        [](void* ctx, const char* command, JsonObjectConst data) {
+            static_cast<IdryerRuntime*>(ctx)->onMqttCommand(command, data);
+        }, this);
     cloud_->begin();
 }
 
@@ -103,8 +104,8 @@ void IdryerRuntime::onMqttCommand(const char* command, JsonObjectConst data) {
     HAL_LOG_DEBUG("RT", "unhandled command: %s", command);
 }
 
-void IdryerRuntime::setCommandHandler(CommandHandler handler) {
-    commandHandler_ = std::move(handler);
+void IdryerRuntime::setCommandHandler(CommandHandler::FnPtr fn, void* ctx) {
+    commandHandler_.set(fn, ctx);
 }
 
 } // namespace idryer

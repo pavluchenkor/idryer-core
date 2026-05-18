@@ -31,9 +31,9 @@
 
 #if defined(ESP32) || defined(ESP_PLATFORM)
 
-#include <functional>
 #include <ArduinoJson.h>
 #include "../core/config.h"
+#include "core/callback.h"
 
 namespace idryer {
 
@@ -47,10 +47,10 @@ public:
      * Wired to the same handler the MQTT path uses. get_config is typically
      * intercepted before the ActionDispatcher — same rule applies here.
      */
-    using CommandSink = std::function<void(const char* command, JsonObjectConst data)>;
+    using CommandSink = Callback<void(const char*, JsonObjectConst)>;
 
     /** Called when client presents an invalid token. Product should reload token. */
-    using TokenRefreshCallback = std::function<void()>;
+    using TokenRefreshCallback = Callback<void()>;
 
     // ── Lifecycle ─────────────────────────────────────────────────────────────
 
@@ -101,10 +101,10 @@ public:
     // ── Callbacks ─────────────────────────────────────────────────────────────
 
     /** Register the shared command handler. Call before begin(). */
-    void setCommandSink(CommandSink cb)              { commandSink_ = cb; }
+    void setCommandSink(CommandSink::FnPtr fn, void* ctx = nullptr) { commandSink_.set(fn, ctx); }
 
     /** Register the token-refresh callback. Called on invalid_token. */
-    void setTokenRefreshCallback(TokenRefreshCallback cb) { tokenRefreshCb_ = cb; }
+    void setTokenRefreshCallback(TokenRefreshCallback::FnPtr fn, void* ctx = nullptr) { tokenRefreshCb_.set(fn, ctx); }
 
     /** Update the device token (e.g. after portal auto-refresh). */
     void updateToken(const char* newToken);

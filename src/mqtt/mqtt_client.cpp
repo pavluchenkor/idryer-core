@@ -41,8 +41,8 @@ void MqttClient::begin(const char* serialNumber, const char* token) {
     HAL_LOG_INFO("MQTT", "Init: broker=%s:%d serial=%s", MQTT_BROKER, MQTT_PORT, serialNumber_);
 }
 
-void MqttClient::setCommandCallback(CommandCallback callback) {
-    commandCallback_ = callback;
+void MqttClient::setCommandCallback(CommandCallback::FnPtr fn, void* ctx) {
+    commandCallback_.set(fn, ctx);
 }
 
 void MqttClient::disconnect() {

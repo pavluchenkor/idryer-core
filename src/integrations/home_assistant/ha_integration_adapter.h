@@ -19,7 +19,7 @@
 #if defined(ESP32) || defined(ESP_PLATFORM)
 
 #include "ha_mqtt_client.h"
-#include <functional>
+#include "core/callback.h"
 
 namespace idryer {
 namespace cloud {
@@ -39,7 +39,7 @@ const char* haConnectionStateToString(HaConnectionState value);
 class HaIntegrationAdapter
 {
 public:
-    using StateChangeCallback = std::function<void(HaConnectionState)>;
+    using StateChangeCallback = Callback<void(HaConnectionState)>;
 
     HaIntegrationAdapter();
     ~HaIntegrationAdapter();
@@ -59,7 +59,7 @@ public:
 
     ha::HaMqttClient* mqttClient() { return &client_; }
 
-    void setStateChangeCallback(StateChangeCallback cb) { stateCallback_ = std::move(cb); }
+    void setStateChangeCallback(StateChangeCallback::FnPtr fn, void* ctx = nullptr) { stateCallback_.set(fn, ctx); }
 
     bool authConfigured() const { return cfg_.username[0] != '\0'; }
 

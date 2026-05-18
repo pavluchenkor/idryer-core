@@ -60,7 +60,6 @@
 #pragma once
 
 #include <stdint.h>
-#include <functional>
 #include <ArduinoJson.h>
 
 // Auto-generated from mqtt_contract.yaml — enums, data structs, Config.

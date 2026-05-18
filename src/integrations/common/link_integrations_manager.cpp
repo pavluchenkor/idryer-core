@@ -47,9 +47,9 @@ LinkIntegrationsManager::LinkIntegrationsManager(idryer::MqttClient* mqtt,
     // Маршрутизируем входящие сообщения с HA-брокера в haBuilder
     // (он сам отфильтрует по своему prefix `idryer_ha/{deviceId}/...`).
     haClient_.mqttClient()->setMessageCallback(
-        [this](const char* topic, const char* payload) {
-            haBuilder_.handleIncoming(topic, payload);
-        });
+        [](void* ctx, const char* topic, const char* payload) {
+            static_cast<LinkIntegrationsManager*>(ctx)->haBuilder_.handleIncoming(topic, payload);
+        }, this);
 }
 
 void LinkIntegrationsManager::begin()
@@ -65,26 +65,28 @@ void LinkIntegrationsManager::begin()
     store_->loadMoonraker(moonraker_);
     store_->loadCommon(selection_);
 
-    bambuClient_.setStateChangeCallback([this](BambuConnectionState /*s*/) {
-        publishStatus();
-    });
+    bambuClient_.setStateChangeCallback([](void* ctx, BambuConnectionState) {
+        static_cast<LinkIntegrationsManager*>(ctx)->publishStatus();
+    }, this);
 
-    moonrakerClient_.setStateChangeCallback([this](MoonrakerConnectionState /*s*/) {
-        publishStatus();
-    });
+    moonrakerClient_.setStateChangeCallback([](void* ctx, MoonrakerConnectionState) {
+        static_cast<LinkIntegrationsManager*>(ctx)->publishStatus();
+    }, this);
 
-    haClient_.setStateChangeCallback([this](HaConnectionState s) {
-        if (s == HaConnectionState::Connected && haDeviceId_[0] != '\0') {
-            haPublisher_.publishDiscovery(haDeviceId_, haUnitsCount_, haHwVersion_, haFwVersion_,
-                                           haCapabilities_);
+    haClient_.setStateChangeCallback([](void* ctx, HaConnectionState s) {
+        auto* mgr = static_cast<LinkIntegrationsManager*>(ctx);
+        if (s == HaConnectionState::Connected && mgr->haDeviceId_[0] != '\0') {
+            mgr->haPublisher_.publishDiscovery(mgr->haDeviceId_, mgr->haUnitsCount_,
+                                               mgr->haHwVersion_, mgr->haFwVersion_,
+                                               mgr->haCapabilities_);
             // Продуктовые controls (если зарегистрированы через link.ha()).
-            haBuilder_.setDeviceId(haDeviceId_);
-            haBuilder_.republishAll();
+            mgr->haBuilder_.setDeviceId(mgr->haDeviceId_);
+            mgr->haBuilder_.republishAll();
         } else if (s != HaConnectionState::Connected) {
-            haPublisher_.resetDiscoveryPublished();
+            mgr->haPublisher_.resetDiscoveryPublished();
         }
-        publishStatus();
-    });
+        mgr->publishStatus();
+    }, this);
 
     HAL_LOG_INFO("LINK_MGR", "begin: active=%s ha=%d bambu=%d moonraker=%d",
                  activeIntegrationToString(selection_.active),
@@ -308,24 +310,28 @@ void LinkIntegrationsManager::setDeviceType(UartDeviceType deviceType)
 // Callbacks passthrough
 // =============================================================================
 
-void LinkIntegrationsManager::setChamberTargetCallback(MoonrakerClient::ChamberTargetCallback cb)
+void LinkIntegrationsManager::setChamberTargetCallback(
+    MoonrakerClient::ChamberTargetCallback::FnPtr fn, void* ctx)
 {
-    moonrakerClient_.setChamberTargetCallback(std::move(cb));
+    moonrakerClient_.setChamberTargetCallback(fn, ctx);
 }
 
-void LinkIntegrationsManager::setMoonrakerStatusCallback(MoonrakerClient::StatusChangeCallback cb)
+void LinkIntegrationsManager::setMoonrakerStatusCallback(
+    MoonrakerClient::StatusChangeCallback::FnPtr fn, void* ctx)
 {
-    moonrakerClient_.setStatusChangeCallback(std::move(cb));
+    moonrakerClient_.setStatusChangeCallback(fn, ctx);
 }
 
-void LinkIntegrationsManager::setVirtualChamberCallback(MoonrakerClient::VirtualChamberCallback cb)
+void LinkIntegrationsManager::setVirtualChamberCallback(
+    MoonrakerClient::VirtualChamberCallback::FnPtr fn, void* ctx)
 {
-    moonrakerClient_.setVirtualChamberCallback(std::move(cb));
+    moonrakerClient_.setVirtualChamberCallback(fn, ctx);
 }
 
-void LinkIntegrationsManager::setBambuPrinterStatusCallback(BambuClient::PrinterStatusCallback cb)
+void LinkIntegrationsManager::setBambuPrinterStatusCallback(
+    BambuClient::PrinterStatusCallback::FnPtr fn, void* ctx)
 {
-    bambuClient_.setPrinterStatusCallback(std::move(cb));
+    bambuClient_.setPrinterStatusCallback(fn, ctx);
 }
 
 // =============================================================================

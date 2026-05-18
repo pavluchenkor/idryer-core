@@ -19,7 +19,6 @@
 
 #include "ha_publisher.h"
 #include "ha_mqtt_client.h"
-#include <functional>
 #include <stdint.h>
 
 namespace idryer {

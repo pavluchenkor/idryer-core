@@ -13,7 +13,7 @@
 #include <WiFi.h>
 #include <PubSubClient.h>
 #include <ESPmDNS.h>
-#include <functional>
+#include "core/callback.h"
 
 namespace idryer {
 namespace ha {
@@ -70,8 +70,8 @@ public:
     bool publish(const char* topic, const char* payload, bool retained = false);
     bool subscribe(const char* topic);
 
-    using MessageCallback = std::function<void(const char* topic, const char* payload)>;
-    void setMessageCallback(MessageCallback cb) { messageCallback_ = cb; }
+    using MessageCallback = Callback<void(const char*, const char*)>;
+    void setMessageCallback(MessageCallback::FnPtr fn, void* ctx = nullptr) { messageCallback_.set(fn, ctx); }
 
     const HaDiscoveryResult& getDiscoveryResult() const { return discoveryResult_; }
 

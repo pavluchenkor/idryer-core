@@ -9,6 +9,7 @@
 #include <PubSubClient.h>
 #include <ArduinoJson.h>
 #include "idryer_topics.h"
+#include "core/callback.h"
 
 #define IDRYER_MQTT_KEEPALIVE   60
 #define MQTT_BUFFER_SIZE        16384
@@ -39,7 +40,7 @@ namespace idryer {
 class MqttClient {
 public:
     /// @brief Callback invoked when a @c commands/* message arrives.
-    using CommandCallback = std::function<void(const char* command, JsonObjectConst data)>;
+    using CommandCallback = Callback<void(const char*, JsonObjectConst)>;
 
     /**
      * @brief Initializes the MQTT client with device credentials.
@@ -56,7 +57,7 @@ public:
      *
      * Called by @c IdryerRuntime — you don't need to set this yourself.
      */
-    void setCommandCallback(CommandCallback callback);
+    void setCommandCallback(CommandCallback::FnPtr fn, void* ctx = nullptr);
 
     /**
      * @brief Connects to the broker and subscribes to @c commands/#.

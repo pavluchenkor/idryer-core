@@ -15,7 +15,6 @@
 
 #include "ha_mqtt_client.h"
 #include "../../uart/uart_protocol.h"
-#include <functional>
 
 namespace idryer {
 namespace ha {

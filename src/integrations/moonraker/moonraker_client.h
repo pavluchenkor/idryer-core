@@ -23,7 +23,7 @@
 #include <Arduino.h>
 #include <ArduinoJson.h>   // JsonObjectConst используется в сигнатуре applyStatusUpdate
 #include <WebSocketsClient.h>
-#include <functional>
+#include "core/callback.h"
 
 namespace idryer {
 namespace cloud {
@@ -69,10 +69,10 @@ struct VirtualChamberData
 class MoonrakerClient
 {
 public:
-    using StateChangeCallback     = std::function<void(MoonrakerConnectionState)>;
-    using ChamberTargetCallback   = std::function<void(float target, bool available)>;
-    using VirtualChamberCallback  = std::function<void(const VirtualChamberData&)>;
-    using StatusChangeCallback    = std::function<void(const MoonrakerStatus&)>;
+    using StateChangeCallback    = Callback<void(MoonrakerConnectionState)>;
+    using ChamberTargetCallback  = Callback<void(float, bool)>;
+    using VirtualChamberCallback = Callback<void(const VirtualChamberData&)>;
+    using StatusChangeCallback   = Callback<void(const MoonrakerStatus&)>;
 
     MoonrakerClient();
     ~MoonrakerClient();
@@ -95,15 +95,15 @@ public:
 
     // Callbacks --------------------------------------------------------------
 
-    void setStateChangeCallback(StateChangeCallback cb) { stateCallback_ = std::move(cb); }
+    void setStateChangeCallback(StateChangeCallback::FnPtr fn, void* ctx = nullptr) { stateCallback_.set(fn, ctx); }
 
     /// Legacy-колбэк: фаер при изменении `target` или `available`.
-    void setChamberTargetCallback(ChamberTargetCallback cb) { chamberCallback_ = std::move(cb); }
+    void setChamberTargetCallback(ChamberTargetCallback::FnPtr fn, void* ctx = nullptr) { chamberCallback_.set(fn, ctx); }
 
     /// Главный потребительский колбэк для iHeater (предпочтительный).
-    void setVirtualChamberCallback(VirtualChamberCallback cb) { vcCallback_ = std::move(cb); }
+    void setVirtualChamberCallback(VirtualChamberCallback::FnPtr fn, void* ctx = nullptr) { vcCallback_.set(fn, ctx); }
 
-    void setStatusChangeCallback(StatusChangeCallback cb) { statusCallback_ = std::move(cb); }
+    void setStatusChangeCallback(StatusChangeCallback::FnPtr fn, void* ctx = nullptr) { statusCallback_.set(fn, ctx); }
 
 private:
     static constexpr uint32_t kReconnectMinMs = 1000;

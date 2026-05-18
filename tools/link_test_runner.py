@@ -66,6 +66,7 @@ class Config:
     test_timeout_s: float = 15.0
     only: List[str] = field(default_factory=list)
     skip: List[str] = field(default_factory=list)
+    report: Optional[str] = None
 
 
 # ── result ──────────────────────────────────────────────────────────
@@ -784,7 +785,7 @@ def test_cmd_set(cfg: Config) -> Result:
 
 def test_cmd_drying(cfg: Config) -> Result:
     """commands/drying → RP2040 переходит в DRYING → видно в /status."""
-    _send_command(cfg, "drying", {"params": {"temperature": 30, "duration": 5}})
+    _send_command(cfg, "drying", {"unitId": "U1", "params": {"temperature": 30, "duration": 5}})
     unit_id = _wait_fresh_status_mode(cfg, "DRYING", cfg.test_timeout_s)
     if unit_id:
         return Result("cmd_drying", True, f"mode=DRYING подтверждён на {unit_id}")
@@ -794,7 +795,7 @@ def test_cmd_drying(cfg: Config) -> Result:
 
 def test_cmd_stop(cfg: Config) -> Result:
     """commands/stop → все юниты возвращаются в IDLE."""
-    _send_command(cfg, "stop", {})
+    _send_command(cfg, "stop", {"unitId": "U1"})
 
     topic = f"idryer/{cfg.serial}/status"
     result: list = [None]
@@ -831,14 +832,147 @@ def test_cmd_stop(cfg: Config) -> Result:
     return Result("cmd_stop", False, f"IDLE не подтверждён за {cfg.test_timeout_s:.0f}с")
 
 
+def test_telemetry(cfg: Config) -> Result:
+    """idryer/<serial>/telemetry публикуется с реальными данными температуры и влажности."""
+    topic = f"idryer/{cfg.serial}/telemetry"
+    msgs = mqtt_collect(cfg.local_broker, cfg.local_port, [topic], cfg.test_timeout_s)
+    if topic not in msgs:
+        return Result("telemetry", False, f"топик telemetry не пришёл за {cfg.test_timeout_s:.0f}с")
+    try:
+        d = json.loads(msgs[topic])
+        units = d.get("units", [])
+        if not units:
+            return Result("telemetry", False, "units пустой в telemetry")
+        u = units[0]
+        temp = u.get("temperature")
+        hum  = u.get("humidity")
+        if temp is None or hum is None:
+            return Result("telemetry", False, f"нет temperature/humidity: {u}")
+        if not (-40 <= temp <= 200):
+            return Result("telemetry", False, f"temperature вне диапазона: {temp}°C")
+        if not (0 <= hum <= 100):
+            return Result("telemetry", False, f"humidity вне диапазона: {hum}%")
+        return Result("telemetry", True,
+                      f"U1: {temp}°C / {hum}% влажности, heater={u.get('heaterPower',0)}%")
+    except Exception as e:
+        return Result("telemetry", False, f"parse error: {e}")
+
+
+def test_config_menu(cfg: Config) -> Result:
+    """из /config: menu не пустой, есть секция DRYING; из /status: units_count > 0."""
+    config_topic = f"idryer/{cfg.serial}/config"
+    status_topic = f"idryer/{cfg.serial}/status"
+    msgs = mqtt_collect(cfg.local_broker, cfg.local_port,
+                        [config_topic, status_topic], cfg.test_timeout_s, stop_after=2)
+
+    if config_topic not in msgs:
+        return Result("config_menu", False, "нет retained /config")
+    if status_topic not in msgs:
+        return Result("config_menu", False,
+                      f"нет /status за {cfg.test_timeout_s:.0f}с (устройство не публикует status?)")
+
+    try:
+        menu = json.loads(msgs[config_topic]).get("menu", [])
+        units = json.loads(msgs[status_topic]).get("units", [])
+    except Exception as e:
+        return Result("config_menu", False, f"parse error: {e}")
+
+    if not menu:
+        return Result("config_menu", False, "menu пустой")
+    units_count = len(units)
+    if units_count == 0:
+        return Result("config_menu", False, "units_count=0 в /status")
+
+    sections = [x["n"] for x in menu if x.get("t") == "sub" and x.get("p") == 0]
+    has_drying = "DRYING" in sections
+    if not has_drying:
+        return Result("config_menu", False, f"секция DRYING не найдена, есть: {sections}")
+
+    return Result("config_menu", True,
+                  f"units_count={units_count}, menu={len(menu)} элементов, секции: {sections[:4]}")
+
+
+def test_config_set_temp(cfg: Config) -> Result:
+    """commands/set для температуры сушки (DRYING/TEMPERATURE id=3) → /config обновился."""
+    config_topic = f"idryer/{cfg.serial}/config"
+    msgs = mqtt_collect(cfg.local_broker, cfg.local_port, [config_topic], 5.0)
+    if config_topic not in msgs:
+        return Result("config_set_temp", False, "нет retained /config")
+
+    try:
+        menu = json.loads(msgs[config_topic]).get("menu", [])
+        item = next((x for x in menu if x.get("id") == 3 and x.get("n") == "TEMPERATURE"), None)
+        if item is None:
+            return Result("config_set_temp", False, "элемент id=3 (DRYING/TEMPERATURE) не найден в menu")
+        original = item.get("val")
+        orig_val = original[0] if isinstance(original, list) else original
+    except Exception as e:
+        return Result("config_set_temp", False, f"parse /config: {e}")
+
+    new_val = orig_val + 5 if orig_val + 5 <= item.get("max", 110) else orig_val - 5
+    _send_command(cfg, "set", {"cmd": "set", "id": 3, "val": new_val})
+
+    got = _wait_fresh_config_item(cfg, 3, new_val, cfg.test_timeout_s)
+
+    _send_command(cfg, "set", {"cmd": "set", "id": 3, "val": orig_val})
+    time.sleep(1.0)
+
+    if got is None:
+        return Result("config_set_temp", False,
+                      f"DRYING TEMP id=3: set→{new_val}°C не подтверждено в /config за {cfg.test_timeout_s:.0f}с")
+    return Result("config_set_temp", True,
+                  f"DRYING TEMP id=3: {orig_val}°C → {new_val}°C подтверждено, восстановлено")
+
+
+def test_cmd_find(cfg: Config) -> Result:
+    """commands/find → RP2040 мигает LEDs, отвечает, остаётся живым (status приходит без FAULT)."""
+    _send_command(cfg, "find", {"unitId": "U1"})
+
+    topic = f"idryer/{cfg.serial}/status"
+    result: list = [None]
+    done = threading.Event()
+    pub_ts = time.time()
+
+    def on_msg(_c, _u, msg):
+        if time.time() < pub_ts:
+            return
+        try:
+            d = json.loads(msg.payload.decode())
+            units = d.get("units", [])
+            if units:
+                result[0] = units[0].get("mode", "?")
+                done.set()
+        except Exception:
+            pass
+
+    c = _new_client()
+    c.on_message = on_msg
+    try:
+        c.connect(cfg.local_broker, cfg.local_port, 10)
+    except Exception as e:
+        return Result("cmd_find", False, f"connect: {e}")
+    c.subscribe(topic)
+    c.loop_start()
+    time.sleep(0.2)
+    done.wait(timeout=cfg.test_timeout_s)
+    c.loop_stop()
+    c.disconnect()
+
+    if result[0] is None:
+        return Result("cmd_find", False, f"статус не пришёл за {cfg.test_timeout_s:.0f}с")
+    if result[0] == "FAULT":
+        return Result("cmd_find", False, f"RP2040 в FAULT после find")
+    return Result("cmd_find", True, f"устройство живое после find, mode={result[0]}")
+
+
 def test_cmd_storage(cfg: Config) -> Result:
     """commands/storage → RP2040 переходит в STORAGE → stop → IDLE."""
-    _send_command(cfg, "storage", {"params": {"temperature": 40, "humidity": 15}})
+    _send_command(cfg, "storage", {"unitId": "U1", "params": {"temperature": 40, "humidity": 15}})
     unit_id = _wait_fresh_status_mode(cfg, "STORAGE", cfg.test_timeout_s)
     if not unit_id:
         return Result("cmd_storage", False,
                       f"STORAGE не появился в /status за {cfg.test_timeout_s:.0f}с")
-    _send_command(cfg, "stop", {})
+    _send_command(cfg, "stop", {"unitId": "U1"})
     return Result("cmd_storage", True, f"mode=STORAGE на {unit_id}, stop отправлен")
 
 
@@ -918,10 +1052,34 @@ TESTS: List = [
         "iHeater Link: Moonraker VirtualChamber.target>0 → outputMode=1 targetTempC>0",
     ),
     (
+        "telemetry",
+        test_telemetry,
+        False, False,
+        "iDryer: /telemetry публикуется с реальными temperature и humidity",
+    ),
+    (
+        "config_menu",
+        test_config_menu,
+        False, False,
+        "iDryer: /config содержит menu с секцией DRYING; /status сообщает units_count",
+    ),
+    (
+        "config_set_temp",
+        test_config_set_temp,
+        False, False,
+        "iDryer: commands/set DRYING/TEMPERATURE id=3 → delta от RP2040 → обновлённый /config",
+    ),
+    (
         "cmd_set",
         test_cmd_set,
         False, False,
         "iDryer: commands/set id=146 (AUTO STORAGE) → delta от RP2040 → обновлённый /config",
+    ),
+    (
+        "cmd_find",
+        test_cmd_find,
+        False, False,
+        "iDryer: commands/find → RP2040 мигает LEDs для идентификации, остаётся живым",
     ),
     (
         "cmd_drying",
@@ -993,9 +1151,25 @@ HUMAN_VERDICTS = {
         "Moonraker → авто-нагрев сработал (VirtualChamber→RMT)",
         "Moonraker НЕ запустил нагрев — цепочка VirtualChamber→RMT сломана",
     ),
+    "telemetry": (
+        "сенсор работает — temperature и humidity в норме",
+        "telemetry не приходит или данные вне диапазона — сенсор или UART сломан",
+    ),
+    "config_menu": (
+        "menu/config корректный — units_count и секции на месте",
+        "menu/config отсутствует или неполный — портал не сможет отрисовать интерфейс",
+    ),
+    "config_set_temp": (
+        "смена температуры сушки работает — RP2040 принял и подтвердил",
+        "смена температуры НЕ прошла — set команда не дошла до RP2040",
+    ),
     "cmd_set": (
         "commands/set работает — настройка дошла до RP2040 и подтверждена в /config",
         "commands/set НЕ работает — изменения из портала не доходят до контроллера",
+    ),
+    "cmd_find": (
+        "find команда работает — RP2040 мигнул LEDs и остался живым",
+        "find не сработал — команда не дошла до RP2040 или RP2040 завис",
     ),
     "cmd_drying": (
         "drying команда работает — RP2040 перешёл в DRYING",
@@ -1022,6 +1196,7 @@ def parse_args() -> Config:
     ap.add_argument("--timeout", type=float, default=15.0)
     ap.add_argument("--only", help="comma-separated имена тестов")
     ap.add_argument("--skip", help="comma-separated имена для пропуска")
+    ap.add_argument("--report", help="сохранить JSON отчёт в файл (напр. report.json)")
     a = ap.parse_args()
     return Config(
         serial=a.serial,
@@ -1032,6 +1207,7 @@ def parse_args() -> Config:
         test_timeout_s=a.timeout,
         only=[s.strip() for s in (a.only or "").split(",") if s.strip()],
         skip=[s.strip() for s in (a.skip or "").split(",") if s.strip()],
+        report=a.report,
     )
 
 
@@ -1116,6 +1292,25 @@ def main() -> int:
     skipped = sum(1 for r in results if r.passed is None)
     print(f"СВОДКА: ✅ {passed} прошло   ❌ {failed} упало   ⏭  {skipped} пропущено (нет в этой прошивке)")
     print("═" * 70)
+
+    if cfg.report:
+        report_data = {
+            "serial": cfg.serial,
+            "timestamp": __import__("datetime").datetime.utcnow().isoformat() + "Z",
+            "summary": {"passed": passed, "failed": failed, "skipped": skipped},
+            "tests": [
+                {
+                    "name": r.name,
+                    "passed": r.passed,
+                    "details": r.details,
+                }
+                for r in results
+            ],
+        }
+        with open(cfg.report, "w", encoding="utf-8") as f:
+            json.dump(report_data, f, ensure_ascii=False, indent=2)
+        print(f"\nJSON отчёт сохранён: {cfg.report}")
+
     return 1 if failed else 0
 
 

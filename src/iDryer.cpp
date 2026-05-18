@@ -293,14 +293,15 @@ bool Link::begin() {
 
     // mDNS / LAN WS server start lazily after WiFi connects (lwIP needs
     // network stack ready). See Link::loop() — `localStarted_` gate.
-    impl_->local.setCommandSink([this](const char* command, JsonObjectConst data) {
-        dispatchCommand(command, data);
-    });
-    impl_->local.setTokenRefreshCallback([this]() {
+    impl_->local.setCommandSink([](void* ctx, const char* command, JsonObjectConst data) {
+        static_cast<Link*>(ctx)->dispatchCommand(command, data);
+    }, this);
+    impl_->local.setTokenRefreshCallback([](void* ctx) {
+        auto* self = static_cast<Link*>(ctx);
         idryer::DeviceIdentity id;
-        impl_->credentials.load(id);
-        impl_->local.updateToken(id.token);
-    });
+        self->impl_->credentials.load(id);
+        self->impl_->local.updateToken(id.token);
+    }, this);
 
     // Integrations.
     impl_->intStore.begin();
@@ -344,9 +345,9 @@ bool Link::begin() {
     impl_->intManager.begin();
 
     // Runtime command handler — same dispatch as local-WS, single user callback.
-    impl_->runtime.setCommandHandler([this](const char* command, JsonObjectConst data) {
-        dispatchCommand(command, data);
-    });
+    impl_->runtime.setCommandHandler([](void* ctx, const char* command, JsonObjectConst data) {
+        static_cast<Link*>(ctx)->dispatchCommand(command, data);
+    }, this);
 
     // Auto-claim for standalone devices — отключён: claim только по START_CLAIM от flasher.
     // impl_->cloud.setUnclaimedCallback([](void* ctx) {
