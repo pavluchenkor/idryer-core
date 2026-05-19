@@ -6,7 +6,7 @@
   "authors": [{ "name": "iDryer Team" }],
   "repository": { "type": "git", "url": "" },
   "frameworks": "arduino",
-  "platforms": "espressif32",
+  "platforms": ["espressif32", "raspberrypi"],
   "build": {
     "srcDir": "src",
     "includeDir": "src"

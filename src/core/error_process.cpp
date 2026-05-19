@@ -1,3 +1,4 @@
+#if defined(ESP32) || defined(ESP_PLATFORM)
 #include "error_process.h"
 
 static ErrorCallback g_cb        = nullptr;
@@ -18,3 +19,5 @@ void error_process_all(void) {
         g_cb(&ev);
     }
 }
+
+#endif // ESP32 || ESP_PLATFORM

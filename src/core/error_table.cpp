@@ -1,3 +1,4 @@
+#if defined(ESP32) || defined(ESP_PLATFORM)
 #include "error_table.h"
 #include "error_defs.h"
 #include <stdio.h>
@@ -52,3 +53,5 @@ int error_format_line(const ErrorEvent* ev, char* buf, size_t buf_sz) {
         (unsigned long)ev->ts_ms
     );
 }
+
+#endif // ESP32 || ESP_PLATFORM

@@ -1,3 +1,4 @@
+#if defined(ESP32) || defined(ESP_PLATFORM)
 #include "error_bus.h"
 
 #if (ERRORBUS_SIZE < 2)
@@ -71,3 +72,5 @@ uint8_t errorbus_count(void) {
     EB_CRIT_EXIT(_t);
     return (uint8_t)((h + ERRORBUS_SIZE - t) % ERRORBUS_SIZE);
 }
+
+#endif // ESP32 || ESP_PLATFORM

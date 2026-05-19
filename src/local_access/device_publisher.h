@@ -78,7 +78,11 @@ public:
     bool publishRfid(JsonDocument& doc);
 
     bool isMqttConnected() const  { return mqtt_->isConnected(); }
+#if defined(ESP32) || defined(ESP_PLATFORM)
     bool isLocalConnected() const { return local_ && local_->isClientConnected(); }
+#else
+    bool isLocalConnected() const { return false; }
+#endif
 
 private:
     MqttClient*  mqtt_;

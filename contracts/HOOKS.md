@@ -3,25 +3,25 @@
 Этот hook защищает от commit'ов с протухшим или невалидным `mqtt_contract.yaml` /
 сгенерированными файлами.
 
-Что проверяет (только если в commit'е есть файлы из `lib/idryer-core/contracts/`):
+Что проверяет (только если в commit'е есть релевантные staged-файлы):
 
-1. `validate_contract.py` — yaml-валидация: schema, cross-refs, kind_id uniqueness, sizeof.
-2. `gen_uart_protocol_h.py` — регенерация `_generated/uart_protocol.h`.
-3. `git diff` — если регенерированный файл отличается от того что в репо, commit отменяется.
+1. `regen.sh` — единая точка пайплайна (валидация + регенерация).
+2. `git diff` — если любой из generated-файлов после регенерации отличается от версии в репо, commit отменяется.
 
 ## Установка
 
-После клона репозитория один раз (запускается из корня `iHeater-link/`):
+После клона репозитория один раз (запускается из корня `docs/idryer-core/`):
 
 ```bash
-ln -sf ../../lib/idryer-core/contracts/pre_commit.sh .git/hooks/pre-commit
+ln -sf ../contracts/pre_commit.sh .git/hooks/pre-commit
+chmod +x .git/hooks/pre-commit
 ```
 
 Проверить:
 
 ```bash
 ls -la .git/hooks/pre-commit
-# → pre-commit -> ../../lib/idryer-core/contracts/pre_commit.sh
+# → pre-commit -> ../contracts/pre_commit.sh
 ```
 
 ## Использование
@@ -86,9 +86,9 @@ rm .git/hooks/pre-commit
 ## Ручной запуск (без commit'а)
 
 ```bash
-./lib/idryer-core/contracts/pre_commit.sh   # из корня iHeater-link/
+./contracts/pre_commit.sh   # из корня docs/idryer-core/
 # или
-cd lib/idryer-core/contracts/ && ./pre_commit.sh
+cd contracts/ && ./pre_commit.sh
 ```
 
 Полезно перед коммитом большого изменения, чтобы убедиться что всё пройдёт.
@@ -101,24 +101,26 @@ Hook реагирует только на staged изменения в:
 - `lib/idryer-core/contracts/gen_*.py`
 - `lib/idryer-core/contracts/validate_contract.py`
 - `lib/idryer-core/contracts/mqtt_contract.schema.json`
+- `lib/idryer-core/contracts/regen.sh`
 
 Любой commit без этих файлов → hook молча пропускает.
 
 ## Что ещё в pipeline
 
-Связанные тулзы в `lib/idryer-core/contracts/`:
+Связанные тулзы в `contracts/`:
 
 | Файл | Назначение |
 |---|---|
 | `mqtt_contract.yaml` | Single source of truth для MQTT+UART протокола |
 | `mqtt_contract.schema.json` | JSON Schema валидирует структуру yaml |
 | `validate_contract.py` | Validator: schema + cross-refs + kind_id + sizeof |
+| `regen.sh` | Запускает pipeline (validate + regenerate) |
 | `gen_uart_protocol_h.py` | Генерирует `_generated/uart_protocol.h` (C++) |
 | `_generated/uart_protocol.h` | **AUTO-GENERATED**, не редактировать руками |
 
 Запуск напрямую:
 ```bash
-cd lib/idryer-core/contracts/
+cd contracts/
 python3 validate_contract.py        # проверить yaml
 python3 gen_uart_protocol_h.py      # перегенерировать .h
 ```

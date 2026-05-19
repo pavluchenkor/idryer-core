@@ -55,7 +55,7 @@ class Config:
     moonraker_port: int = 7125
     fake_moonraker_script: str = (
         "/Users/ruslanpavlucenko/Projects/iDryerProject/docs/"
-        "iHeater-link/tools/fake_moonraker.py"
+        "iHeater-link/tools/fake_moonraker/fake_moonraker.py"
     )
     fake_bambu_dir: str = (
         "/Users/ruslanpavlucenko/Projects/iDryerProject/docs/"
@@ -1204,6 +1204,7 @@ def parse_args() -> Config:
         local_port=a.local_port,
         ha_broker=a.ha_broker,
         ha_port=a.ha_port,
+        moonraker_host=a.local_broker,
         test_timeout_s=a.timeout,
         only=[s.strip() for s in (a.only or "").split(",") if s.strip()],
         skip=[s.strip() for s in (a.skip or "").split(",") if s.strip()],
