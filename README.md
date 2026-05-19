@@ -1,117 +1,122 @@
 # idryer-core
 
-> **Перед тем как что-либо редактировать — прочитайте раздел «Кодогенерация» ниже.**
-> Часть файлов в этом репозитории генерируется автоматически, и ваши правки будут перезаписаны.
+[developer docs](https://dev.idryer.org/core/)
+
+> **Before editing anything, read the "Code Generation" section below.**
+> Some files in this repository are generated automatically, and manual changes will be overwritten.
 
 ---
 
-Embedded-библиотека для ESP32-устройств экосистемы iDryer.
+Embedded library for ESP32 devices in the iDryer ecosystem.
 
-Если вы делаете своё устройство, которое должно работать с инфраструктурой [iDryer](https://idryer.org) — облако, портал, мобильное приложение, интеграции с принтерами — эта библиотека снимает с вас всю обвязку: WiFi-provisioning, claim-протокол привязки к аккаунту, MQTT-сессию с TLS и автореконнектом, маршрутизацию команд, периодическую публикацию телеметрии.
+If you are building a device that should work with the [iDryer portal](https://portal.idryer.org/) infrastructure (cloud, web portal, mobile app, printer integrations), this library provides the full integration layer: WiFi provisioning, claim flow, TLS MQTT session with auto-reconnect, command routing, and periodic telemetry publishing.
+[App Store](https://apps.apple.com/app/idryer/id6760609044)
+[Google Play](https://play.google.com/store/apps/details?id=org.idryer.mobile)
 
-Вы пишете только то, что специфично вашему устройству: чтение датчиков, управление периферией, бизнес-логику. Всё остальное — `iDryer::Link link(cfg); link.begin(); link.loop();`.
+
+You only implement device-specific logic: sensor reads, peripheral control, and business logic. Everything else is handled by `iDryer::Link link(cfg); link.begin(); link.loop();`.
 
 ---
 
-## Кодогенерация
+## Code Generation
 
-**Единственный источник правды: [`contracts/mqtt_contract.yaml`](contracts/mqtt_contract.yaml)**
+**Single source of truth: [`contracts/mqtt_contract.yaml`](contracts/mqtt_contract.yaml)**
 
-Из этого файла автоматически генерируется:
+This file is used to generate:
 
-| Что генерируется | Куда | Кто читает |
+| Generated artifact | Output path | Used by |
 |---|---|---|
-| `iDryer::Config` (has* флаги) | `src/_generated/iDryer_api.h` | Прошивка (`main.cpp`) |
-| UART-протокол (structs/enums/kind ids) | `contracts/_generated/uart_protocol.h` | UART bridge |
-| MQTT topics (C++ constants) | `contracts/_generated/mqtt_topics.h` | Прошивка |
-| `HardwareUnitConfigCapabilities` | `contracts/_generated/mqtt-api.types.ts` | Портал (TypeScript) |
+| `iDryer::Config` (`has*` flags) | `src/_generated/iDryer_api.h` | Firmware (`main.cpp`) |
+| UART protocol (structs/enums/kind ids) | `contracts/_generated/uart_protocol.h` | UART bridge |
+| MQTT topics (C++ constants) | `contracts/_generated/mqtt_topics.h` | Firmware |
+| `HardwareUnitConfigCapabilities` | `contracts/_generated/mqtt-api.types.ts` | Portal (TypeScript) |
 
-**Правило:** не редактируйте файлы в `src/_generated/` и `contracts/_generated/` вручную — они перезаписываются при следующей регенерации.
+**Rule:** do not edit files in `src/_generated/` and `contracts/_generated/` manually. They are overwritten on the next regeneration.
 
-### Запуск регенерации
+### Run Regeneration
 
 ```bash
 cd contracts
 ./regen.sh
 ```
 
-Внутри: валидация YAML → все генераторы подряд. Занимает ~1 секунду.
+Internally: YAML validation -> all generators in sequence. Usually takes around 1 second.
 
-Pre-commit hook делает это автоматически. Установка — см. [`contracts/HOOKS.md`](contracts/HOOKS.md).
+The pre-commit hook runs this automatically. Setup is described in [`contracts/HOOKS.md`](contracts/HOOKS.md).
 
-### Как добавить новую периферию (capability)
+### Add a New Capability
 
-Например, добавляем поддержку кнопки (`button`):
+Example: add support for a button (`button`):
 
-**1. Добавить в YAML:**
+**1. Add to YAML:**
 
 ```yaml
 # contracts/mqtt_contract.yaml → capability_vocabulary:
 button:
   json_key: "button"
   config_flag: "hasButton"
-  description: "Кнопка управления"
+  description: "Control button"
 ```
 
-**2. Запустить регенерацию:**
+**2. Run regeneration:**
 
 ```bash
 cd contracts && ./regen.sh
 ```
 
-После этого в `iDryer::Config` появится поле `hasButton`, а в TypeScript — `HardwareUnitConfigCapabilities.button`.
+After that, `iDryer::Config` will include `hasButton`, and TypeScript will include `HardwareUnitConfigCapabilities.button`.
 
-**3. В `main.cpp` вашего устройства:**
+**3. In your device `main.cpp`:**
 
 ```cpp
 static const iDryer::Config CFG = {
     // ...
-    .hasButton = true,   // ← теперь это поле существует
+    .hasButton = true,   // field is now available
 };
 ```
 
-**4. Прошить устройство** — портал подхватит `button: true` из `/info` и отобразит нужный UI-блок.
+**4. Flash the device** — the portal reads `button: true` from `/info` and renders the corresponding UI block.
 
-### Навигация по контракту
+### Contract Navigation
 
 ```bash
 cd contracts
 
-# Карта файла
+# File map
 python3 show.py
 
-# Найти конкретный action
+# Find a specific action
 python3 show.py invoke_actions.storage_link.led.pulse
 
-# Все invoke actions всех устройств
+# All invoke actions across devices
 python3 show.py --actions
 
-# Профили устройств (что умеет каждое)
+# Device profiles (capability sets per device)
 python3 show.py device_profiles
 ```
 
 ---
 
-## Применение
+## Usage
 
-Используется в реальных устройствах:
+Used in production devices:
 
-- **iDryer Storage Link** — управление подсветкой стеллажа с филаментом.
-- **iHeater Link** — мост между принтером (Bambu/Klipper/HA) и нагревательной камерой iHeater.
+- **iDryer Storage Link** - filament rack lighting control.
+- **iHeater Link** - bridge between printer systems (Bambu/Klipper/HA) and an active iHeater-based thermal chamber.
 
-Каждое устройство — отдельный продуктовый репозиторий, подключающий эту библиотеку через PlatformIO `lib_deps` или симлинк.
+Each device has its own product repository and uses this library via PlatformIO `lib_deps` or a symlink.
 
-## Документация
+## Documentation
 
-- Сайт: https://dev.idryer.org/core/ *(после первой публикации)*
-- В репозитории: [`docs/ru/`](docs/ru/) — русская версия.
+- Site: https://dev.idryer.org/core/
+- In this repository: [`docs/ru/`](docs/ru/) - Russian docs.
 
-Старт за 5 минут — [`docs/ru/02-quickstart/01-five-minutes.md`](docs/ru/02-quickstart/01-five-minutes.md).
+5-minute quick start: [`docs/ru/02-quickstart/01-five-minutes.md`](docs/ru/02-quickstart/01-five-minutes.md).
 
-Полный API фасада — [`docs/ru/03-public-api/01-link-api-reference.md`](docs/ru/03-public-api/01-link-api-reference.md).
+Full public API reference: [`docs/ru/03-public-api/01-link-api-reference.md`](docs/ru/03-public-api/01-link-api-reference.md).
 
-## Лицензия
+## License
 
-[GPL-3.0](LICENSE). Любой продукт, использующий эту библиотеку, обязан публиковать свои исходники под совместимой лицензией.
+[GPL-3.0](LICENSE). Any product using this library must publish its source code under a compatible license.
 
-По вопросам, не покрытым лицензией — связаться с автором: [pavluchenkor](https://github.com/pavluchenkor).
+For questions not covered by the license, contact the author: [pavluchenkor](https://github.com/pavluchenkor).
