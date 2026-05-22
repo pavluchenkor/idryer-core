@@ -1012,18 +1012,19 @@ messages:
             timestamp:
               type: ISO8601
               optional: true
-          example_storage_link:
-            deviceType: storage_link
-            firmwareVersion: "1.0.0"
-            hardwareVersion: "1.0"
-            timestamp: "2026-04-28T12:00:00Z"
-          example_dryer_v3:
-            deviceType: dryer
-            firmwareVersion: "1.1.0"
-            mcuFirmwareVersion: "1.0.2"
-            hardwareVersion: "DRYER-v3"
-            mcuSerial: "DE654C14D3115939"
-            timestamp: "2026-05-22T10:49:00Z"
+          examples:
+            storage_link:
+              deviceType: storage_link
+              firmwareVersion: "1.0.0"
+              hardwareVersion: "1.0"
+              timestamp: "2026-04-28T12:00:00Z"
+            dryer_v3:
+              deviceType: dryer
+              firmwareVersion: "1.1.0"
+              mcuFirmwareVersion: "1.0.2"
+              hardwareVersion: "DRYER-v3"
+              mcuSerial: "DE654C14D3115939"
+              timestamp: "2026-05-22T10:49:00Z"
           product_variants:
             iheater_link:
               notes:
