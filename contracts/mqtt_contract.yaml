@@ -983,11 +983,47 @@ messages:
             - "Schema продукт-зависимая. idryer-core её не валидирует."
             - "Storage Link payload: deviceType, firmwareVersion, hardwareVersion, timestamp."
             - "Полные требования портала — portal_backend_status.md."
+            - |
+              firmwareVersion — версия прошивки ESP32 Link (bridge-чип). Для ДваЧип устройств
+              (iDryer Dryer v3) ESP32 публикует свою версию из VERSION_STR.
+            - |
+              mcuFirmwareVersion — версия прошивки RP2040 контроллера (опционально).
+              ESP32 получает её из UART Hello payload.firmwareVersion и должен передавать
+              в info JSON. Если поле отсутствует — портал считает версию контроллера неизвестной.
+              Формат: "MAJOR.MINOR.PATCH" (строка).
+          fields:
+            firmwareVersion:
+              type: string
+              required: true
+              note: "Версия прошивки ESP32 Link. Формат: 'MAJOR.MINOR.PATCH'."
+            mcuFirmwareVersion:
+              type: string
+              optional: true
+              note: "Версия прошивки RP2040 контроллера. Декодируется из UART Hello.firmwareVersion (uint32 MAJOR<<16|MINOR<<8|PATCH). Отсутствует для ОдинЧип устройств."
+            hardwareVersion:
+              type: string
+              required: true
+            deviceType:
+              type: string
+              required: true
+            mcuSerial:
+              type: string
+              optional: true
+            timestamp:
+              type: ISO8601
+              optional: true
           example_storage_link:
             deviceType: storage_link
             firmwareVersion: "1.0.0"
             hardwareVersion: "1.0"
             timestamp: "2026-04-28T12:00:00Z"
+          example_dryer_v3:
+            deviceType: dryer
+            firmwareVersion: "1.1.0"
+            mcuFirmwareVersion: "1.0.2"
+            hardwareVersion: "DRYER-v3"
+            mcuSerial: "DE654C14D3115939"
+            timestamp: "2026-05-22T10:49:00Z"
           product_variants:
             iheater_link:
               notes:
