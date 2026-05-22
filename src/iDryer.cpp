@@ -18,6 +18,7 @@
 
 #include "idryer_core.h"
 #include "idryer_integrations.h"
+#include "cloud/cloud_state_machine.h"
 #include "local_access/local_access.h"
 #include "local_access/device_publisher.h"
 
@@ -40,8 +41,9 @@ const char* unitModeString(UnitMode m);
 
 class FacadeProfile : public idryer::IProfile {
 public:
-    FacadeProfile(const Config& cfg, const idryer::ArduinoCredentialStore& credentials)
-        : cfg_(cfg), credentials_(credentials) {}
+    FacadeProfile(const Config& cfg, const idryer::ArduinoCredentialStore& credentials,
+                  idryer::cloud::CloudStateMachine* cloud = nullptr)
+        : cfg_(cfg), credentials_(credentials), cloud_(cloud) {}
 
     void onOnline() override {
         // No product-specific hardware to bring online — facade is generic.
@@ -76,8 +78,18 @@ public:
         doc["firmwareVersion"] = cfg_.firmwareVersion ? cfg_.firmwareVersion : "";
         doc["workTimeCounter"] = millis() / 1000u;
         doc["unitsCount"]      = cfg_.unitsCount;
-        if (id.hasSerialNumber()) {
+        // For two-chip devices, use the mcuSerial from CloudStateMachine (set via
+        // UART Hello). For one-ID devices (no cloud_ or no mcuSerial set),
+        // fall back to identity_.serialNumber = DEVICE_... as before.
+        const char* mcu = cloud_ ? cloud_->getMcuSerial() : nullptr;
+        if (mcu && mcu[0] != '\0') {
+            doc["mcuSerial"] = mcu;
+        } else if (id.hasSerialNumber()) {
             doc["mcuSerial"] = id.serialNumber;
+        }
+        const char* mcuFw = cloud_ ? cloud_->getMcuFirmwareVersion() : nullptr;
+        if (mcuFw && mcuFw[0] != '\0') {
+            doc["mcuFirmwareVersion"] = mcuFw;
         }
         doc["deviceType"] = deviceTypeString(cfg_.deviceType);
 
@@ -103,6 +115,8 @@ public:
     }
 
 private:
+    idryer::cloud::CloudStateMachine* cloud_ = nullptr;
+
     static const char* deviceTypeString(DeviceType t) {
         switch (t) {
             case DeviceType::Dryer:       return "dryer";
@@ -143,7 +157,7 @@ struct Link::Impl {
           pub(&mqtt, &local),
           intManager(&mqtt, &intStore),
           improv(&Serial),
-          profile(this->cfg, credentials),
+          profile(this->cfg, credentials, &cloud),
           runtime(&cloud, &dispatcher, &profile, &mqtt) {}
 
     // Saved configuration (mutable — setUnitsCount() updates it at runtime).
@@ -200,6 +214,7 @@ struct Link::Impl {
     // User callbacks.
     Link::IntegrationStatusCallback onIntegrationStatus;
     Link::ClaimPinCallback          onClaimPin;
+    Link::DiagnosticCallback        onDiagnostic;
     Link::PublishHookCallback       onTelemetryPublish;
     Link::PublishHookCallback       onStatusPublish;
 
@@ -359,6 +374,10 @@ bool Link::begin() {
         auto* self = static_cast<Link::Impl*>(ctx);
         if (self->onClaimPin) self->onClaimPin(pin, expires);
     }, impl_);
+    impl_->cloud.setDiagnosticCallback([](const char* message, void* ctx) {
+        auto* self = static_cast<Link::Impl*>(ctx);
+        if (self->onDiagnostic) self->onDiagnostic(message);
+    }, impl_);
 
     // Bring runtime online.
     impl_->runtime.begin();
@@ -393,14 +412,38 @@ void Link::loop() {
                     s_serial_len = 0;
                     const char* cmd = s_serial_buf;
                     if (strcmp(cmd, "START_CLAIM") == 0 || strcmp(cmd, "claim") == 0) {
-                        if (isOnline()) {
-                            idryer::DeviceIdentity id;
-                            impl_->credentials.load(id);
-                            Serial.printf("CLAIM_ALREADY:%s\n",
-                                          id.hasSerialNumber() ? id.serialNumber : "?");
-                        } else {
-                            bool ok = requestClaim();
-                            Serial.println(ok ? "CLAIM_STARTED:OK" : "CLAIM_STARTED:ERROR");
+                        idryer::DeviceIdentity id;
+                        impl_->credentials.load(id);
+                        iDryer::ClaimRequestResult result = requestClaimDetailed();
+                        switch (result) {
+                            case iDryer::ClaimRequestResult::Started:
+                                Serial.println("CLAIM_STARTED:OK");
+                                break;
+                            case iDryer::ClaimRequestResult::AlreadyClaimed:
+                                Serial.printf("CLAIM_ALREADY:%s\n",
+                                              id.hasSerialNumber() ? id.serialNumber : "?");
+                                break;
+                            case iDryer::ClaimRequestResult::StaleNvs:
+                                Serial.printf("CLAIM_STALE_NVS:%s:%s\n",
+                                              id.hasSerialNumber() ? id.serialNumber : "?",
+                                              id.hasDeviceId() ? id.deviceId : "?");
+                                break;
+                            case iDryer::ClaimRequestResult::WaitingForMcuSerial:
+                                Serial.println("CLAIM_STARTED:ERROR:WAITING_FOR_MCU_SERIAL");
+                                break;
+                            case iDryer::ClaimRequestResult::WifiNotConnected:
+                                Serial.println("CLAIM_STARTED:ERROR:WIFI_NOT_CONNECTED");
+                                break;
+                            case iDryer::ClaimRequestResult::TokenWithheld:
+                                Serial.println("CLAIM_STARTED:ERROR:TOKEN_WITHHELD");
+                                break;
+                            case iDryer::ClaimRequestResult::ProvisionFailed:
+                                Serial.println("CLAIM_STARTED:ERROR:PROVISION_FAILED");
+                                break;
+                            case iDryer::ClaimRequestResult::RegisterFailed:
+                            default:
+                                Serial.println("CLAIM_STARTED:ERROR:REGISTER_FAILED");
+                                break;
                         }
                         Serial.flush();
                     }
@@ -671,6 +714,10 @@ void Link::onClaimPin(ClaimPinCallback cb) {
     impl_->onClaimPin = std::move(cb);
 }
 
+void Link::onDiagnostic(DiagnosticCallback cb) {
+    impl_->onDiagnostic = cb;
+}
+
 void Link::onTelemetryPublish(PublishHookCallback cb) {
     impl_->onTelemetryPublish = std::move(cb);
 }
@@ -730,6 +777,10 @@ bool Link::requestClaim() {
     return impl_->cloud.requestClaim();
 }
 
+iDryer::ClaimRequestResult Link::requestClaimDetailed() {
+    return impl_->cloud.requestClaimDetailed();
+}
+
 idryer::cloud::LinkIntegrationsManager* Link::integrationsManager() {
     return &impl_->intManager;
 }
@@ -768,6 +819,26 @@ void Link::eraseClaimAndRestart() {
     impl_->credentials.clear();
     delay(200);
     ESP.restart();
+}
+
+void Link::setWaitForMcuSerial(bool wait) {
+    impl_->cloud.setWaitForMcuSerial(wait);
+}
+
+iDryer::McuSerialResult Link::setMcuSerial(const char* mcuSerial) {
+    return impl_->cloud.setMcuSerial(mcuSerial);
+}
+
+void Link::setMcuFirmwareVersion(uint32_t fwVersion) {
+    impl_->cloud.setMcuFirmwareVersion(fwVersion);
+}
+
+const char* Link::mcuSerial() const {
+    return impl_->cloud.getMcuSerial();
+}
+
+const char* Link::mqttKey() const {
+    return impl_->cloud.getMqttKey();
 }
 
 const char* Link::serial() const {

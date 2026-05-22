@@ -1,6 +1,6 @@
 #pragma once
 
-#include "../core/types.h"
+#include "../core/types.h"   // DeviceIdentity, McuSerialResult
 #include "../core/config.h"
 #include "../hal/hal_types.h"
 #include "../device/interfaces/IWifiManager.h"
@@ -42,6 +42,9 @@ typedef void (*ClaimCompleteCallback)(const char* deviceId, void* ctx);
 
 /// @brief Called when the device reaches @c AwaitingClaim (needs user action).
 typedef void (*UnclaimedCallback)(void* ctx);
+
+/// @brief Plain diagnostic line for product/UI logging.
+typedef void (*DiagnosticCallback)(const char* message, void* ctx);
 
 /**
  * @brief Configuration for retry intervals and device mode.
@@ -96,14 +99,41 @@ public:
      * @return @c true if the request was sent successfully.
      */
     bool requestClaim();
+    idryer::ClaimRequestResult requestClaimDetailed();
 
     /**
      * @brief Passes the serial number received from the RP2040 controller.
      *
      * Only needed for two-MCU devices with @c waitForMcuSerial = @c true.
      * Call this from the UART Hello handler.
+     *
+     * @return McuSerialResult indicating outcome; caller must handle Mismatch
+     *         (e.g. send UartClaimStatus::Error via UART — not done here to
+     *         keep cloud layer free of UART dependencies).
      */
-    void setMcuSerial(const char* mcuSerial);
+    idryer::McuSerialResult setMcuSerial(const char* mcuSerial);
+
+    /**
+     * @brief Handles a bind_ack command received from the backend over MQTT.
+     *
+     * For one-ID devices: no-op MQTT switch, returns true.
+     * For two-chip devices: saves boundMqttKey to NVS and reconnects MQTT
+     * with the MCU identity. Product code must not call this directly —
+     * IdryerRuntime intercepts "bind_ack" before commandHandler_.
+     */
+    bool handleBindAck(const char* mqttTopicKey, const char* mcuSerial);
+
+    /// Returns the mcuSerial received from RP2040 Hello, or nullptr if not set.
+    const char* getMcuSerial() const;
+
+    /// Stores the RP2040 firmware version decoded from UART Hello.firmwareVersion.
+    void setMcuFirmwareVersion(uint32_t fwVersion);
+
+    /// Returns the RP2040 firmware version string, or nullptr if not set.
+    const char* getMcuFirmwareVersion() const;
+
+    /// Returns the active MQTT key (linkSerial before bind, mcuSerial after).
+    const char* getMqttKey() const;
 
     void setWaitForMcuSerial(bool wait) { config_.waitForMcuSerial = wait; }
 
@@ -143,8 +173,11 @@ public:
      * @endcode
      */
     void setUnclaimedCallback(UnclaimedCallback cb, void* ctx);
+    void setDiagnosticCallback(DiagnosticCallback cb, void* ctx);
 
 private:
+    void emitDiagnostic(const char* message);
+    void emitDiagnostic2(const char* prefix, const char* value);
     void handleWifiConnecting();
     void handleWaitingForMcuSerial();
     void handleProvisioning();
@@ -173,6 +206,11 @@ private:
     bool mqttInitialized_    = false;
     bool unclaimedNotified_  = false;
     bool serialVerified_     = false;
+    bool bindSwitchPending_  = false;
+
+    char mcuSerial_[IDRYER_MAX_SERIAL_NUMBER_LEN];
+    char mcuFirmwareVersion_[12]; // "255.255.255\0"
+    char mqttKey_[IDRYER_MAX_SERIAL_NUMBER_LEN];
 
     char     pendingPin_[IDRYER_MAX_PIN_LEN];
     uint32_t pinCreatedAtMs_  = 0;
@@ -186,6 +224,8 @@ private:
     void*                    claimCompleteCtx_      = nullptr;
     UnclaimedCallback        unclaimedCallback_     = nullptr;
     void*                    unclaimedCtx_          = nullptr;
+    DiagnosticCallback       diagnosticCallback_    = nullptr;
+    void*                    diagnosticCtx_         = nullptr;
 };
 
 } // namespace cloud

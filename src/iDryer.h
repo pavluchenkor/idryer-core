@@ -66,6 +66,9 @@
 // See contracts/gen_idryer_api_h.py.
 #include "_generated/iDryer_api.h"
 
+// Core SDK types (DeviceIdentity, McuSerialResult) — needed for the public API.
+#include "core/types.h"
+
 // Forward declaration for the SDK integrations manager — exposed via
 // Link::integrationsManager() accessor for product-side wiring (auto_heat,
 // menu lookup, etc.). Real definition is in <integrations/common/link_integrations_manager.h>.
@@ -74,6 +77,11 @@ namespace idryer { class MqttClient; class IdryerRuntime; class DevicePublisher;
 namespace idryer { namespace ha { class HaBuilder; } }
 
 namespace iDryer {
+
+/// Re-export from idryer::McuSerialResult so product code uses iDryer:: API
+/// without including cloud_state_machine.h directly.
+using McuSerialResult = idryer::McuSerialResult;
+using ClaimRequestResult = idryer::ClaimRequestResult;
 
 // ──────────────────────────────────────────────────────────────────────
 //  Link — the facade.
@@ -128,6 +136,7 @@ public:
     using CommandCallback           = void (*)(JsonObjectConst data);
     using IntegrationStatusCallback = void (*)(const IntegrationStatus&);
     using ClaimPinCallback          = void (*)(const char* pin, uint32_t expiresInSeconds);
+    using DiagnosticCallback        = void (*)(const char* message);
     using PublishHookCallback       = void (*)(JsonObject root);
 
     /// Called right before telemetry is sent. Library has already filled
@@ -172,6 +181,29 @@ public:
 
     /// Called when the cloud claim flow produces a PIN.
     void onClaimPin(ClaimPinCallback cb);
+    void onDiagnostic(DiagnosticCallback cb);
+
+    // ─── Two-chip (ESP32 + RP2040) API ───────────────────────────────
+    /// Enable waiting for UART Hello before claim/MQTT. Call before begin().
+    /// Required for two-chip devices (iDryer Link + iDryer Controller).
+    /// Not needed for one-ID devices (iHeater Link).
+    void setWaitForMcuSerial(bool wait);
+
+    /// Pass the mcuSerial received from RP2040 UART Hello.
+    /// Call only from the UART Hello handler in product code.
+    /// Returns McuSerialResult — product must send UartClaimStatus::Error
+    /// via UART on Mismatch (the library does not touch UART).
+    iDryer::McuSerialResult setMcuSerial(const char* mcuSerial);
+
+    /// Pass the RP2040 firmware version from UART Hello.firmwareVersion (uint32).
+    /// Decoded as MAJOR.MINOR.PATCH and included in info JSON as mcuFirmwareVersion.
+    void setMcuFirmwareVersion(uint32_t fwVersion);
+
+    /// Returns the mcuSerial received from RP2040 Hello, or nullptr if not set.
+    const char* mcuSerial() const;
+
+    /// Returns the active MQTT key (linkSerial before bind, mcuSerial after).
+    const char* mqttKey() const;
 
     // ─── Diagnostics ─────────────────────────────────────────────────
     bool        isOnline() const;
@@ -188,6 +220,7 @@ public:
     /// Manually start the cloud claim flow (provision → register → check-claim).
     /// Triggers @ref onClaimPin once the portal returns a PIN.
     bool requestClaim();
+    iDryer::ClaimRequestResult requestClaimDetailed();
 
     /// Outlet to the SDK integrations manager — for product-side wiring of
     /// callbacks (Moonraker chamber target, Bambu printer status, etc.).
