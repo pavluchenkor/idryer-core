@@ -92,6 +92,9 @@ public:
             doc["mcuFirmwareVersion"] = mcuFw;
         }
         doc["deviceType"] = deviceTypeString(cfg_.deviceType);
+        if (cfg_.model && cfg_.model[0] != '\0') {
+            doc["model"] = cfg_.model;
+        }
 
         // units[] with per-unit capabilities (legacy field names).
         JsonArray units = doc.createNestedArray("units");
