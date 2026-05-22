@@ -215,8 +215,8 @@ bool MqttClient::publishConfigDelta(const char* json, size_t length) {
 
 void MqttClient::mqttCallback(char* topic, byte* payload, unsigned int length) {
     if (!instance_) return;
-    // Входящие команды маленькие (< 512 байт). Статический буфер без heap.
-    static char s_payload_buf[512];
+    // profile-команда с 10 стадиями занимает ~540 байт.
+    static char s_payload_buf[1024];
     if (length >= sizeof(s_payload_buf)) {
         HAL_LOG_ERROR("MQTT", "← payload too large: %u bytes, dropped", length);
         return;
@@ -235,7 +235,7 @@ void MqttClient::handleMessage(const char* topic, const char* payload, size_t le
     if (!cmdStart) return;
     cmdStart += strlen(cmdPrefix);
 
-    StaticJsonDocument<512> doc;
+    StaticJsonDocument<1024> doc;
     DeserializationError err = deserializeJson(doc, payload, length);
     if (err) {
         HAL_LOG_ERROR("MQTT", "JSON parse error: %s", err.c_str());
