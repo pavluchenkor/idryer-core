@@ -40,6 +40,7 @@ ALL_GENERATORS=(
     gen_uart_protocol_h.py
     gen_mqtt_topics_h.py
     gen_ts_types.py
+    gen_dart_types.py
     gen_idryer_api_h.py
     gen_scaffold.py
 )
@@ -89,6 +90,16 @@ if [ -d "$PORTAL_WIDGETS" ]; then
     done
 else
     echo "⚠  Portal widgets dir not found — skipping widget copy"
+fi
+
+MOBILE_CONTRACTS="$(dirname "$0")/../../../../flutter-prj/idryer_app/lib/contracts"
+if [ -d "$(dirname "$MOBILE_CONTRACTS")" ]; then
+    mkdir -p "$MOBILE_CONTRACTS"
+    cp _generated/canonical_roles.dart "$MOBILE_CONTRACTS/canonical_roles.dart"
+    cp _generated/invoke_actions.dart  "$MOBILE_CONTRACTS/invoke_actions.dart"
+    echo "→ Copied canonical_roles.dart, invoke_actions.dart → idryer_app/lib/contracts/"
+else
+    echo "⚠  Mobile app not found at expected path — skipping Dart copy"
 fi
 
 echo "✅ Contracts pipeline OK"
