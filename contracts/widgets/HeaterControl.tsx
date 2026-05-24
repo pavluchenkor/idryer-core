@@ -1,3 +1,6 @@
+// SOURCE OF TRUTH: idryer-core/contracts/widgets/
+// НЕ редактировать в frontend-v2 — будет перезаписано через `bash contracts/regen.sh`.
+
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { NumberInput } from "../device/NumberInput";

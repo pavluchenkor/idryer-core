@@ -1,3 +1,6 @@
+// SOURCE OF TRUTH: idryer-core/contracts/widgets/
+// НЕ редактировать в frontend-v2 — будет перезаписано через `bash contracts/regen.sh`.
+
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { InvokeActions } from "../../contracts/mqtt-api.types";
@@ -29,17 +32,9 @@ export function LedPulseWidget({ device, socket }: WidgetProps) {
         </div>
         <input
           type="color"
+          className="input-color"
           value={draftColor}
           onChange={(e) => setDraftColor(e.target.value)}
-          style={{
-            width: 36,
-            height: 36,
-            padding: 2,
-            borderRadius: "var(--r)",
-            border: "1px solid var(--line)",
-            background: "var(--paper-2)",
-            cursor: "pointer",
-          }}
         />
       </div>
       <CardActions cols={2}>

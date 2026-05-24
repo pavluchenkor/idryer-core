@@ -1,3 +1,6 @@
+// SOURCE OF TRUTH: idryer-core/contracts/widgets/
+// НЕ редактировать в frontend-v2 — будет перезаписано через `bash contracts/regen.sh`.
+
 import type { Socket } from "socket.io-client";
 import type { CanonicalRole } from "../../contracts/mqtt-api.types";
 import { CanonicalRoles } from "../../contracts/mqtt-api.types";

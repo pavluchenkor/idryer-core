@@ -6,7 +6,7 @@
 
 namespace idryer {
 
-constexpr uint16_t CONFIG_BUFFER_SIZE = 16384;
+constexpr uint16_t CONFIG_BUFFER_SIZE = 8192;
 
 /**
  * @brief Result codes returned by @c ConfigReceiver::processFragment().

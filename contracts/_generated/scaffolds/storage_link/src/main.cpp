@@ -1,6 +1,6 @@
 // ============================================================================
 // SCAFFOLD: storage_link
-// Generated 2026-05-22 by contracts/gen_scaffold.py from mqtt_contract.yaml
+// Generated 2026-05-24 by contracts/gen_scaffold.py from mqtt_contract.yaml
 //
 // HOW TO START:
 //   1. Copy this directory to your PlatformIO project root.
