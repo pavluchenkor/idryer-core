@@ -103,6 +103,12 @@ public:
 
     uint16_t    transferId() const { return transferId_; }
 
+    /// @brief Returns @c true if this transfer is a delta (partial update).
+    /// RP2040 sets the high bit of @c transferId (0x8000) for delta config pushes;
+    /// full config pushes use the low 15 bits only. See iDryerControllerV2
+    /// sendConfigDelta() vs sendFullConfig() in uart_manager.cpp.
+    bool        isDelta()    const { return (transferId_ & 0x8000u) != 0; }
+
 private:
     uint8_t  buffer_[CONFIG_BUFFER_SIZE]{};
     uint16_t transferId_   = 0;
