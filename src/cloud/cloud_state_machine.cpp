@@ -182,10 +182,11 @@ void CloudStateMachine::handleMqttConnecting() {
         mqtt_->begin(key, identity_.token);
         mqttInitialized_ = true;
     }
-    // TODO(diag): убрать после стабилизации TLS — оставлено для контроля heap перед mbedtls handshake.
-    HAL_LOG_INFO("CLOUD", "heap before MQTT connect: free=%u largest=%u",
-                 (unsigned)heap_caps_get_free_size(MALLOC_CAP_DEFAULT),
-                 (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_DEFAULT));
+    // Диагностика heap перед mbedtls handshake — включать при подозрениях на
+    // фрагментацию .bss, ломающую TLS.
+    // HAL_LOG_INFO("CLOUD", "heap before MQTT connect: free=%u largest=%u",
+    //              (unsigned)heap_caps_get_free_size(MALLOC_CAP_DEFAULT),
+    //              (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_DEFAULT));
     mqtt_->connect();
 }
 
