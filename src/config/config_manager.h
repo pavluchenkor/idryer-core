@@ -104,10 +104,15 @@ public:
     uint16_t    transferId() const { return transferId_; }
 
     /// @brief Returns @c true if this transfer is a delta (partial update).
-    /// RP2040 sets the high bit of @c transferId (0x8000) for delta config pushes;
-    /// full config pushes use the low 15 bits only. See iDryerControllerV2
-    /// sendConfigDelta() vs sendFullConfig() in uart_manager.cpp.
-    bool        isDelta()    const { return (transferId_ & 0x8000u) != 0; }
+    /// Routing rule per mqtt_contract.yaml messages[config_delta].uart.notes:
+    /// "На UART delta едет тем же ConfigPush kind; различение — по shape JSON
+    /// внутри." Full config carries "full":true (see config_full.shape_full),
+    /// delta carries "rev" without "full". Buffer is null-terminated after
+    /// ConfigFragResult::Complete, so strstr is safe at that point.
+    bool        isDelta() const {
+        if (receivedSize_ == 0) return false;
+        return strstr(reinterpret_cast<const char*>(buffer_), "\"full\"") == nullptr;
+    }
 
 private:
     uint8_t  buffer_[CONFIG_BUFFER_SIZE]{};
