@@ -590,6 +590,17 @@ enums:
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Общие payload-схемы (на которые ссылаются messages / invoke_actions)
+#
+# КОНВЕНЦИЯ ЕДИНИЦ ИЗМЕРЕНИЯ (temperatures):
+#   - На MQTT (между порталом/мобильным и ESP-bridge) температуры передаются
+#     как целые °C (human-readable).
+#   - На UART (между ESP-bridge и MCU) все температуры кодируются как
+#     `°C × 10` int. ESP-bridge умножает на 10 при отправке UART,
+#     MCU делит на 10 при приёме. Поля: Profile.stages[].temp,
+#     Command.arg0 (для Start drying/storage), Telemetry.temperatureC10,
+#     Telemetry.targetTempC10, Config.targetTemperatureC10.
+#   - Точность 0.1 °C на проводе соответствует разрешению термосенсоров
+#     (SHT31, термисторы) и держит единый int-формат без float.
 # ─────────────────────────────────────────────────────────────────────────────
 payloads:
   UartUnitConfig:
@@ -787,8 +798,12 @@ payloads:
           type: "uint8[2]",
           note: "wire-padding между unitId и arg0 для выравнивания uint32; должен быть 0",
         }
-      arg0: { type: uint32 }
-      arg1: { type: uint32 }
+      arg0:
+        type: uint32
+        note: "Семантика зависит от command/targetState. Для Start drying/storage — целевая температура в °C × 10 (ESP умножает params.temperature × 10, RP2040 делит / 10 при приёме; uart_manager.cpp:456). Единая конвенция с Profile.stages[].temp и Telemetry.temperatureC10."
+      arg1:
+        type: uint32
+        note: "Семантика зависит от command/targetState. Для Start drying — duration в минутах. Для Start storage — целевая влажность (current MCU игнорирует, см. known_mismatches.storage_humidity_dropped)."
 
   Profile:
     description: "Многоэтапный профиль сушки (до 10 стадий)."
@@ -803,8 +818,8 @@ payloads:
           temp:
             {
               type: uint16,
-              unit: "°C",
-              note: "Целое °C; RP2040 использует напрямую без деления. До 2026-05-16 wire-формат был °C×10 (RP2040 делил на 10, uart_manager.cpp:427); изменено вместе с переходом MQTT-команды на new-формат (params.stages[].temperature).",
+              unit: "°C × 10",
+              note: "Wire-формат °C × 10. ESP-bridge умножает MQTT-поле params.stages[].temperature (целое °C) на 10 при формировании UART payload; RP2040 делит на 10 при потреблении (uart_manager.cpp:427). Единая конвенция для всех температур в UART payload-ах — см. также Telemetry.temperatureC10, Telemetry.targetTempC10, Command.arg0 (для Start drying/storage).",
             }
           ramp:
             {
