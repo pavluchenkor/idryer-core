@@ -21,6 +21,7 @@ extern "C" {
 #define IDRYER_TOPIC_CONFIG_DELTA       "config/delta"
 #define IDRYER_TOPIC_OFFLINE            "offline"
 #define IDRYER_TOPIC_RFID               "rfid"
+#define IDRYER_TOPIC_RFID_WRITE_RESULT  "rfid/write_result"
 
 // Backend -> Device
 #define IDRYER_TOPIC_CMD_SET            "commands/set"
@@ -42,6 +43,7 @@ extern "C" {
 #define IDRYER_RETAINED_CONFIG          1
 #define IDRYER_RETAINED_CONFIG_DELTA    0
 #define IDRYER_RETAINED_RFID            1
+#define IDRYER_RETAINED_RFID_WRITE_RESULT 0
 
 // Publish intervals (ms)
 #define IDRYER_INTERVAL_TELEMETRY_MS    5000

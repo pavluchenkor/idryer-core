@@ -105,6 +105,11 @@ public:
     /// @brief Publishes to @c idryer/{serial}/rfid (retained).
     bool publishRfid(JsonDocument& json);
 
+    /// @brief Publishes to @c idryer/{serial}/rfid/write_result (non-retained).
+    /// Используется bridge для ответа порталу на commands/write_rfid (Variant B).
+    /// Payload: {commandId, status: "ok"|"failed", error?}.
+    bool publishRfidWriteResult(JsonDocument& json);
+
     /**
      * @brief Publishes a raw JSON string to @c idryer/{serial}/config.
      *

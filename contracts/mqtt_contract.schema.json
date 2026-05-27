@@ -39,6 +39,7 @@
       }
     },
     "canonical_roles":    { "type": "object", "additionalProperties": true },
+    "widgets":            { "type": "object", "additionalProperties": true },
     "migration_status":   { "type": "object", "additionalProperties": true },
     "source_of_truth": { "$ref": "#/$defs/SourceOfTruth" },
     "rules": { "$ref": "#/$defs/Rules" },

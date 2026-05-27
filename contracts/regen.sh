@@ -81,16 +81,9 @@ else
     echo "⚠  Portal i18n not found — skipping roles JSON copy"
 fi
 
-PORTAL_WIDGETS="$(dirname "$0")/../../../../iDryerPortal/frontend-v2/src/components/widgets"
-if [ -d "$PORTAL_WIDGETS" ]; then
-    for f in widgets/HeaterControl.tsx widgets/LedPulse.tsx widgets/widget-props.ts widgets/index.ts; do
-        [ -f "$f" ] || continue
-        cp "$f" "$PORTAL_WIDGETS/$(basename "$f")"
-        echo "→ Copied $(basename "$f") → frontend-v2/src/components/widgets/"
-    done
-else
-    echo "⚠  Portal widgets dir not found — skipping widget copy"
-fi
+# Composite-виджеты из contracts/widgets/ удалены 2026-05-27. Концепция
+# «виджет = карточка устройства на дашборде» (product-specific React-компонент
+# в портале, не часть контракта). См. mqtt_contract.yaml → widgets.
 
 MOBILE_CONTRACTS="$(dirname "$0")/../../../../flutter-prj/idryer_app/lib/contracts"
 if [ -d "$(dirname "$MOBILE_CONTRACTS")" ]; then

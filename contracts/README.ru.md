@@ -87,46 +87,41 @@ alias contract='python3 contracts/show.py'
 
 ## Добавить новое устройство
 
-Полный воркфлоу (fork → yaml → regen → firmware → widget → UIKit → PR):
+Полный воркфлоу (fork → yaml → regen → firmware → dashboard-карточка → UIKit → PR):
 
-→ **[docs/ru/09-add-product/02-add-widget.md](../docs/ru/09-add-product/02-add-widget.md)**
-→ **[docs/en/09-add-product/02-add-widget.md](../docs/en/09-add-product/02-add-widget.md)**
+→ **[docs/en/09-add-product/02-add-widget.md](../docs/en/09-add-product/02-add-widget.md)** (актуальная версия)
+→ **[docs/ru/09-add-product/02-add-widget.md](../docs/ru/09-add-product/02-add-widget.md)** (устарела, см. EN)
 
-Практически: проще всего добавлять устройство с функционалом, который уже
-покрыт существующими виджетами.
+«Виджет» в этом коде — это **карточка устройства на дашборде портала**,
+product-specific React-компонент в `iDryerPortal/frontend-v2/src/components/dashboard/cards/`.
+Контракт не описывает JSX; нет widget-registry, нет генерируемых React-файлов.
 
-Сейчас в портале как отдельные dashboard-виджеты реально подключены:
-- `HeaterControl`
-- `LedPulse`
+Сейчас в портале есть карточки:
+- `HeaterCard` — `IHEATER_LINK`
+- `StorageCard` — `STORAGE_LINK`
+- `IDryerCard` — fallback для устройств без своей карточки
 
-Этот список будет пополняться.
-Если нужен новый виджет, отправляйте PR в `iDryerPortal/frontend-v2`
-(регистрация в `src/components/widgets/widget-registry.tsx` и пример в `src/pages/UiKitPage.tsx`).
+Добавление карточки под новый тип устройства — задача на стороне портала
+(см. документ по ссылке выше).
 
-Остальные widget-типы (`button`, `slider`, `toggle`, `number`, `select`, `hidden`,
-`ProfileEditor`, `RfidWriter`) в `widget-registry.tsx` заведены как `NullWidget`
-(то есть отдельный dashboard-компонент под них не рендерится).
-
-Краткая схема (когда используешь уже существующий виджет):
+Краткая схема:
 
 ```
 mqtt_contract.yaml
   capability_vocabulary   ← новая периферия → hasXxx в Config
-  canonical_roles         ← роль + имя React-виджета
-  invoke_actions          ← args для команды виджета
+  canonical_roles         ← семантическая роль для пунктов меню
+  invoke_actions          ← args для команд
   device_profiles         ← capabilities + invoke_actions устройства
         │
         └─► ./contracts/regen.sh
               ├─► _generated/scaffolds/my_device/  (firmware заготовка)
-              ├─► mqtt-api.types.ts                (TS типы)
-              └─► portal/.../widgets/...           (копии widget-файлов)
+              ├─► mqtt-api.types.ts                (TS-типы → портал)
+              ├─► roles.*.json                     (i18n → портал)
+              └─► canonical_roles.dart             (mobile)
 ```
 
-Если нужен новый кастом-виджет (не из уже существующих), это отдельная задача:
-1. Добавить/обновить widget-компонент в `contracts/widgets/`.
-2. Запустить `./contracts/regen.sh` (копирование в `iDryerPortal/frontend-v2`).
-3. Вручную подключить виджет в `frontend-v2/src/components/widgets/widget-registry.tsx`.
-4. Добавить секцию примера в `frontend-v2/src/pages/UiKitPage.tsx`.
+Портал потребляет `mqtt-api.types.ts` и подбирает карточку по `deviceType`
+в `src/components/dashboard/DeviceDashboardCard.tsx`.
 
 ## Pipeline
 

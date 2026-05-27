@@ -75,13 +75,34 @@ capability_vocabulary:
     config_flag: "hasRfid"
     description: "RFID-ридер метки катушки"
 
+  air_temp:
+    json_key: "air_temp"
+    config_flag: "hasAirTemp"
+    telemetry_field: "airTempC"
+    telemetry_type: "float"
+    description: "Датчик температуры воздуха (SHT/DHT)"
+
+  air_humidity:
+    json_key: "air_humidity"
+    config_flag: "hasAirHumidity"
+    telemetry_field: "airHumidityPct"
+    telemetry_type: "float"
+    description: "Датчик влажности воздуха"
+
+  heater_temp:
+    json_key: "heater_temp"
+    config_flag: "hasHeaterTemp"
+    telemetry_field: "heaterTempC"
+    telemetry_type: "float"
+    description: "Датчик температуры корпуса нагревателя"
+
 device_profiles:
   iheater_link:
     device_type: "iheater_link"
     capabilities: ["heater", "fan"]
   storage_link:
     device_type: "storage_link"
-    capabilities: ["led", "weight", "rfid"]
+    capabilities: ["led", "air_temp", "air_humidity"]
   dryer_v3:
     device_type: "dryer"
     capabilities: ["heater", "fan", "weight", "rfid"]
@@ -103,20 +124,14 @@ source_of_truth:
     - "lib/idryer-core/src/integrations/common/link_integrations_manager.h"
     - "lib/idryer-core/src/integrations/common/link_integrations_types.h"
     # iHeater-link (текущий ESP32-bridge для iHeater)
-    - "iHeater-link/src/heater/command_routing.cpp"
     - "iHeater-link/src/heater/MenuBridge.cpp"
     - "iHeater-link/src/heater/telemetry.cpp"
     - "iHeater-link/src/heater/HeaterProfile.cpp"
-    # idryer-link (legacy ESP32-bridge для Storage / Dryer; используется на проде)
-    - "idryer-link/src/IdryerDevice.cpp"
-    - "idryer-link/lib/idryer-protocol/src/cloud/telemetry_publisher.cpp"
-    - "idryer-link/lib/idryer-protocol/src/cloud/command_handler.cpp"
-    - "idryer-link/lib/idryer-protocol/src/cloud/link_integrations_manager.cpp"
-    - "idryer-link/lib/idryer-protocol/src/uart/uart_protocol.h"
-    - "idryer-link/lib/idryer-protocol/src/mqtt/idryer_topics.h"
-    # iDryerRP2040 (контроллер; UART-сторона)
-    - "iDryerRP2040/src/uart/uart_manager.h"
-    - "iDryerRP2040/src/uart/uart_manager.cpp"
+    # idryer-link (ESP32-bridge для Storage / Dryer; использует idryer-core SDK)
+    - "idryer-link/src/main.cpp"
+    # iDryerControllerV2 (контроллер; UART-сторона)
+    - "iDryerControllerV2/src/uart/uart_manager.h"
+    - "iDryerControllerV2/src/uart/uart_manager.cpp"
     # Portal (NestJS)
     - "iDryerPortal/backend/src/mqtt-telemetry/mqtt-client.service.ts"
     - "iDryerPortal/backend/src/mqtt-telemetry/mqtt-telemetry.service.ts"
@@ -172,6 +187,41 @@ rules:
     - "Новый topic / UART kind / invoke action — сначала появляется здесь."
     - "Расхождения между источниками не скрываются: фиксируются в notes и в mismatches.md."
 
+  telemetry_null_policy:
+    rule: "Отсутствие поля = нет данных."
+    description: |
+      Float-поля telemetry (temperature, humidity, heaterTemp и т.п.) — если
+      датчик не подключён ИЛИ ни одного валидного reading'а ещё не было, поле
+      В PAYLOAD НЕ ВКЛЮЧАЕТСЯ ВООБЩЕ. Не пишем 0.0, не пишем null — поля
+      просто нет в JSON.
+
+      Реализация:
+      - Прошивка-продукт ставит NAN в `telemetry.airTempC[i]` (или подобное
+        float-поле) когда датчик не отвечает.
+      - SDK (idryer-core `iDryer.cpp` publishTelemetry) проверяет `isnan(v)`
+        и пропускает поле в JSON-сериализации.
+      - Frontend (TelemetryRow.tsx) фильтрует cells с `value === undefined`,
+        пустые блоки не рисует.
+
+      Преимущества:
+      - Экономия трафика (нет null-полей в payload).
+      - Семантика чистая: «нет поля» = «нет данных», нет ambiguous 0.0.
+      - Frontend единообразно обрабатывает «датчик архитектурно отсутствует»
+        (cfg.has*=false) и «датчик не отвечает» (NAN) — оба случая = поле
+        отсутствует в JSON.
+    applies_to:
+      - "telemetry.temperature (airTempC)"
+      - "telemetry.humidity (airHumidityPct)"
+      - "telemetry.heaterTemp (heaterTempC)"
+    not_applies_to:
+      - "status.target.temperature — здесь 0 = реальное значение (нагрев выключен)"
+      - "heaterPower (int 0..100) — здесь 0 = реальное значение"
+      - "fanStatus (bool) — здесь false = реальное значение"
+    source_ref:
+      sdk: "lib/idryer-core/src/iDryer.cpp:577-594 (publishTelemetry, isnan-check)"
+      example_storage: "iDryer-Storage/src/main.cpp:371-377 (NAN init), :394-407 (NAN on read fail)"
+      frontend: "iDryerPortal/frontend-v2/src/components/device/TelemetryRow.tsx:23 (filter cells)"
+
   timestamp_convention:
     description: |
       Поле `timestamp` (ISO 8601 UTC, формат `YYYY-MM-DDTHH:MM:SS.sssZ` или `YYYY-MM-DDTHH:MM:SSZ`)
@@ -224,11 +274,11 @@ rules:
 migration_status:
   iheater_link:
     target:  menu_protocol_v1
-    status:  in_progress
-    actions:
-      - "Добавить r: в menu.yaml для mat_petg/mat_pla/mat_pacf, *_en"
-      - "Удалить ручные обработки link_integration / bambu_apply из main.cpp"
-      - "Команды переезжают в commands/set + commands/invoke"
+    status:  done
+    notes:
+      - "Все запуск/остановка нагрева идут через commands/invoke (heat.start / heat.stop, форма B)."
+      - "Legacy handlers commands/drying / commands/storage / commands/stop удалены из прошивки (см. src/main.cpp)."
+      - "Backend (sessions.service.ts::completeSession) для IHEATER_LINK шлёт invoke heat.stop, для прочих deviceType — legacy commands/stop."
 
   storage_link:
     target:  menu_protocol_v1
@@ -435,6 +485,104 @@ uart_kind_ranges:
   "0x60": "Log (диагностика)"
   "0x70-0x72": "Claiming (ClaimStart / ClaimStatus / ClaimComplete)"
   "0x73-0x76": "WebSocket Local Access (WsEnable / WsStatus / WsResetClients / WsStatusRequest)"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Виджеты — карточки устройств на дашборде портала
+# ─────────────────────────────────────────────────────────────────────────────
+#
+# Виджет = одна карточка одного типа устройства на дашборде / странице
+# устройства портала. Product-specific React-компонент. Один deviceType =
+# одна карточка.
+#
+# Структура карточки:
+#   ┌──────────────────────────────────────────────┐
+#   │  Header (общий блок)                         │  ← имя, статус, WiFi RSSI
+#   ├──────────────────────────────────────────────┤
+#   │  Telemetry (общий блок, опционально)         │  ← T, влажность, вес
+#   ├──────────────────────────────────────────────┤
+#   │  Body — специфичен для типа устройства       │  ← основной UI
+#   └──────────────────────────────────────────────┘
+#
+# Header и Telemetry — переиспользуемые компоненты портала (`DeviceHeader`,
+# `DeviceTelemetryBlock`). Body — кастомный код в карточке.
+#
+# Контракт фиксирует семантику и поведение виджета (что показывает, какие
+# команды шлёт). Конкретная React/Flutter имплементация живёт в портале /
+# мобильном приложении, контракт её не описывает.
+#
+# Концепция «widget в menu.yaml» (composite-виджеты типа HeaterControl
+# через widget-registry) — ОТМЕНЕНА 2026-05-27. Меню рендерится только
+# примитивами (value/toggle/action). Любой композит — отдельная карточка
+# в этой секции.
+#
+widgets:
+  HeaterCard:
+    applies_to: [iheater_link]
+    purpose: "Карточка нагревателя. Локальный draft state для temp/duration, не затрагивает меню."
+    telemetry:
+      - "temperature (от Bambu/Moonraker если интеграция активна)"
+    status_signals:
+      - "status.mode (DRYING|Idle)"
+      - "status.targetTempC"
+      - "status.elapsedTime, status.durationS — для прогресс-бара"
+    body_idle:
+      - "input: Температура (range из контракта 30..120 °C, draft state)"
+      - "input: Время (range 0..1440 min, 0=∞, draft state)"
+      - "button: Старт → commands/invoke {action:'heat.start', args:{tempC, durationMin}}"
+    body_active:
+      - "display: targetTempC"
+      - "progress: status.elapsedTime / status.durationS (если durationS>0)"
+      - "button: Стоп → commands/invoke {action:'heat.stop'}"
+    mockup_idle: |
+      ┌─ iHeater Link · Idle · ▂▂▂▆ ─────────┐
+      │  🌡 23.5 °C (от Bambu, опц.)          │
+      │  ─────────────────────────────────    │
+      │  Темп  [  60  ] °C                    │
+      │  Время [   0  ] мин (0=∞)             │
+      │  [▶ Старт]                            │
+      └───────────────────────────────────────┘
+    mockup_active: |
+      ┌─ iHeater Link · DRYING · ▂▂▂▆ ───────┐
+      │  🌡 58.2 °C  →  цель 60 °C            │
+      │  ──────████░░░░░░  12/30 мин          │  ← progressbar если durationS>0
+      │  [⏹ Стоп]                             │
+      └───────────────────────────────────────┘
+    source_ref: "iDryerPortal/frontend-v2/src/components/dashboard/cards/HeaterCard.tsx"
+    status: implemented_2026-05-27
+
+  StorageCard:
+    applies_to: [storage_link]
+    purpose: "Карточка хранилища филамента. SHT31 telemetry + управление LED-лентой (pulse)."
+    telemetry:
+      - "temperature (SHT31 airTempC), отсутствует если датчик не подключён"
+      - "humidity (SHT31 airHumidityPct), отсутствует если датчик не подключён"
+    body:
+      - "select: animation (solid/breathe/wave/rainbow/twinkle), draft state"
+      - "color picker (#RRGGBB), draft state"
+      - "button: Turn On → commands/invoke {action:'led.pulse', args:{animation, color}}"
+      - "button: Turn Off → commands/invoke {action:'led.pulse', args:{animation:'off'}}"
+    mockup: |
+      ┌─ Storage Link · Idle · ▂▂▂▆ ─────────┐
+      │  🌡 23.5 °C    💧 45 %                │  ← скрывается если null
+      │  ─────────────────────────────────    │
+      │  [Solid       ▾]  [🎨]                │
+      │  [Turn On]     [Turn Off]             │
+      └───────────────────────────────────────┘
+    source_ref: "iDryerPortal/frontend-v2/src/components/dashboard/cards/StorageCard.tsx"
+    status: implemented_2026-05-27
+
+  IDryerCard:
+    applies_to: [dryer]
+    purpose: "Карточка сушилки. Legacy — продолжает использовать commands/drying/storage/profile/stop."
+    body:
+      - "Active session: ActiveSessionBlock (elapsed/duration/targetTemp, кнопка Stop)"
+      - "Idle: пресеты + Controls (старт сушки/хранения/профиля)"
+    migration_target: |
+      После миграции сушилки на menu_protocol_v1 (см. migration_status.dryer) —
+      переписать на invoke форма B (commands/invoke {action:'drying.start', args:{...}}).
+      Сейчас deferred.
+    source_ref: "iDryerPortal/frontend-v2/src/components/dashboard/cards/IDryerCard.tsx"
+    status: legacy
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Перечисления (enum) — копируются 1:1 из uart_protocol.h
@@ -831,7 +979,7 @@ payloads:
             {
               type: uint16,
               unit: "seconds",
-              note: "wire-level семантика — секунды; см. idryer-link/lib/idryer-protocol/src/cloud/command_handler.cpp:590-605 + iDryerRP2040/src/uart/uart_manager.cpp:426-430",
+              note: "wire-level семантика — секунды; см. idryer-link/lib/idryer-protocol/src/cloud/command_handler.cpp:590-605 + iDryerControllerV2/src/uart/uart_manager.cpp:426-430",
             }
 
   Config:
@@ -840,7 +988,7 @@ payloads:
     status: legacy_broken
     source_ref:
       struct: "uart_protocol.h:241-245 (UartConfigPayload, 8 bytes)"
-      broken_consumer: "iDryerRP2040/src/uart/uart_manager.cpp:907-915,921-927 — handleUartConfig копирует binary payload в chunkPayload.data и зовёт deserializeJson() на бинарных байтах. Binary struct НЕ парсится."
+      broken_consumer: "iDryerControllerV2/src/uart/uart_manager.cpp:907-915,921-927 — handleUartConfig копирует binary payload в chunkPayload.data и зовёт deserializeJson() на бинарных байтах. Binary struct НЕ парсится."
     fields:
       targetTemperatureC10: { type: int16, unit: "°C × 10" }
       targetHumidityPct: { type: uint16, unit: "%RH" }
@@ -884,7 +1032,7 @@ payloads:
         }
     notes:
       - "Wire-форма — fixed-size binary struct. Producer (RP2040 main.cpp:1338-1354 + uart_manager.cpp:1085-1093) заполняет поля и шлёт через sendLog (raw bytes transport)."
-      - "ESP32-сторона (idryer-link IdryerDevice.cpp:657-678 handleLog) парсит struct и публикует MQTT events с unitId."
+      - "ESP32-сторона (idryer-link/src/main.cpp:335-360 onLog) парсит struct и публикует MQTT events с unitId."
 
   Heartbeat:
     description: "Keep-alive MCU↔ESP32 + сетевой статус для UI."
@@ -1141,7 +1289,7 @@ messages:
         direction_uart: rp2040_to_esp
         ack_kind: TelemetryAck
         ack_kind_id: 0x11
-        source_ref: "uart_protocol.h:82, uart_manager.h:sendUartTelemetry; iDryerRP2040/src/uart/uart_manager.cpp:267-284 (sendUartTelemetry → uartBridge.sendTelemetry(payload, true))"
+        source_ref: "uart_protocol.h:82, uart_manager.h:sendUartTelemetry; iDryerControllerV2/src/uart/uart_manager.cpp:267-284 (sendUartTelemetry → uartBridge.sendTelemetry(payload, true))"
     status: implemented
 
   - name: status
@@ -1167,6 +1315,7 @@ messages:
             "units[i].target.humidity": "%RH (если присутствует)"
             "units[i].target.duration": "minutes (соответствует Device.targetDurationMins)"
             "units[i].elapsedTime": "seconds — время текущего юнит-сегмента"
+            "units[i].progressPercent": "uint8 0..100, optional. Внешний прогресс (Bambu mc_percent, Moonraker virtual_chamber и т.п.). Absent если у режима нет внешнего источника прогресса (manual heat, Storage). UI приоритизирует это поле над elapsed/duration."
             "units[i].profileTotalElapsed": "seconds — суммарное время с начала PROFILE (все этапы)"
             "units[i].totalRemaining": "seconds — для PROFILE: до конца профиля"
             "units[i].currentStage": "только PROFILE"
@@ -1423,7 +1572,7 @@ messages:
 
   - name: command_drying
     direction: backend_to_device
-    purpose: "Запуск сушки. На iHeater-link обрабатывается напрямую (без UART); на dryer — конвертируется в UART Command(Start, targetState=Drying)."
+    purpose: "Запуск сушки. Legacy-канал для dryer (iDryer V3): конвертируется в UART Command(Start, targetState=Drying). iHeater Link на menu_protocol_v1 этот топик больше не обрабатывает — для него backend шлёт commands/invoke {action:'heat.start'}."
     bindings:
       mqtt:
         suffix: commands/drying
@@ -1448,7 +1597,7 @@ messages:
             - "unitId обязателен (U1..UN). Broadcast (unitId отсутствует / unitId=0xFF) НЕ реализован —
               RP2040 отклоняет unitId=0xFF как InvalidPayload. Реализовать broadcast можно когда
               появится реальная потребность (сценарий: одинаковый материал во всех камерах)."
-            - "iHeater-link парсит и params.*, и legacy targetTemperature/durationMinutes."
+            - "Топик для legacy dryer; iHeater Link его не обрабатывает (см. migration_status.iheater_link)."
       uart:
         kind: Command
         kind_id: 0x20
@@ -1510,10 +1659,10 @@ messages:
         cmd_code_id: 0x01
         cmd_targetState: "Storage (2)"
         source_ref: "command_handler.cpp:197 (Start with Storage)"
-        rp2040_handler: "iDryerRP2040/src/uart/uart_manager.cpp:466-472 — CURRENT: берёт только tempC и зовёт requestMode(Storage, tempC, 9999); humidity/priority пока игнорируются"
+        rp2040_handler: "iDryerControllerV2/src/uart/uart_manager.cpp:466-472 — CURRENT: берёт только tempC и зовёт requestMode(Storage, tempC, 9999); humidity/priority пока игнорируются"
     status: design_or_partial
     notes:
-      - "iHeater Link не поддерживает: команда логируется и игнорируется."
+      - "iHeater Link этот топик не обрабатывает — handler удалён из прошивки после миграции на menu_protocol_v1. Storage-режим у iHeater отсутствует."
       - "TODO: привести UART path к локальному start_storage, чтобы humidity/priority читались из menu. См. known_mismatches.storage_humidity_dropped."
 
   - name: command_profile
@@ -1595,7 +1744,7 @@ messages:
         source_ref: "command_handler.cpp:252 (handleStop в idryer-link)"
     status: implemented
     notes:
-      - "iHeater-link обрабатывает локально (command_routing.cpp:114-128 applyStop, RmtOutput Off + сброс drying-deadline)."
+      - "iHeater Link этот топик не обрабатывает — handler удалён после миграции на menu_protocol_v1. Backend (sessions.service.ts::completeSession) для IHEATER_LINK шлёт commands/invoke {action:'heat.stop'} вместо commands/stop."
       - "0xFF=ALL не поддерживается RP2040 (uart_manager.cpp:447 reject); см. known_mismatches.broadcast_unit_id_unsupported (resolved_by_contract — Variant B)."
       - "idryer-link bridge при отсутствии unitId ставит 0xFF defensive default (command_handler.cpp:267) — мёртвая ветка в production, портал всегда шлёт unitId."
 
@@ -1775,6 +1924,52 @@ messages:
 # 2. INVOKE-ACTIONS (универсальный конверт commands/invoke)
 # ─────────────────────────────────────────────────────────────────────────────
 #
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# Канонические формы payload (зафиксировано 2026-05-27)
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+#
+# Существуют ДВЕ формы commands/invoke. Обе валидны, обе остаются — они решают
+# разные задачи и НЕ конкурируют.
+#
+# ── Форма A — по id (action из меню) ─────────────────────────────────────────
+#   {"cmd":"invoke", "id":<int>, "timestamp":"..."}
+#
+#   Назначение: вызов action-пункта из меню устройства. Локальная семантика —
+#   эмулирует физическую кнопку на дисплее/энкодере (так бы сделал пользователь
+#   локально).
+#
+#   Args НЕ передаются — структурно меню не предусматривает аргументов.
+#   Action в menu.yaml = функция void(). Параметры процесса должны быть взяты
+#   из меню устройства (например menu.heat_temp), сохранённые ранее через `set`.
+#
+#   Используется: DeviceMenu на портале при клике "Execute" на action-пункте,
+#   физический интерфейс устройства (там где есть).
+#
+# ── Форма B — по action+args (прямая команда) ────────────────────────────────
+#   {"cmd":"invoke", "action":"<name>", "args":{...}, "timestamp":"..."}
+#
+#   Назначение: прямое управление устройством, НЕЗАВИСИМОЕ от меню. Инструмент
+#   расширения функциональности за пределы того, что упаковано в меню.
+#
+#   Когда применять:
+#     - Виджеты дашборда (HeaterCard, StorageCard и др.) — командный центр,
+#       шлёт invoke с runtime-параметрами, не затрагивая meню/NVS устройства.
+#     - Команды с runtime-параметрами, которые бессмысленно хранить в persist-
+#       меню: led.pulse {color, durationSec}, rfid.write {tagData, expectedUid}.
+#     - Сложные сценарии с фронта, которые не упаковать в меню: пресеты,
+#       batch-операции, фронт-агрегированные алгоритмы.
+#     - Кандидаты на миграцию legacy-топиков (commands/find, commands/drying,
+#       commands/clear_errors и т.д.) — все они должны перейти в форму B как
+#       часть унификации командного канала.
+#
+# ── commands/set — отдельный канал для значений меню ────────────────────────
+#   {"cmd":"set", "id":<int>, "val":<num|bool>, "timestamp":"..."}
+#
+#   Меняет значение value/toggle пункта меню. Persist в NVS. Не invoke —
+#   указано здесь для контекста, чтобы было видно границу между каналами.
+#
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+#
 # Архитектура:
 #   ActionDispatcher::handleInvoke (action_dispatcher.cpp:9-21) читает поле
 #   "action" из payload и вызывает зарегистрированный продуктом колбэк
@@ -1788,8 +1983,9 @@ messages:
 # Поэтому реальный список "что принимается" разный у каждого продукта:
 #   - core: единственный встроенный action — device.getConfig (через
 #           default-ветку IdryerRuntime, когда commandHandler_ не задан).
-#   - iheater_link: команда "invoke" ЯВНО ИГНОРИРУЕТСЯ в command_routing.cpp.
-#                   Никаких action'ов не принимается.
+#   - iheater_link: принимает {action: "heat.start"|"heat.stop", args} в
+#                   onCommand("invoke") (main.cpp:330-344). Прочие action — fallback
+#                   в MenuBridge::applyInvokeCommand, который требует {id}.
 #   - idryer_link:  принимает {cmd:"invoke", id:<int>} и проксирует в RP2040
 #                   через ConfigPush; диспетчинг по action-name НЕ реализован.
 #   - rp2040:       на UART через ConfigPush принимает {cmd:"invoke", id} и
@@ -2054,10 +2250,10 @@ invoke_actions:
 
   # ── RP2040 (MCU; принимает invoke по UART через ConfigPush, не MQTT) ───
   # source_ref для всей секции:
-  #   dispatch:        iDryerRP2040/src/uart/uart_manager.cpp:1011-1039
-  #   compiled_table:  iDryerRP2040/src/menu/menu_data.cpp
-  #   callback_bodies: iDryerRP2040/src/menu/user_menu_callbacks.cpp
-  #   declarative:     iDryerRP2040/src/menu/menu_v2.yaml (manifest)
+  #   dispatch:        iDryerControllerV2/src/uart/uart_manager.cpp:1011-1039
+  #   compiled_table:  iDryerControllerV2/src/menu/menu_data.cpp
+  #   callback_bodies: iDryerControllerV2/src/menu/user_menu_callbacks.cpp
+  #   declarative:     iDryerControllerV2/src/menu/menu_v2.yaml (manifest)
   # У каждого name ниже — только declarative_line (строка в menu_v2.yaml).
   rp2040:
     # Транспортная обёртка: на RP2040 invoke приходит из ESP32 через UART
@@ -2073,10 +2269,10 @@ invoke_actions:
       purpose: "Section-level source_ref для всех rp2040 invoke actions ниже."
       status: notes_only
       source_ref:
-        dispatch: "iDryerRP2040/src/uart/uart_manager.cpp:1011-1039"
-        compiled_table: "iDryerRP2040/src/menu/menu_data.cpp"
-        callback_bodies: "iDryerRP2040/src/menu/user_menu_callbacks.cpp"
-        declarative: "iDryerRP2040/src/menu/menu_v2.yaml (manifest)"
+        dispatch: "iDryerControllerV2/src/uart/uart_manager.cpp:1011-1039"
+        compiled_table: "iDryerControllerV2/src/menu/menu_data.cpp"
+        callback_bodies: "iDryerControllerV2/src/menu/user_menu_callbacks.cpp"
+        declarative: "iDryerControllerV2/src/menu/menu_v2.yaml (manifest)"
       notes:
         - "У каждого name ниже — только declarative_line: индекс name в menu_v2.yaml как декларация. Реальный исполняемый код см. в полях выше."
 
@@ -2090,165 +2286,165 @@ invoke_actions:
           direction_uart: esp_to_rp2040
           ack: true
       status: implemented
-      declarative_line: "iDryerRP2040/src/menu/menu_v2.yaml:82 (on_invoke: start_drying)"
+      declarative_line: "iDryerControllerV2/src/menu/menu_v2.yaml:82 (on_invoke: start_drying)"
 
     - name: start_storage
       purpose: "Запустить режим хранения (storage) — поддержание низкой температуры с инверсной логикой."
       status: implemented
-      declarative_line: "iDryerRP2040/src/menu/menu_v2.yaml:125 (on_invoke: start_storage)"
+      declarative_line: "iDryerControllerV2/src/menu/menu_v2.yaml:125 (on_invoke: start_storage)"
 
     - name: start_profile
       purpose: "Запустить выбранный профиль (через выбор в подменю profile)."
       status: implemented
-      declarative_line: "iDryerRP2040/src/menu/menu_v2.yaml:152 (on_invoke: start_profile)"
+      declarative_line: "iDryerControllerV2/src/menu/menu_v2.yaml:152 (on_invoke: start_profile)"
 
     - name: start_drying_pla
       purpose: "Пресет: PLA."
       status: implemented
-      declarative_line: "iDryerRP2040/src/menu/menu_v2.yaml:599"
+      declarative_line: "iDryerControllerV2/src/menu/menu_v2.yaml:599"
 
     - name: start_drying_pla_cf
       purpose: "Пресет: PLA-CF."
       status: implemented
-      declarative_line: "iDryerRP2040/src/menu/menu_v2.yaml:630"
+      declarative_line: "iDryerControllerV2/src/menu/menu_v2.yaml:630"
 
     - name: start_drying_pla_gf
       purpose: "Пресет: PLA-GF."
       status: implemented
-      declarative_line: "iDryerRP2040/src/menu/menu_v2.yaml:661"
+      declarative_line: "iDryerControllerV2/src/menu/menu_v2.yaml:661"
 
     - name: start_drying_petg
       purpose: "Пресет: PETG."
       status: implemented
-      declarative_line: "iDryerRP2040/src/menu/menu_v2.yaml:692"
+      declarative_line: "iDryerControllerV2/src/menu/menu_v2.yaml:692"
 
     - name: start_drying_petg_cf
       purpose: "Пресет: PETG-CF."
       status: implemented
-      declarative_line: "iDryerRP2040/src/menu/menu_v2.yaml:723"
+      declarative_line: "iDryerControllerV2/src/menu/menu_v2.yaml:723"
 
     - name: start_drying_petg_gf
       purpose: "Пресет: PETG-GF."
       status: implemented
-      declarative_line: "iDryerRP2040/src/menu/menu_v2.yaml:754"
+      declarative_line: "iDryerControllerV2/src/menu/menu_v2.yaml:754"
 
     - name: start_drying_abs
       purpose: "Пресет: ABS."
       status: implemented
-      declarative_line: "iDryerRP2040/src/menu/menu_v2.yaml:785"
+      declarative_line: "iDryerControllerV2/src/menu/menu_v2.yaml:785"
 
     - name: start_drying_abs_cf
       purpose: "Пресет: ABS-CF."
       status: implemented
-      declarative_line: "iDryerRP2040/src/menu/menu_v2.yaml:816"
+      declarative_line: "iDryerControllerV2/src/menu/menu_v2.yaml:816"
 
     - name: start_drying_abs_gf
       purpose: "Пресет: ABS-GF."
       status: implemented
-      declarative_line: "iDryerRP2040/src/menu/menu_v2.yaml:847"
+      declarative_line: "iDryerControllerV2/src/menu/menu_v2.yaml:847"
 
     - name: start_drying_pa
       purpose: "Пресет: PA (Nylon)."
       status: implemented
-      declarative_line: "iDryerRP2040/src/menu/menu_v2.yaml:878"
+      declarative_line: "iDryerControllerV2/src/menu/menu_v2.yaml:878"
 
     - name: start_drying_pa_cf
       purpose: "Пресет: PA-CF."
       status: implemented
-      declarative_line: "iDryerRP2040/src/menu/menu_v2.yaml:909"
+      declarative_line: "iDryerControllerV2/src/menu/menu_v2.yaml:909"
 
     - name: start_drying_pa_gf
       purpose: "Пресет: PA-GF."
       status: implemented
-      declarative_line: "iDryerRP2040/src/menu/menu_v2.yaml:940"
+      declarative_line: "iDryerControllerV2/src/menu/menu_v2.yaml:940"
 
     - name: start_drying_pc
       purpose: "Пресет: PC."
       status: implemented
-      declarative_line: "iDryerRP2040/src/menu/menu_v2.yaml:971"
+      declarative_line: "iDryerControllerV2/src/menu/menu_v2.yaml:971"
 
     - name: start_drying_pc_cf
       purpose: "Пресет: PC-CF."
       status: implemented
-      declarative_line: "iDryerRP2040/src/menu/menu_v2.yaml:1002"
+      declarative_line: "iDryerControllerV2/src/menu/menu_v2.yaml:1002"
 
     - name: start_drying_my1
       purpose: "Пользовательский пресет My1."
       status: implemented
-      declarative_line: "iDryerRP2040/src/menu/menu_v2.yaml:1033"
+      declarative_line: "iDryerControllerV2/src/menu/menu_v2.yaml:1033"
 
     - name: start_drying_my2
       purpose: "Пользовательский пресет My2."
       status: implemented
-      declarative_line: "iDryerRP2040/src/menu/menu_v2.yaml:1064"
+      declarative_line: "iDryerControllerV2/src/menu/menu_v2.yaml:1064"
 
     - name: start_drying_my3
       purpose: "Пользовательский пресет My3."
       status: implemented
-      declarative_line: "iDryerRP2040/src/menu/menu_v2.yaml:1095"
+      declarative_line: "iDryerControllerV2/src/menu/menu_v2.yaml:1095"
 
     - name: calib_zero1
       purpose: "Калибровка нуля тензодатчика юнита 1."
       status: implemented
-      declarative_line: "iDryerRP2040/src/menu/menu_v2.yaml:1174"
+      declarative_line: "iDryerControllerV2/src/menu/menu_v2.yaml:1174"
 
     - name: calib_kg_1
       purpose: "Калибровка веса (1 кг) юнита 1."
       status: implemented
-      declarative_line: "iDryerRP2040/src/menu/menu_v2.yaml:1178"
+      declarative_line: "iDryerControllerV2/src/menu/menu_v2.yaml:1178"
 
     - name: calib_zero2
       purpose: "Калибровка нуля тензодатчика юнита 2."
       status: implemented
-      declarative_line: "iDryerRP2040/src/menu/menu_v2.yaml:1186"
+      declarative_line: "iDryerControllerV2/src/menu/menu_v2.yaml:1186"
 
     - name: calib_kg_2
       purpose: "Калибровка веса (1 кг) юнита 2."
       status: implemented
-      declarative_line: "iDryerRP2040/src/menu/menu_v2.yaml:1190"
+      declarative_line: "iDryerControllerV2/src/menu/menu_v2.yaml:1190"
 
     - name: calib_zero3
       purpose: "Калибровка нуля тензодатчика юнита 3."
       status: implemented
-      declarative_line: "iDryerRP2040/src/menu/menu_v2.yaml:1199"
+      declarative_line: "iDryerControllerV2/src/menu/menu_v2.yaml:1199"
 
     - name: calib_kg_3
       purpose: "Калибровка веса (1 кг) юнита 3."
       status: implemented
-      declarative_line: "iDryerRP2040/src/menu/menu_v2.yaml:1203"
+      declarative_line: "iDryerControllerV2/src/menu/menu_v2.yaml:1203"
 
     - name: calib_zero4
       purpose: "Калибровка нуля тензодатчика юнита 4."
       status: implemented
-      declarative_line: "iDryerRP2040/src/menu/menu_v2.yaml:1212"
+      declarative_line: "iDryerControllerV2/src/menu/menu_v2.yaml:1212"
 
     - name: calib_kg_4
       purpose: "Калибровка веса (1 кг) юнита 4."
       status: implemented
-      declarative_line: "iDryerRP2040/src/menu/menu_v2.yaml:1216"
+      declarative_line: "iDryerControllerV2/src/menu/menu_v2.yaml:1216"
 
     - name: pid_autotune_heater
       purpose: "PID autotune нагревателя (heater)."
       status: implemented
-      declarative_line: "iDryerRP2040/src/menu/menu_v2.yaml:1356"
+      declarative_line: "iDryerControllerV2/src/menu/menu_v2.yaml:1356"
 
     - name: pid_autotune_chamber
       purpose: "PID autotune камеры (chamber)."
       status: implemented
-      declarative_line: "iDryerRP2040/src/menu/menu_v2.yaml:1410"
+      declarative_line: "iDryerControllerV2/src/menu/menu_v2.yaml:1410"
 
     - name: start_claim
       purpose: "Запросить старт claim-флоу с MCU (ClaimStart 0x70 уйдёт в ESP32)."
       status: disabled
-      declarative_line: "iDryerRP2040/src/menu/menu_v2.yaml:1605"
+      declarative_line: "iDryerControllerV2/src/menu/menu_v2.yaml:1605"
       notes:
-        - "Code commented out at iDryerRP2040/src/menu/user_menu_callbacks.cpp:55-76; UART claim callbacks disabled at uart_manager.cpp:622, 631."
+        - "Code commented out at iDryerControllerV2/src/menu/user_menu_callbacks.cpp:55-76; UART claim callbacks disabled at uart_manager.cpp:622, 631."
 
     - name: "<rp2040_uart_dispatch_notes>"
       direction: esp_to_rp2040
       purpose: "Транспортная заметка: RP2040 не парсит поле 'action' — только числовое 'id'."
       status: notes_only
-      source_ref: "iDryerRP2040/src/uart/uart_manager.cpp:1011-1039"
+      source_ref: "iDryerControllerV2/src/uart/uart_manager.cpp:1011-1039"
       notes:
         - 'uart_manager.cpp читает doc["id"] (uint16_t), валидирует id < MENU__COUNT и item.type == MN_ACTION, шлёт ConfigAck(None) и вызывает item.u.action.invoke().'
         - "Если id невалиден или item не MN_ACTION — ConfigAck(InvalidPayload), действие не выполняется."
@@ -2297,7 +2493,7 @@ uart_only:
     fragmented: false
     ack: false
     purpose: "Liveness check + сетевой статус. Пропуск heartbeat дольше UART_LINK_LOSS_MS → линк потерян."
-    source_ref: "uart_protocol.h:93 (kind), uart_protocol.h:56-57 (intervals UART_HEARTBEAT_MS/UART_LINK_LOSS_MS), uart_bridge.cpp:94 + iDryerRP2040/src/uart/uart_manager.cpp:344"
+    source_ref: "uart_protocol.h:93 (kind), uart_protocol.h:56-57 (intervals UART_HEARTBEAT_MS/UART_LINK_LOSS_MS), uart_bridge.cpp:94 + iDryerControllerV2/src/uart/uart_manager.cpp:344"
 
   - kind: Error
     kind_id: 0x50
@@ -2322,8 +2518,8 @@ uart_only:
       kind_decl: "lib/idryer-core/src/uart/uart_protocol.h:95"
       transport: "lib/idryer-core/src/uart/uart_bridge.cpp:114-119 (sendLog) — общий sender для raw bytes (transport)"
       struct_decl: "idryer-link/lib/idryer-protocol/src/uart/uart_protocol.h:301-309 (legacy DryerUart::LogPayload binary struct)"
-      rp2040_producer: "iDryerRP2040/src/main.cpp:1338-1354 + iDryerRP2040/src/uart/uart_manager.cpp:1085-1093 — заполняют binary struct"
-      esp_consumer: "idryer-link/src/IdryerDevice.cpp:657-678 (handleLog) — парсит binary struct и публикует MQTT events с unitId"
+      rp2040_producer: "iDryerControllerV2/src/main.cpp:1338-1354 + iDryerControllerV2/src/uart/uart_manager.cpp:1085-1093 — заполняют binary struct"
+      esp_consumer: "idryer-link/src/main.cpp:335-360 (onLog) — парсит binary struct и публикует MQTT events с unitId"
     notes:
       - "Wire-форма — fixed-size BINARY STRUCT (DryerUart::LogPayload). НЕ свободные строки!"
       - "Старая yaml-формулировка 'raw bytes' вводила в заблуждение — transport принимает любые байты, но producer всегда шлёт packed struct."
@@ -2436,9 +2632,9 @@ mqtt_only:
           message: string
           timestamp: ISO8601
           unitId: "ОТСУТСТВУЕТ"
-          source_ref: "idryer-link/src/IdryerDevice.cpp:621-630 (handleUartError)"
+          source_ref: "idryer-link/src/main.cpp:367-369 (onUartError)"
         mcu_log:
-          source_ref: "idryer-link/src/IdryerDevice.cpp:657-683 (handleLog)"
+          source_ref: "idryer-link/src/main.cpp:335-360 (onLog)"
           notes:
             - "free-form event строки; severity — то, что прислал MCU."
       notes:
@@ -2793,6 +2989,12 @@ legacy_command_topics:
 # 6. РАСХОЖДЕНИЯ И ОТКРЫТЫЕ ВОПРОСЫ
 # ─────────────────────────────────────────────────────────────────────────────
 # Полный текст — в mismatches.md. Здесь — короткие пометки, чтобы не потерялись.
+#
+# ВАЖНО: ссылки вида `idryer-link/lib/idryer-protocol/...` ниже указывают на
+# legacy либу, удалённую после переезда на idryer-core. Файлы доступны только
+# в backup: `docs/idryer-link — копия/lib/idryer-protocol/`. Ссылки полезны
+# как историческая справка при миграции функциональности в core SDK; при
+# закрытии соответствующих mismatch'ей ссылки уйдут вместе с записями.
 known_mismatches:
   - id: weights_no_core_api
     summary: "MqttClient (idryer-core) не имеет publishWeights/publishRfid; есть только в legacy idryer-link."
@@ -2837,14 +3039,14 @@ known_mismatches:
       logic: "если есть id (number) ИЛИ action (string) — validation passes"
     handlers_per_path:
       uart_proxy_idryer_link:
-        ref: "idryer-link/lib/idryer-protocol/src/cloud/command_handler.cpp:341-367 (handleInvoke)"
+        ref: "idryer-link/src/main.cpp:485-501 (onCommand 'invoke')"
         accepts: "{id} only"
         rejects: "{action} без id → логируется WARN, return"
         reason: "RP2040 диспатчит по индексу пункта меню (menu_data.cpp), action как строка туда не доходит"
       iheater_link:
-        ref: "iHeater-link/src/heater/command_routing.cpp:212"
-        accepts: "ничего"
-        rejects: "invoke в списке explicit-ignore"
+        ref: "iHeater-link/src/main.cpp:330-344"
+        accepts: "{action: 'heat.start'|'heat.stop', args: {tempC, durationMin}}"
+        rejects: "{action} без известного имени → fallback в MenuBridge::applyInvokeCommand, требует {id}"
       core_sdk_runtime_callback:
         ref: "lib/idryer-core/src/runtime/idryer_runtime.cpp:85-97"
         accepts: "что зарегистрирует продукт. Встроено: action='device.getConfig' → IProfile::getConfig"
@@ -2865,10 +3067,6 @@ known_mismatches:
   - id: command_get_config_vs_invoke
     summary: "commands/get_config и invoke device.getConfig дублируют друг друга."
     impact: "Оба поддерживаются. Долгосрочная цель — оставить только invoke."
-  - id: heater_unsupported_commands
-    summary: "iHeater-link explicit-ignore: storage / profile / find / read_rfid / write_rfid / clear_errors / invoke."
-    impact: "Команды не вызывают ошибок, но и не дают эффекта на iHeater-устройствах."
-
   # ── Interop-баги между Portal/legacy bridge/RP2040 (требуют решения по коду) ──
   - id: write_rfid_payload_mismatch
     severity: critical
@@ -2941,8 +3139,8 @@ known_mismatches:
     summary: "Частичный mismatch: MCU log events работают; UART transport errors дропаются Portal'ом из-за отсутствия unitId."
     portal_validates: "iDryerPortal/backend/src/mqtt-telemetry/handlers/events.handler.ts:39-43"
     firmware_publishes:
-      mcu_log_events: "idryer-link/src/IdryerDevice.cpp:657-683 (handleLog) — содержит unitId 'U1..U4', работает"
-      uart_transport_errors: "idryer-link/src/IdryerDevice.cpp:621-630 (handleUartError) — БЕЗ unitId, severity lowercase, дропается"
+      mcu_log_events: "idryer-link/src/main.cpp:335-360 (onLog) — содержит unitId 'U1..U4', работает"
+      uart_transport_errors: "idryer-link/src/main.cpp:367-369 (onUartError) — БЕЗ unitId, severity lowercase, дропается"
     works_today:
       - "MCU LogPayload events (SESSION_COMPLETE, STAGE_CHANGED, OVERHEAT и т.п.) — все 4 поля есть, портал принимает"
     broken_today:
@@ -2994,7 +3192,7 @@ known_mismatches:
     severity: low
     summary: "0xFF=ALL присутствует как defensive fallback в bridge, но в реальной работе никогда не достигается. Контракт убирает ALL semantics."
     bridge_emits: "idryer-link/lib/idryer-protocol/src/cloud/command_handler.cpp:141, 212, 267, 293, 528, 545 (defensive fallback when unitId omitted)"
-    rp2040_rejects: "iDryerRP2040/src/uart/uart_manager.cpp:447-451 (handleUartCommand); :409-414 (handleUartProfileCommand)"
+    rp2040_rejects: "iDryerControllerV2/src/uart/uart_manager.cpp:447-451 (handleUartCommand); :409-414 (handleUartProfileCommand)"
     iheater_link_local: "iHeater-link/src/heater/command_routing.cpp:58, 89, 117 — 0xFF используется только для логирования; iHeater single-unit, нет UART, no real broadcast"
     portal_status: "iDryerPortal/backend/src/mqtt-telemetry/mqtt-telemetry.service.ts:757 — sendStopCommand требует unitId; UI 'Stop all' не существует"
     real_world_status: "Dead path в production — портал никогда не шлёт без unitId, fallback в bridge не срабатывает."
@@ -3066,7 +3264,7 @@ known_mismatches:
     summary: "Portal публикует commands/storage, commands/profile, commands/find, commands/clear_errors, commands/pause, commands/resume через WebSocket events.gateway.ts:380-397, но ни один current-scope продукт (iHeater-link, iDryer-Storage) не имеет consumer-веток."
     portal_publisher: "iDryerPortal/backend/src/gateway/events.gateway.ts:121-196,355-397"
     consumers_status:
-      iheater_link: "command_routing.cpp:204-215 — explicit-ignore для storage/profile/find/read_rfid/write_rfid/clear_errors/invoke; pause/resume не упомянуты, попадут в Unknown command"
+      iheater_link: "src/main.cpp — обрабатываются find/clear_errors/get_config/set/invoke/link_integration. drying/storage/stop удалены после миграции на menu_protocol_v1 (запуск/остановка идут через invoke heat.start/heat.stop). find и clear_errors — no-op (нужны для DeviceHeader колокольчика и ClearErrorsButton). profile/read_rfid/write_rfid/pause/resume не зарегистрированы — попадут в Unknown command."
       idryer_storage: "src/main.cpp:188-209 — handler знает только get_config/set/invoke; остальные команды no-op"
     impact: "Portal возвращает {status:'sent'} оператору, но никаких действий на устройстве нет. Тихий interop-баг."
     decision_required: |
@@ -3209,7 +3407,7 @@ known_mismatches:
     summary: "yaml payloads.Config описывает legacy binary UartConfigPayload (8 bytes), но RP2040 handleUartConfig не парсит его как struct — копирует байты в chunkPayload.data и runs deserializeJson на бинарных байтах."
     code_evidence:
       yaml_decl: "payloads.Config: targetTemperatureC10/targetHumidityPct/durationMinutes/fanDutyPct (8 bytes binary struct из uart_protocol.h:241-245)"
-      rp2040_handler: "iDryerRP2040/src/uart/uart_manager.cpp:907-915,921-927 — handleUartConfig копирует payload в chunkPayload.data и зовёт deserializeJson(); binary НЕ парсится корректно"
+      rp2040_handler: "iDryerControllerV2/src/uart/uart_manager.cpp:907-915,921-927 — handleUartConfig копирует payload в chunkPayload.data и зовёт deserializeJson(); binary НЕ парсится корректно"
     impact: "Legacy binary ConfigPush никогда не сработает на current RP2040 firmware."
     decision_required: |
       1) Снять path с binary ConfigPush (статус 'legacy/broken') в yaml;
@@ -3225,7 +3423,7 @@ known_mismatches:
     summary: "yaml payloads.Log описывает 'raw bytes (UART_MAX_PAYLOAD)' — свободно-формальные строки. Реальный producer на RP2040 шлёт fixed-size binary DryerUart::LogPayload struct с полями severity/source/event/message."
     code_evidence:
       legacy_struct: "idryer-link/lib/idryer-protocol/src/uart/uart_protocol.h:301-309 (DryerUart::LogPayload) — fixed binary struct"
-      rp2040_producer: "iDryerRP2040/src/main.cpp:1338-1354 + src/uart/uart_manager.cpp:1085-1093 — заполняет binary struct"
+      rp2040_producer: "iDryerControllerV2/src/main.cpp:1338-1354 + src/uart/uart_manager.cpp:1085-1093 — заполняет binary struct"
     decision_made: "yaml: payloads.Log должен описывать binary struct (severity[N], source[M], event[K], message[L], unitId), не 'raw bytes'."
     status: implemented
     found_by: "external audit (BLK-LOG-STRUCT)"

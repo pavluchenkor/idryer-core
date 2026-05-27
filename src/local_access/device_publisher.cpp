@@ -68,4 +68,9 @@ bool DevicePublisher::publishRfid(JsonDocument& doc) {
     return mqtt_->publishRfid(doc);
 }
 
+bool DevicePublisher::publishRfidWriteResult(JsonDocument& doc) {
+    // Local WS этот ответ не нужен — это специфичная backend-корреляция.
+    return mqtt_->publishRfidWriteResult(doc);
+}
+
 } // namespace idryer

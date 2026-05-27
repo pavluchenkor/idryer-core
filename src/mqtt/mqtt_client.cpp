@@ -149,6 +149,10 @@ bool MqttClient::publishRfid(JsonDocument& json) {
     return publishJson(IDRYER_TOPIC_RFID, json, IDRYER_RETAINED_RFID);
 }
 
+bool MqttClient::publishRfidWriteResult(JsonDocument& json) {
+    return publishJson(IDRYER_TOPIC_RFID_WRITE_RESULT, json, IDRYER_RETAINED_RFID_WRITE_RESULT);
+}
+
 uint16_t MqttClient::publishConfigRaw(const char* json, size_t length) {
     if (!mqttClient_.connected() || !json || length == 0) return 0;
 

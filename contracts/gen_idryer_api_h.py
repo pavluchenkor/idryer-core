@@ -284,11 +284,6 @@ def render_config_struct(doc: dict) -> list[str]:
         out.append(f"    bool        {(flag + ';'):<21} ///< {desc}")
     out += [
         "",
-        "    // ── Basic air sensors (not in capability_vocabulary — present on most devices) ──",
-        "    bool        hasAirTemp;          ///< air temperature sensor (SHT/DHT)",
-        "    bool        hasAirHumidity;      ///< air humidity sensor",
-        "    bool        hasHeaterTemp;       ///< heater body temperature sensor",
-        "",
         "    // ── Integration availability (compile-time decision) ──",
     ]
     for _kind, flag, _doc in INTEGRATIONS:

@@ -1,10 +1,6 @@
 /**
  * @file ha_mqtt_client.cpp
  * @brief Реализация MQTT клиента для Home Assistant.
- *
- * Портировано из legacy idryer-protocol/src/mqtt/ha_mqtt_client.cpp
- * без изменений API. Единственное отличие — путь include на hal/hal_types.h
- * (файл переехал в integrations/home_assistant/, hal лежит на два уровня выше).
  */
 
 #if defined(ESP32) || defined(ESP_PLATFORM)

@@ -575,9 +575,22 @@ void Link::publishTelemetryNow() {
         u["unitId"] = uid;
 
         // Only fields enabled in Config are emitted.
-        if (cfg.hasAirTemp)     u["temperature"] = telemetry.airTempC[i];
-        if (cfg.hasAirHumidity) u["humidity"]    = telemetry.airHumidityPct[i];
-        if (cfg.hasHeaterTemp)  u["heaterTemp"]  = telemetry.heaterTempC[i];
+        // Float-поля: NAN ⇒ поле НЕ публикуется вообще (нет данных). Продукт
+        // ставит NAN когда датчик не отвечает / не подключён. На проводе и в
+        // случае cfg.has*=false, и в случае NAN — поле отсутствует. Frontend
+        // обрабатывает одинаково: TelemetryRow скрывает cell.
+        if (cfg.hasAirTemp) {
+            float v = telemetry.airTempC[i];
+            if (!isnan(v)) u["temperature"] = v;
+        }
+        if (cfg.hasAirHumidity) {
+            float v = telemetry.airHumidityPct[i];
+            if (!isnan(v)) u["humidity"] = v;
+        }
+        if (cfg.hasHeaterTemp) {
+            float v = telemetry.heaterTempC[i];
+            if (!isnan(v)) u["heaterTemp"] = v;
+        }
         if (cfg.hasHeaterPower) u["heaterPower"] = (int)roundf(telemetry.heaterPower01[i] * 100.0f);
         if (cfg.hasFanStatus)   u["fanStatus"]   = telemetry.fanOn[i];
         if (cfg.hasScales)      u["weight"]      = telemetry.weightG[i];
