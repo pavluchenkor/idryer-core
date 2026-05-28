@@ -58,11 +58,13 @@ enum class IntegrationState : uint8_t {
 };
 
 /// Event severity for raiseEvent() — JSON `severity` per contract.
-/// Mirrors yaml.enums.PortalEventType severities (INFO/WARNING/ERROR).
+/// Canonical severity vocabulary (matches RP2040 error bus + backend
+/// events.handler): INFO / WARN / ERROR / CRIT. See eventSeverityString.
 enum class EventKind : uint8_t {
     Info,
     Warning,
     Error,
+    Critical,
 };
 
 /// Business commands routed through Link::onRequest().

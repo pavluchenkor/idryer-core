@@ -549,12 +549,14 @@ const char* unitModeString(UnitMode m) {
     return "UNKNOWN";
 }
 
-// EventKind → JSON `severity` (uppercase per contract).
+// EventKind → JSON `severity`. Канон CRIT/ERROR/WARN/INFO — единый словарь
+// с RP2040 error bus и backend events.handler.
 const char* eventSeverityString(EventKind k) {
     switch (k) {
-        case EventKind::Info:    return "INFO";
-        case EventKind::Warning: return "WARNING";
-        case EventKind::Error:   return "ERROR";
+        case EventKind::Info:     return "INFO";
+        case EventKind::Warning:  return "WARN";
+        case EventKind::Error:    return "ERROR";
+        case EventKind::Critical: return "CRIT";
     }
     return "INFO";
 }
