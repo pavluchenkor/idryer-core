@@ -131,11 +131,11 @@ rules:
   serial_format:
     pattern: "DEVICE_[0-9A-F]{12}"
     description: |
-      Серийник устройства. 12 hex-символов в UPPERCASE с префиксом DEVICE_.
-      Источник правды — ядро (ESP32 SDK): `ArduinoCredentialStore::seedSerialFromMac()`
-      использует `snprintf("%02X", mac[i])`. Все компоненты (ESP firmware, портал-backend,
-      portal-frontend, MQTT topic, БД Device.serialNumber, JSON-payload поля `serial`/`serialNumber`)
-      хранят и сравнивают строку как есть — БЕЗ нормализации регистра.
+      Серийник устройства. 12 hex-символов в UPPERCASE с префиксом DEVICE_
+      (из MAC, формат "%02X"). Все компоненты (ESP firmware, портал-backend,
+      portal-frontend, MQTT topic, БД Device.serialNumber, JSON-payload поля
+      `serial`/`serialNumber`) хранят и сравнивают строку как есть — БЕЗ
+      нормализации регистра.
     example: "DEVICE_ACEBE6490534"
   timestamp_format: "YYYY-MM-DDTHH:MM:SSZ"
   lwt_topic: "idryer/{serial}/offline"
@@ -144,7 +144,7 @@ rules:
   unit_id_format: "string U1..U4 (по соглашению портала); внутри MCU — uint8_t 0..3. ИСКЛЮЧЕНИЕ: info.units[].unitId — numeric 0..3 (исторически; так шлют iHeater-link и legacy dryer; Portal InfoPayload type тоже numeric)."
 
   mqtt_session: "clean_session=false; keepalive=60s"
-  publish_qos: "PubSubClient в idryer-core/idryer-link публикует ВСЕГДА QoS 0 (PubSubClient::publish() не имеет publish-QoS параметра). Поэтому ВСЕ device→backend MQTT entries в этом контракте имеют qos: 0. Subscribe (commands/*) — QoS 1. LWT (offline) — broker-side."
+  publish_qos: "Все device→backend publish — QoS 0 (MQTT-клиент прошивки не задаёт publish-QoS). Subscribe (commands/*) — QoS 1. LWT (offline) — broker-side."
   uart_baud: 115200
   uart_protocol_version: 1
   uart_max_payload_bytes: 200
@@ -196,8 +196,8 @@ rules:
       — конвенция протокола, применяется в обе стороны:
 
         portal → device: добавляется во все `commands/*` payload'ы (включая ping).
-        device → portal: автоматически добавляется во все publish-сообщения через
-                         generic `MqttClient::publishJson()`, если не задан явно.
+        device → portal: автоматически добавляется SDK во все publish-сообщения,
+                         если не задан явно.
 
       Назначение для устройства: settimeofday() при получении любой portal-команды.
       RTC-времени на железе нет; NTP не используется. Time-sync целиком построен
@@ -209,31 +209,18 @@ rules:
 
     portal_to_device:
       coverage: "ВСЕ commands/* кроме `bambu_apply` и `link_integration` (config-команды без time-sync semantics)."
-      added_by: "Каждый portal-сервис ручно при формировании payload (НЕ через global interceptor)."
-      source_ref: |
-        iDryerPortal/backend/src/mqtt-telemetry/mqtt-telemetry.service.ts:635 (drying), :658 (storage),
-        :682 (profile), :761 (stop), :775 (pause), :789 (resume), :802 (ping);
-        backend/src/devices/devices.service.ts:1271 (get_config), :1339 (set/invoke);
-        backend/src/rfid/write-orchestrator.service.ts:219 (write_rfid);
-        backend/src/mqtt-telemetry/handlers/rfid.handler.ts:333 (read_rfid);
-        backend/src/gateway/events.gateway.ts:342 (find / clear_errors).
+      added_by: "Каждый portal-сервис при формировании payload (НЕ через global interceptor)."
 
     device_to_portal:
       coverage: "ВСЕ publish-сообщения (info, telemetry, status, weights, rfid, config, config/delta, events, integrations/status)."
-      added_by: "MqttClient::publishJson() — generic wrapper, который добавляет timestamp если отсутствует."
-      source_ref: |
-        legacy: idryer-protocol/src/mqtt/mqtt_client.cpp:599-602 (generic), :340 (publishInfo).
-        new SDK: idryer-core/src/mqtt/mqtt_client.cpp:254-256 (generic).
+      added_by: "SDK generic publish-wrapper добавляет timestamp если отсутствует."
 
     device_incoming_parsing:
-      where: "IdryerRuntime::onMqttCommand на верхнем уровне ДО роутинга (idryer_runtime.cpp:46-66)."
+      where: "На верхнем уровне приёма MQTT-команды, ДО роутинга."
       effect: "settimeofday() при наличии валидного timestamp в любой portal-команде."
       excludes:
-        - "Local-WS команды (приходят через local_access::setCommandSink, минуют onMqttCommand) — клиент сам знает своё время, не должен менять системное."
-        - "UART команды от RP2040 — то же самое, RP2040 синхронизируется через ESP, не наоборот."
-      legacy_behavior: |
-        В legacy idryer-protocol парсинг был в CommandHandler::handleMqttCommand (command_handler.cpp:39-40
-        → syncTimeIfPresent) — тот же контракт. В iHeater-link/idryer-core поведение восстановлено.
+        - "Local-WS команды (минуют MQTT-приём) — клиент сам знает своё время, не должен менять системное."
+        - "UART команды от RP2040 — RP2040 синхронизируется через ESP, не наоборот."
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Статус миграции продуктов на menu_protocol_v1
@@ -911,7 +898,7 @@ payloads:
         }
       arg0:
         type: uint32
-        note: "Семантика зависит от command/targetState. Для Start drying/storage — целевая температура в °C × 10 (ESP умножает params.temperature × 10, RP2040 делит / 10 при приёме; uart_manager.cpp:456). Единая конвенция с Profile.stages[].temp и Telemetry.temperatureC10."
+        note: "Семантика зависит от command/targetState. Для Start drying/storage — целевая температура в °C × 10 (ESP умножает params.temperature × 10, RP2040 делит / 10 при приёме). Единая конвенция с Profile.stages[].temp и Telemetry.temperatureC10."
       arg1:
         type: uint32
         note: "Семантика зависит от command/targetState. Для Start drying — duration в минутах. Для Start storage — целевая влажность (current MCU игнорирует, см. known_mismatches.storage_humidity_dropped)."
@@ -930,19 +917,19 @@ payloads:
             {
               type: uint16,
               unit: "°C × 10",
-              note: "Wire-формат °C × 10. ESP-bridge умножает MQTT-поле params.stages[].temperature (целое °C) на 10 при формировании UART payload; RP2040 делит на 10 при потреблении (uart_manager.cpp:427). Единая конвенция для всех температур в UART payload-ах — см. также Telemetry.temperatureC10, Telemetry.targetTempC10, Command.arg0 (для Start drying/storage).",
+              note: "Wire-формат °C × 10. ESP-bridge умножает MQTT-поле params.stages[].temperature (целое °C) на 10 при формировании UART payload; RP2040 делит на 10 при потреблении. Единая конвенция для всех температур в UART payload-ах — см. также Telemetry.temperatureC10, Telemetry.targetTempC10, Command.arg0.",
             }
           ramp:
             {
               type: uint16,
               unit: "seconds",
-              note: "wire-level семантика — секунды; комментарий 'minutes' в lib/idryer-core/src/uart/uart_protocol.h:318-319 устарел и подлежит замене",
+              note: "wire-level семантика — секунды (комментарий 'minutes' в коде устарел)",
             }
           hold:
             {
               type: uint16,
               unit: "seconds",
-              note: "wire-level семантика — секунды; см. idryer-link/lib/idryer-protocol/src/cloud/command_handler.cpp:590-605 + iDryerControllerV2/src/uart/uart_manager.cpp:426-430",
+              note: "wire-level семантика — секунды",
             }
 
   Config:
@@ -990,8 +977,8 @@ payloads:
           note: "связанный юнит (0..3) или 0xFF если событие линка",
         }
     notes:
-      - "Wire-форма — fixed-size binary struct. Producer (RP2040 main.cpp:1338-1354 + uart_manager.cpp:1085-1093) заполняет поля и шлёт через sendLog (raw bytes transport)."
-      - "ESP32-сторона (idryer-link/src/main.cpp:335-360 onLog) парсит struct и публикует MQTT events с unitId."
+      - "Wire-форма — fixed-size binary struct. RP2040 заполняет поля и шлёт через sendLog (raw bytes transport)."
+      - "ESP32-сторона парсит struct и публикует MQTT events с unitId."
 
   Heartbeat:
     description: "Keep-alive MCU↔ESP32 + сетевой статус для UI."
@@ -1006,7 +993,7 @@ payloads:
       errorsSinceBoot:
         {
           type: uint16,
-          note: "RP2040 stub-шлёт 0 (uart_manager.cpp:347-348). Реальные счётчики ошибок ведутся на ESP32.",
+          note: "RP2040 stub-шлёт 0. Реальные счётчики ошибок ведутся на ESP32.",
         }
       cloudState:
         {
@@ -1042,7 +1029,7 @@ payloads:
         type: uint32
         unit: "unix epoch"
         optional: true
-        note: "В current code-paths producer'а нет: cloud claim callback (cloud_state_machine.cpp:209-226) экспонирует только pin+remainingSeconds; reference UART forwarder (DryerDevice.cpp:84-90) шлёт expiresAt=0. См. known_mismatches.claimstatus_expiresAt_no_producer."
+        note: "В current code-paths producer'а нет: cloud claim callback экспонирует только pin+remainingSeconds; reference UART forwarder шлёт expiresAt=0. См. known_mismatches.claimstatus_expiresAt_no_producer."
       remainingSeconds:
         {
           type: uint32,

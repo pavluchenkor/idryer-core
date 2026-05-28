@@ -265,8 +265,8 @@ static_assert(sizeof(UartWeightEntry) == 4, "UartWeightEntry must be 4 bytes (ya
 /// Entry-record для inline-массивов в payload'ах.
 struct UartProfileStage {
     uint16_t    temp;  ///< Wire-формат °C × 10
-    uint16_t    ramp;  ///< wire-level семантика — секунды; комментарий 'minutes' в lib/idryer-core/src/uart
-    uint16_t    hold;  ///< wire-level семантика — секунды; см
+    uint16_t    ramp;  ///< wire-level семантика — секунды (комментарий 'minutes' в коде устарел)
+    uint16_t    hold;  ///< wire-level семантика — секунды
 } __attribute__((packed));
 static_assert(sizeof(UartProfileStage) == 6, "UartProfileStage must be 6 bytes (yaml-computed)");
 
@@ -397,7 +397,7 @@ static_assert(sizeof(UartLogPayload) == 163, "UartLogPayload must be 163 bytes (
 struct UartHeartbeatPayload {
     uint32_t    uptimeSeconds;
     int16_t    wifiRssiDbm;  ///< RP2040 шлёт всегда 0 (нет WiFi у MCU)
-    uint16_t    errorsSinceBoot;  ///< RP2040 stub-шлёт 0 (uart_manager
+    uint16_t    errorsSinceBoot;  ///< RP2040 stub-шлёт 0
     UartLinkCloudState cloudState;  ///< Имеет смысл только в направлении ESP32→RP2040 (статус облака)
 } __attribute__((packed));
 static_assert(sizeof(UartHeartbeatPayload) == 9, "UartHeartbeatPayload must be 9 bytes (yaml-computed)");
@@ -421,7 +421,7 @@ static_assert(sizeof(UartErrorPayload) == 4, "UartErrorPayload must be 4 bytes (
 struct UartClaimStatusPayload {
     UartClaimStatus status;
     char    pin[9];
-    uint32_t    expiresAt;  ///< В current code-paths producer'а нет: cloud claim callback (cloud_state_machine
+    uint32_t    expiresAt;  ///< В current code-paths producer'а нет: cloud claim callback экспонирует только pin
     uint32_t    remainingSeconds;  ///< Основное поле для UI
 } __attribute__((packed));
 static_assert(sizeof(UartClaimStatusPayload) == 18, "UartClaimStatusPayload must be 18 bytes (yaml-computed)");
