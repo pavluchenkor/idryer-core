@@ -40,7 +40,6 @@
     },
     "canonical_roles":    { "type": "object", "additionalProperties": true },
     "widgets":            { "type": "object", "additionalProperties": true },
-    "migration_status":   { "type": "object", "additionalProperties": true },
     "source_of_truth": { "$ref": "#/$defs/SourceOfTruth" },
     "rules": { "$ref": "#/$defs/Rules" },
     "uart_kind_ranges": { "$ref": "#/$defs/UartKindRanges" },
@@ -79,10 +78,6 @@
     "known_mismatches": {
       "type": "array",
       "items": { "$ref": "#/$defs/Mismatch" }
-    },
-    "todo": {
-      "type": "array",
-      "items": { "type": "string" }
     }
   },
 

@@ -223,46 +223,10 @@ rules:
         - "UART команды от RP2040 — RP2040 синхронизируется через ESP, не наоборот."
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Статус миграции продуктов на menu_protocol_v1
-# Согласно ___capabilities_and_menu_as_protocol.md §10.6
+# Статус миграции на menu_protocol_v1: iHeater Link и Storage Link — мигрированы
+# (set + invoke, canonical roles). Dryer (iDryer V3) остаётся на legacy-топиках
+# commands/drying|storage|profile|stop и т.п. — см. messages с этими suffix.
 # ─────────────────────────────────────────────────────────────────────────────
-migration_status:
-  iheater_link:
-    target:  menu_protocol_v1
-    status:  done
-    notes:
-      - "Все запуск/остановка нагрева идут через commands/invoke (heat.start / heat.stop, форма B)."
-      - "Legacy handlers commands/drying / commands/storage / commands/stop удалены из прошивки (см. src/main.cpp)."
-      - "Backend (sessions.service.ts::completeSession) для IHEATER_LINK шлёт invoke heat.stop, для прочих deviceType — legacy commands/stop."
-
-  storage_link:
-    target:  menu_protocol_v1
-    status:  in_progress
-    actions:
-      - "Добавить r: в menu.yaml для led_count, brightness, animation"
-      - "Добавить пункт act с r: led.pulse, widget: LedPulse"
-      - "Backend mapDeviceType: добавить case 'storage_link'"
-
-  dryer:
-    target:  menu_protocol_v1
-    status:  deferred
-    note: |
-      Сушилка работает в проде. Миграция отдельной задачей после стабилизации
-      iHeater Link и Storage Link на новой модели. До этого момента сушилка
-      продолжает использовать legacy-формат (top-level топики команд:
-      commands/drying, commands/storage, commands/profile, commands/read_rfid,
-      commands/write_rfid и т.п.) и старые messages-секции этого файла.
-    legacy_format_kept:
-      - "commands/drying"
-      - "commands/storage"
-      - "commands/profile"
-      - "commands/stop"
-      - "commands/find"
-      - "commands/clear_errors"
-      - "commands/read_rfid"
-      - "commands/write_rfid"
-      - "weights"
-      - "rfid"
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Канонические роли — закрытый словарь menu_protocol_v1
@@ -3275,9 +3239,6 @@ known_mismatches:
 # ─────────────────────────────────────────────────────────────────────────────
 # 7. TODO — что не удалось верифицировать автоматически
 # ─────────────────────────────────────────────────────────────────────────────
-todo:
-  - "Расширить invoke_actions по продуктам (iHeater-link, idryer-link, RP2040) — собрать что каждый реально обрабатывает в своём CommandHandler."
-
 # ─────────────────────────────────────────────────────────────────────────────
 # 8. HA-PUBLISHER топики (publishing к локальному HA-broker)
 # ─────────────────────────────────────────────────────────────────────────────
