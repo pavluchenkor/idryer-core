@@ -236,9 +236,11 @@ canonical_roles:
   # Каждая роль описывает:
   #   type        — тип данных (float/uint/bool/action)
   #   unit        — единица измерения (опционально, для UI)
-  #   widget      — какой UI-компонент рисовать на портале
-  #                   стандартные: slider | number | toggle | select | button | hidden
-  #                   хардкод: ProfileEditor | RfidWriter | LedPulse | HeaterControl
+  #   widget      — примитив рендера пункта МЕНЮ на портале/в приложении:
+  #                   slider | number | toggle | select | button | hidden
+  #                   (composite-виджеты отменены — виджет = карточка устройства
+  #                    на дашборде, продуктовый React-компонент, не часть меню;
+  #                    RfidWriter — единственный оставшийся legacy для RFID-потока)
   #   labels      — переводы названия для портала (по коду языка ISO 639-1)
   #                   портал показывает labels[currentLang], fallback → en
   #                   если роль неизвестна — портал берёт n: от устройства
@@ -291,7 +293,7 @@ canonical_roles:
 
   profile.start:
     type: action
-    widget: ProfileEditor
+    widget: button
     args_schema: { stages: array_of_stages }
     labels: { ru: "Профиль сушки", en: "Drying profile" }
 
@@ -332,7 +334,7 @@ canonical_roles:
 
   iheater.heat_start:
     type: action
-    widget: HeaterControl
+    widget: button
     args_schema: { tempC: float, durationMin: uint }
     labels: { ru: "Нагрев", en: "Heating" }
 
@@ -359,7 +361,7 @@ canonical_roles:
 
   led.pulse:
     type: action
-    widget: LedPulse
+    widget: button
     args_schema: { ledIndex: int, color: rgb, durationMs: uint }
     labels: { ru: "Подсветка", en: "LED pulse" }
 
