@@ -32,13 +32,9 @@
 - ✅ Универсальный progress: `status.units[i].progressPercent` в контракте + прошивка iHeater (`enrichStatus` hook + триггер ∆≥1%) + backend broadcast + frontend (`ActiveSessionBlock.progressPercent`, HeaterCard live state). Bambu mc_percent доходит до карточки.
 - ✅ Backend убрал дефолт `targetDurationMins=240` — бессрочный нагрев теперь хранится как `null`, UI скрывает прогресс-бар и строку времени вместо «remaining 4h 0m».
 
-### Долги (в порядке приоритета)
+### Открытые долги
 
-1. **Legacy команды iHeater** (`commands/drying` и пр.) — нельзя удалить пока IDryerCard используется на портале для не-iHeater устройств.
-2. **`expectedUid` валидация в write_rfid** — требует доработки UART-протокола + iDryerControllerV2.
-3. **Вынести `menu_commands.{h,cpp}` в idryer-core** — блокер: multiple-definition в idryer-link. Решается `src_filter` в platformio.ini или унификацией. Подробности — в `iHeater-link/___!!!cotrect_report.md`.
-4. **Storage_humidity_dropped** + другие interop-баги — см. `mqtt_contract.yaml → known_mismatches`.
-5. **`s_dryingDeadlineMs`** — мелкий рефакторинг таймера (не блокер).
+Полный список (с группировкой по архитектурным / interop / RFID / мелким) — в [iHeater-link/___!!!cotrect_report.md](../../iHeater-link/___!!!cotrect_report.md). Этот документ — концептуальная база, не реестр задач.
 
 ### Что в этом документе **устарело** (не читать как руководство к действию)
 
