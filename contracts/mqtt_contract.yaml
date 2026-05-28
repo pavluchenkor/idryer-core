@@ -111,42 +111,16 @@ device_profiles:
 # Источники правды
 # ─────────────────────────────────────────────────────────────────────────────
 source_of_truth:
-  code:
-    # idryer-core (актуальная SDK на ESP32)
-    - "lib/idryer-core/src/mqtt/idryer_topics.h"
-    - "lib/idryer-core/src/mqtt/mqtt_client.h"
-    - "lib/idryer-core/src/mqtt/mqtt_client.cpp"
-    - "lib/idryer-core/src/uart/uart_protocol.h"
-    - "lib/idryer-core/src/uart/uart_bridge.h"
-    - "lib/idryer-core/src/uart/uart_bridge.cpp"
-    - "lib/idryer-core/src/runtime/idryer_runtime.cpp"
-    - "lib/idryer-core/src/cloud/action_dispatcher.h"
-    - "lib/idryer-core/src/integrations/common/link_integrations_manager.h"
-    - "lib/idryer-core/src/integrations/common/link_integrations_types.h"
-    # iHeater-link (текущий ESP32-bridge для iHeater)
-    - "iHeater-link/src/heater/MenuBridge.cpp"
-    - "iHeater-link/src/heater/telemetry.cpp"
-    - "iHeater-link/src/heater/HeaterProfile.cpp"
-    # idryer-link (ESP32-bridge для Storage / Dryer; использует idryer-core SDK)
-    - "idryer-link/src/main.cpp"
-    # iDryerControllerV2 (контроллер; UART-сторона)
-    - "iDryerControllerV2/src/uart/uart_manager.h"
-    - "iDryerControllerV2/src/uart/uart_manager.cpp"
-    # Portal (NestJS)
-    - "iDryerPortal/backend/src/mqtt-telemetry/mqtt-client.service.ts"
-    - "iDryerPortal/backend/src/mqtt-telemetry/mqtt-telemetry.service.ts"
-    - "iDryerPortal/backend/src/mqtt-telemetry/mqtt-api.types.ts"
-    - "iDryerPortal/backend/src/mqtt-telemetry/handlers/*"
-    - "iDryerPortal/backend/src/link-integrations/link-integrations.service.ts"
-    - "iDryerPortal/backend/src/link-integrations/bambu-apply.service.ts"
-    - "iDryerPortal/backend/src/link-integrations/handlers/integrations-status.handler.ts"
-    - "iDryerPortal/backend/src/devices/devices.service.ts"
-    - "iDryerPortal/backend/src/gateway/events.gateway.ts"
-    - "iDryerPortal/backend/src/rfid/write-orchestrator.service.ts"
-  docs:
-    - "contracts/portal_backend_status.md"
-    - "contracts/invoke_migration.md"
-    - "contracts/mismatches.md"
+  # Контракт — единственный источник правды о протоколе. Реализации живут в
+  # репозиториях ниже; конкретные файлы/строки в контракте НЕ фиксируются
+  # (устаревают при рефакторинге) — ищите grep'ом по имени топика/поля.
+  repositories:
+    idryer-core:        "SDK на ESP32 — MQTT/UART транспорт, action dispatch, интеграции, header-only menu_commands"
+    iHeater-link:       "Прошивка iHeater (single-chip ESP32) — нагрев, Bambu/Moonraker"
+    iDryer-Storage:     "Прошивка Storage (single-chip ESP32) — LED, SHT-сенсоры"
+    idryer-link:        "ESP32-мост для Dryer/Storage поверх UART к контроллеру"
+    iDryerControllerV2: "RP2040-контроллер сушилки — UART-сторона, владелец меню"
+    iDryerPortal:       "Бэкенд (NestJS) + фронтенд — потребитель MQTT, карточки устройств"
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Общие правила
@@ -163,7 +137,6 @@ rules:
       portal-frontend, MQTT topic, БД Device.serialNumber, JSON-payload поля `serial`/`serialNumber`)
       хранят и сравнивают строку как есть — БЕЗ нормализации регистра.
     example: "DEVICE_ACEBE6490534"
-    source_ref: "lib/idryer-core/src/platform/arduino/ArduinoCredentialStore.cpp:75"
   timestamp_format: "YYYY-MM-DDTHH:MM:SSZ"
   lwt_topic: "idryer/{serial}/offline"
   max_payload_bytes: 16384
@@ -217,11 +190,6 @@ rules:
       - "status.target.temperature — здесь 0 = реальное значение (нагрев выключен)"
       - "heaterPower (int 0..100) — здесь 0 = реальное значение"
       - "fanStatus (bool) — здесь false = реальное значение"
-    source_ref:
-      sdk: "lib/idryer-core/src/iDryer.cpp:577-594 (publishTelemetry, isnan-check)"
-      example_storage: "iDryer-Storage/src/main.cpp:371-377 (NAN init), :394-407 (NAN on read fail)"
-      frontend: "iDryerPortal/frontend-v2/src/components/device/TelemetryRow.tsx:23 (filter cells)"
-
   timestamp_convention:
     description: |
       Поле `timestamp` (ISO 8601 UTC, формат `YYYY-MM-DDTHH:MM:SS.sssZ` или `YYYY-MM-DDTHH:MM:SSZ`)
@@ -702,7 +670,6 @@ enums:
   # Конвертация: integrationStateToString(), activeIntegrationToString() в link_integrations_types.cpp
   IntegrationState:
     cpp_enum:
-      source_ref: "lib/idryer-core/src/integrations/common/link_integrations_types.h:131-139"
       values:
         - Disabled # эта интеграция не активная
         - Idle # активна и сконфигурирована, но ещё не подключена
@@ -711,7 +678,6 @@ enums:
         - ConfigMissing # активна, но обязательные поля пустые/невалидные
         - Error # ошибка подключения; см. lastError в integrations/status
     json_string_form:
-      source_ref: "lib/idryer-core/src/integrations/common/link_integrations_types.cpp:34-45 (integrationStateToString)"
       mapping:
         Disabled: "disabled"
         Idle: "idle"
@@ -722,14 +688,12 @@ enums:
 
   ActiveIntegration:
     cpp_enum:
-      source_ref: "lib/idryer-core/src/integrations/common/link_integrations_types.h:23-29"
       values:
         None: 0
         Ha: 1
         Bambu: 2
         Moonraker: 3
     json_string_form:
-      source_ref: "lib/idryer-core/src/integrations/common/link_integrations_types.cpp:12-31 (activeIntegrationToString)"
       mapping:
         None: "none"
         Ha: "ha"
@@ -753,7 +717,6 @@ enums:
 payloads:
   UartUnitConfig:
     description: "Конфигурация одного юнита внутри Hello.units[4]. Fixed-size 12 bytes, packed."
-    source_ref: "uart_protocol.h:177-183 (UartUnitConfig, __attribute__((packed)), 12 bytes)"
     fields:
       unitId: { type: uint8, note: "Индекс юнита (0..3)." }
       _pad1:
@@ -779,7 +742,7 @@ payloads:
 
   Hello:
     description: "Идентификация контроллера для bridge-ESP32; включает units[] и capabilities."
-    source_ref: "uart_protocol.h:UartHelloPayload (86 bytes, packed; static_assert на размер существует)"
+    cpp_name: UartHelloPayload
     fields:
       role: { type: enum, ref: UartRole }
       deviceType: { type: enum, ref: UartDeviceType }
@@ -803,7 +766,7 @@ payloads:
 
   HelloAck:
     description: "ESP32-сторона возвращает IP/SSID для отображения на экране MCU."
-    source_ref: "uart_protocol.h:UartHelloAckPayload"
+    cpp_name: UartHelloAckPayload
     fields:
       ipAddress:
         { type: uint32, encoding: "network-byte order, 0 если нет WiFi" }
@@ -811,7 +774,7 @@ payloads:
 
   Telemetry:
     description: "Периодические показания датчиков камер."
-    source_ref: "uart_protocol.h:UartTelemetryPayload (29 bytes packed = 1 byte count + 4 × 7 bytes UartTelemetryEntry)"
+    cpp_name: UartTelemetryPayload
     fields:
       count: { type: uint8, range: "0..4" }
       units:
@@ -825,7 +788,7 @@ payloads:
 
   Status:
     description: "Полное состояние юнитов: режим, цели, прогресс, этапы профиля."
-    source_ref: "uart_protocol.h:UartStatusPayload (поля перечислены в порядке wire-layout)"
+    cpp_name: UartStatusPayload
     fields:
       count: { type: uint8, range: "0..4" }
       units:
@@ -858,7 +821,7 @@ payloads:
 
   Weights:
     description: "Показания весов (до 4 датчиков)."
-    source_ref: "uart_protocol.h:UartWeightsPayload"
+    cpp_name: UartWeightsPayload
     fields:
       count:
         {
@@ -928,7 +891,7 @@ payloads:
 
   Command:
     description: "Универсальная команда с MQTT через ESP32 на контроллер."
-    source_ref: "uart_protocol.h:UartCmdPayload"
+    cpp_name: UartCmdPayload
     fields:
       command: { type: enum, ref: UartCmdCode }
       targetState:
@@ -955,7 +918,7 @@ payloads:
 
   Profile:
     description: "Многоэтапный профиль сушки (до 10 стадий)."
-    source_ref: "uart_protocol.h:UartProfilePayload"
+    cpp_name: UartProfilePayload
     fields:
       unitId: { type: uint8 }
       totalStages: { type: uint8, range: "1..10" }
@@ -986,9 +949,6 @@ payloads:
     cpp_name: UartConfigPayload
     description: "Целевые параметры одного юнита (legacy ConfigPush; не фрагментированный). LEGACY/BROKEN — не использовать."
     status: legacy_broken
-    source_ref:
-      struct: "uart_protocol.h:241-245 (UartConfigPayload, 8 bytes)"
-      broken_consumer: "iDryerControllerV2/src/uart/uart_manager.cpp:907-915,921-927 — handleUartConfig копирует binary payload в chunkPayload.data и зовёт deserializeJson() на бинарных байтах. Binary struct НЕ парсится."
     fields:
       targetTemperatureC10: { type: int16, unit: "°C × 10" }
       targetHumidityPct: { type: uint16, unit: "%RH" }
@@ -1001,7 +961,7 @@ payloads:
     description: |
       Фрагмент полного JSON-конфига меню (6-байтный заголовок + до 194 байт данных
       в одном фрейме). Сборка по transferId; финальный фрейм имеет UART_FLAG_LAST_FRAGMENT.
-    source_ref: "uart_protocol.h:UartConfigChunkPayload (header = UartConfigChunkHeader, 6 bytes)"
+    cpp_name: UartConfigChunkPayload
     fields:
       transferId: { type: uint16 }
       totalSize: { type: uint16 }
@@ -1011,7 +971,6 @@ payloads:
   LogPayload:
     cpp_name: UartLogPayload
     description: "Структурированное лог-сообщение от MCU. Fixed-size binary struct (legacy DryerUart::LogPayload)."
-    source_ref: "idryer-link/lib/idryer-protocol/src/uart/uart_protocol.h:301-309"
     fields:
       severity:
         {
@@ -1036,7 +995,7 @@ payloads:
 
   Heartbeat:
     description: "Keep-alive MCU↔ESP32 + сетевой статус для UI."
-    source_ref: "uart_protocol.h:UartHeartbeatPayload"
+    cpp_name: UartHeartbeatPayload
     fields:
       uptimeSeconds: { type: uint32 }
       wifiRssiDbm:
@@ -1060,14 +1019,14 @@ payloads:
 
   Ack:
     description: "Подтверждение принятого фрейма."
-    source_ref: "uart_protocol.h:UartAckPayload"
+    cpp_name: UartAckPayload
     fields:
       ackSequence: { type: uint8 }
       status: { type: enum, ref: UartErrCode }
 
   Error:
     description: "Сообщение об ошибке протокола (CRC, sequence, busy и т.п.)."
-    source_ref: "uart_protocol.h:UartErrorPayload"
+    cpp_name: UartErrorPayload
     fields:
       code: { type: enum, ref: UartErrCode }
       lastSequence: { type: uint8 }
@@ -1075,7 +1034,7 @@ payloads:
 
   ClaimStatus:
     description: "Статус процесса привязки устройства (PIN, оставшееся время)."
-    source_ref: "uart_protocol.h:UartClaimStatusPayload"
+    cpp_name: UartClaimStatusPayload
     fields:
       status: { type: enum, ref: UartClaimStatus }
       pin: { type: "char[9]" }
@@ -1092,14 +1051,14 @@ payloads:
 
   ClaimComplete:
     description: "Финальный результат claiming."
-    source_ref: "uart_protocol.h:UartClaimCompletePayload"
+    cpp_name: UartClaimCompletePayload
     fields:
       success: { type: uint8, encoding: "0/1" }
       deviceId: { type: "char[37]" }
 
   WsEnable:
     description: "Включить/выключить локальный WS-сервер. sizeof(UartWsEnablePayload) == 4."
-    source_ref: "uart_protocol.h:UartWsEnablePayload (lines 342-346)"
+    cpp_name: UartWsEnablePayload
     fields:
       enable: { type: uint8, encoding: "0/1" }
       reserved:
@@ -1111,7 +1070,7 @@ payloads:
 
   WsStatus:
     description: "Статус локального WS-сервера для отображения на экране. sizeof(UartWsStatusPayload) == 6."
-    source_ref: "uart_protocol.h:UartWsStatusPayload (lines 354-360)"
+    cpp_name: UartWsStatusPayload
     fields:
       state: { type: enum, ref: UartWsState }
       pin: { type: uint16 }
@@ -1136,8 +1095,6 @@ messages:
       mqtt:
         suffix: info
         full_topic: "idryer/{serial}/info"
-        producer: "IProfile::buildInfoJson() или TelemetryPublisher::publishInfo()"
-        consumer: "portal/backend (info.handler.ts)"
         qos: 0
         retained: true
         interval: "once after Online; republish on commands/ping"
@@ -1198,7 +1155,7 @@ messages:
                 capabilities:
                   {
                     type: uint32,
-                    note: "битовая маска UnitCaps; в iHeater-link реальный код пишет capabilities как nested-object под units[0] (HeaterProfile.cpp:67-73), потребитель должен принимать оба варианта",
+                    note: "битовая маска UnitCaps; iHeater-link пишет capabilities как nested-object под units[0] — потребитель должен принимать оба варианта",
                   }
                 scales:
                   {
@@ -1215,7 +1172,6 @@ messages:
                 mcuSerial: { type: string, optional: true }
                 deviceType: { type: string }
                 timestamp: { type: ISO8601 }
-              source_ref: "iHeater-link/src/heater/HeaterProfile.cpp:52-81"
       uart:
         kind: Hello
         kind_id: 0x01
@@ -1224,7 +1180,6 @@ messages:
         ack: true
         fragmented: false
         direction_uart: rp2040_to_esp
-        source_ref: "uart_bridge.cpp:sendHello / uart_protocol.h:80"
     status: implemented
 
   - name: telemetry
@@ -1234,11 +1189,9 @@ messages:
       mqtt:
         suffix: telemetry
         full_topic: "idryer/{serial}/telemetry"
-        producer: "MqttClient::publishTelemetry() / TelemetryPublisher::publishTelemetry()"
-        consumer: "portal/backend (telemetry.handler.ts)"
         qos: 0
         retained: false
-        interval: "product-defined; default 5000 ms (5 сек). Источники: idryer-core IDRYER_INTERVAL_TELEMETRY_MS=5000 (idryer_topics.h:45); iHeater-link kIntervalMs=5000 (telemetry.cpp:20)."
+        interval: "product-defined; default 5000 ms (5 сек)."
         payload:
           json_shape:
             "units[i].unitId": 'formatUnitId(entry.unitId) → "U1".."U4"'
@@ -1252,7 +1205,7 @@ messages:
           product_variants:
             iheater_link:
               extra_top_level_fields:
-                deviceType: { type: string, source: "src/heater/telemetry.cpp" }
+                deviceType: { type: string }
                 active:
                   {
                     type: string,
@@ -1276,7 +1229,6 @@ messages:
                   { type: int, note: "0 или 100 (heating ? 100 : 0)" }
                 "units[0].fanStatus":
                   { type: bool, note: "всегда false на iheater_link" }
-              source_ref: "iHeater-link/src/heater/telemetry.cpp:66-83"
               notes:
                 - "iHeater Link публикует эти поля сверх стандартной units[]-схемы."
                 - "Они НЕ часть общего контракта — потребитель должен ожидать их только для deviceType=iheater_link."
@@ -1289,7 +1241,6 @@ messages:
         direction_uart: rp2040_to_esp
         ack_kind: TelemetryAck
         ack_kind_id: 0x11
-        source_ref: "uart_protocol.h:82, uart_manager.h:sendUartTelemetry; iDryerControllerV2/src/uart/uart_manager.cpp:267-284 (sendUartTelemetry → uartBridge.sendTelemetry(payload, true))"
     status: implemented
 
   - name: status
@@ -1299,8 +1250,6 @@ messages:
       mqtt:
         suffix: status
         full_topic: "idryer/{serial}/status"
-        producer: "MqttClient::publishStatus() / TelemetryPublisher::publishStatus()"
-        consumer: "portal/backend (status.handler.ts)"
         qos: 0
         retained: true
         interval: "on change"
@@ -1310,7 +1259,7 @@ messages:
             "rssi": "WiFi.RSSI() (dBm) — диагностический, optional"
             "units[i].unitId": "U1..U4"
             "units[i].mode": "IDLE | DRYING | STORAGE | PROFILE | FAULT | UNKNOWN"
-            "units[i].sessionNum": "uint > 0 для активных режимов (DRYING/STORAGE/PROFILE); 0/omit для IDLE/FAULT. ОБЯЗАТЕЛЬНО для активных — backend status.handler.ts:69 пропускает status без sessionNum."
+            "units[i].sessionNum": "uint > 0 для активных режимов (DRYING/STORAGE/PROFILE); 0/omit для IDLE/FAULT. ОБЯЗАТЕЛЬНО для активных — backend дропает status без sessionNum (silent failure)."
             "units[i].target.temperature": "°C (float)"
             "units[i].target.humidity": "%RH (если присутствует)"
             "units[i].target.duration": "minutes (соответствует Device.targetDurationMins)"
@@ -1323,15 +1272,9 @@ messages:
             "units[i].stageElapsed": "только PROFILE"
             "units[i].stageRemaining": "только PROFILE"
             "units[i].stagePhase": "RAMP | HOLD (только PROFILE)"
-          source_ref:
-            backend_validator: "iDryerPortal/backend/src/mqtt-telemetry/handlers/status.handler.ts:43-111 (handleUnitStatus + sessionNum gate)"
-            backend_types: "iDryerPortal/backend/src/mqtt-telemetry/mqtt-api.types.ts:150-173 (StatusPayload)"
-            facade_publisher: "lib/idryer-core/src/iDryer.cpp::Link::publishStatusNow (iDryer + iHeater Link)"
-            legacy_dryer: "idryer-link/lib/idryer-protocol/src/cloud/telemetry_publisher.cpp::publishStatus"
           notes:
             - "Портал ожидает units[] обязательно."
-            - "Унифицировано: Dryer и iHeater Link шлют status в одном shape (с 2026-05). Раньше iHeater Link использовал top-level outputMode/targetTempC в telemetry — теперь это deprecated, через status."
-            - "ВАЖНО: backend status.handler.ts:69 — без sessionNum>0 status для DRYING/STORAGE/PROFILE дропается без broadcast. Active-mode без sessionNum = silent failure на портале."
+            - "Dryer и iHeater Link шлют status в одном shape."
       uart:
         kind: Status
         kind_id: 0x13
@@ -1339,7 +1282,6 @@ messages:
         ack: false
         fragmented: false
         direction_uart: rp2040_to_esp
-        source_ref: "uart_protocol.h:85"
     status: implemented
 
   - name: weights
@@ -1349,13 +1291,10 @@ messages:
       mqtt:
         suffix: weights
         full_topic: "idryer/{serial}/weights"
-        producer: "TelemetryPublisher::publishWeights() (idryer-link)"
-        consumer: "portal/backend (weights.handler.ts)"
         qos: 0
         retained: false
         interval: "~10s, on change"
         payload:
-          # Точный shape проверен по idryer-link/lib/idryer-protocol/src/cloud/telemetry_publisher.cpp:160-181
           json_shape:
             "weights[i].sensorId": '"W1".."W4" (formatSensorId)'
             "weights[i].value": "float, граммы (entry.weightGramsC10 / 10.0f)"
@@ -1375,7 +1314,6 @@ messages:
         ack: false
         fragmented: false
         direction_uart: rp2040_to_esp
-        source_ref: "uart_protocol.h:84, uart_manager.h:sendUartWeights"
     status: implemented_device_only
     notes:
       - "На стороне idryer-core MqttClient API нет publishWeights — только legacy idryer-link публикует weights."
@@ -1447,7 +1385,6 @@ messages:
         fragmented: true
         direction_uart: rp2040_to_esp
         flow_control: "stop-and-wait ACK на каждый фрагмент"
-        source_ref: "uart_protocol.h:87"
     status: implemented_device_only
 
   - name: rfid_write_data
@@ -1479,7 +1416,6 @@ messages:
                 type: string,
                 note: "header32 etc — мапится в numeric verify mode",
               }
-            source_ref: "idryer-link/lib/idryer-protocol/src/cloud/command_handler.cpp:415-512"
           notes:
             - "INTEROP-BREAK: Portal payload и legacy consumer несовместимы — см. known_mismatches.write_rfid_payload_mismatch."
             - "iHeater-link явно игнорирует commands/write_rfid (src/heater/command_routing.cpp:206-215)."
@@ -1505,15 +1441,13 @@ messages:
       mqtt:
         suffix: config
         full_topic: "idryer/{serial}/config"
-        producer: "MqttClient::publishConfig() / publishConfigRaw() (chunked > 16 KB)"
-        consumer: "portal/backend (config.handler.ts)"
         qos: 0
         retained: false
         interval: "on request (commands/get_config или invoke device.getConfig)"
         payload:
           shape_full:
-            v: "uint — revision номер меню (incrementing). REQUIRED — портал валидирует наличие в config.handler.ts:41."
-            menu: "object — продукт-специфичная структура меню (например, MenuBridge::publishFullConfig). Источник: menu_commands.cpp:254 в iHeater-link."
+            v: "uint — revision номер меню (incrementing). REQUIRED — портал валидирует наличие."
+            menu: "object — продукт-специфичная структура меню (генерируется menu_buildFullJson)."
             note: "Полный (нечанкованный) payload использует 'v', НЕ 'rev'. Поле 'rev' существует только в config_delta. Не путать!"
           shape_chunked:
             tid: "uint — transferId, общий для всех чанков одного transfer'а"
@@ -1523,9 +1457,9 @@ messages:
             d: "string/object — payload фрагмент (base64 либо часть JSON)"
             note: "Chunked используется когда полный JSON > MQTT_CONFIG_CHUNK_SIZE (16000 B). publishConfigRaw собирает чанки автоматически."
           notes:
-            - "Schema продукт-зависимая (например, MenuBridge::publishFullConfig в iHeater-link)."
+            - "Schema продукт-зависимая (генерируется прошивкой при публикации меню)."
             - "publishConfigRaw поддерживает chunked transmission > MQTT_CONFIG_CHUNK_SIZE (16000 B)."
-            - "Portal config.handler.ts:38-43 распознаёт обе формы: chunked (по наличию 'tid') vs full (по наличию 'v' и 'menu')."
+            - "Portal распознаёт обе формы: chunked (по наличию 'tid') vs full (по наличию 'v' и 'menu')."
       uart:
         kind: ConfigPush
         kind_id: 0x30
@@ -1533,7 +1467,6 @@ messages:
         ack: true
         fragmented: true
         direction_uart: bidirectional
-        source_ref: "uart_protocol.h:91 (ConfigPush=0x30), uart_bridge.h:sendConfigPushChunk"
         notes:
           - "Используется и для commands/set, и для commands/invoke (передача JSON c MCU и обратно)."
     status: implemented
@@ -1545,8 +1478,6 @@ messages:
       mqtt:
         suffix: config/delta
         full_topic: "idryer/{serial}/config/delta"
-        producer: "MqttClient::publishConfigDelta()"
-        consumer: "portal/backend (config-delta.handler.ts)"
         qos: 0
         retained: false
         interval: "on change"
@@ -1565,7 +1496,6 @@ messages:
         ack: true
         fragmented: true
         direction_uart: bidirectional
-        source_ref: "uart_manager.h:sendConfigDelta"
         notes:
           - "На UART delta едет тем же ConfigPush kind; различение — по shape JSON внутри."
     status: implemented
@@ -1577,8 +1507,6 @@ messages:
       mqtt:
         suffix: commands/drying
         full_topic: "idryer/{serial}/commands/drying"
-        producer: "portal/backend (mqtt-telemetry.service / events.gateway)"
-        consumer: "device CommandHandler"
         qos: 1
         retained: false
         payload:
@@ -1610,7 +1538,6 @@ messages:
         cmd_code: Start
         cmd_code_id: 0x01
         cmd_targetState: "Drying (1)"
-        source_ref: "uart_protocol.h:Command(0x20), command_handler.cpp:Start"
     status: implemented
 
   - name: command_storage
@@ -1620,8 +1547,6 @@ messages:
       mqtt:
         suffix: commands/storage
         full_topic: "idryer/{serial}/commands/storage"
-        producer: "portal/backend"
-        consumer: "device CommandHandler"
         qos: 1
         retained: false
         payload:
@@ -1644,9 +1569,8 @@ messages:
             params: {}
             timestamp: "2026-04-28T12:00:00Z"
           notes:
-            - "Поле humidity в payload НЕ принимается."
-            - "Поле priority (по влажности vs по температуре) в payload НЕ принимается."
-            - "TODO: canonical behavior должен читать humidity/priority из menu (NVS) и менять их через commands/set, но current RP2040 UART path это ещё не делает. См. known_mismatches.storage_humidity_dropped."
+            - "Поле humidity в payload НЕ принимается; priority тоже не принимается."
+            - "humidity/priority устройство читает из menu (NVS) — задавайте их заранее через commands/set."
       uart:
         kind: Command
         kind_id: 0x20
@@ -1658,12 +1582,9 @@ messages:
         cmd_code: Start
         cmd_code_id: 0x01
         cmd_targetState: "Storage (2)"
-        source_ref: "command_handler.cpp:197 (Start with Storage)"
-        rp2040_handler: "iDryerControllerV2/src/uart/uart_manager.cpp:466-472 — CURRENT: берёт только tempC и зовёт requestMode(Storage, tempC, 9999); humidity/priority пока игнорируются"
-    status: design_or_partial
+    status: implemented
     notes:
-      - "iHeater Link этот топик не обрабатывает — handler удалён из прошивки после миграции на menu_protocol_v1. Storage-режим у iHeater отсутствует."
-      - "TODO: привести UART path к локальному start_storage, чтобы humidity/priority читались из menu. См. known_mismatches.storage_humidity_dropped."
+      - "iHeater Link этот топик не обрабатывает — Storage-режима у iHeater нет."
 
   - name: command_profile
     direction: backend_to_device
@@ -1672,8 +1593,6 @@ messages:
       mqtt:
         suffix: commands/profile
         full_topic: "idryer/{serial}/commands/profile"
-        producer: "portal/backend"
-        consumer: "device CommandHandler"
         qos: 1
         retained: false
         payload:
@@ -1710,7 +1629,6 @@ messages:
         ack_kind_id: 0x21
         direction_uart: esp_to_rp2040
         size_bytes: 64
-        source_ref: "uart_bridge.h:sendProfileCommand"
         notes:
           - "Тот же UART kind 0x20, но payload — UartProfilePayload (64 B), не UartCmdPayload (13 B)."
     status: implemented
@@ -1724,8 +1642,6 @@ messages:
       mqtt:
         suffix: commands/stop
         full_topic: "idryer/{serial}/commands/stop"
-        producer: "portal/backend (mqtt-telemetry.service.ts:757-766 sendStopCommand — unitId required)"
-        consumer: "device CommandHandler"
         qos: 1
         retained: false
         payload:
@@ -1741,12 +1657,10 @@ messages:
         direction_uart: esp_to_rp2040
         cmd_code: Stop
         cmd_code_id: 0x02
-        source_ref: "command_handler.cpp:252 (handleStop в idryer-link)"
     status: implemented
     notes:
-      - "iHeater Link этот топик не обрабатывает — handler удалён после миграции на menu_protocol_v1. Backend (sessions.service.ts::completeSession) для IHEATER_LINK шлёт commands/invoke {action:'heat.stop'} вместо commands/stop."
-      - "0xFF=ALL не поддерживается RP2040 (uart_manager.cpp:447 reject); см. known_mismatches.broadcast_unit_id_unsupported (resolved_by_contract — Variant B)."
-      - "idryer-link bridge при отсутствии unitId ставит 0xFF defensive default (command_handler.cpp:267) — мёртвая ветка в production, портал всегда шлёт unitId."
+      - "iHeater Link этот топик не обрабатывает — backend для IHEATER_LINK шлёт commands/invoke {action:'heat.stop'}."
+      - "0xFF=ALL не поддерживается RP2040 (reject); broadcast не реализован — портал всегда шлёт конкретный unitId."
 
   - name: command_find
     direction: backend_to_device
@@ -1755,8 +1669,6 @@ messages:
       mqtt:
         suffix: commands/find
         full_topic: "idryer/{serial}/commands/find"
-        producer: "portal/backend (events.gateway: CommandType.FIND)"
-        consumer: "device CommandHandler"
         qos: 1
         retained: false
         payload:
@@ -1769,7 +1681,6 @@ messages:
         direction_uart: esp_to_rp2040
         cmd_code: Find
         cmd_code_id: 0x03
-        source_ref: "command_handler.cpp:284"
     status: implemented
     notes:
       - "На iHeater-link не поддерживается."
@@ -1781,15 +1692,13 @@ messages:
       mqtt:
         suffix: commands/get_config
         full_topic: "idryer/{serial}/commands/get_config"
-        producer: "portal/backend (devices.service.requestConfig)"
-        consumer: "device CommandHandler"
         qos: 1
         retained: false
         payload:
           # Реальное (то что портал шлёт сейчас):
           actual:
             example: { timestamp: "2026-04-28T12:00:00Z" }
-            note: "Portal devices.service.ts:1270-1272 — публикует ровно { timestamp }. Других полей не добавляет."
+            note: "Portal публикует ровно { timestamp }. Других полей не добавляет."
           # Theoretical (приняты прошивкой, но портал НЕ шлёт):
           theoretical_other_forms:
             note: "Прошивка примет также пустой {} или {unitId:'U1'} — handler не валидирует поля. Но portal-side ни одну из этих форм НЕ публикует. Не полагаться."
@@ -1801,12 +1710,11 @@ messages:
         direction_uart: esp_to_rp2040
         cmd_code: GetConfig
         cmd_code_id: 0x05
-        source_ref: "command_handler.cpp:369 (handleGetConfig)"
         notes:
           - "Ответ MCU отправляется как ConfigPush (0x30), потом ESP публикует его в MQTT config."
     status: implemented
     notes:
-      - "На iHeater-link перехватывается раньше — MenuBridge::publishFullConfig (без UART)."
+      - "На iHeater-link обрабатывается локально, без UART (прошивка публикует полное меню)."
       - "Также покрывается invoke action 'device.getConfig' (см. invoke_actions)."
 
   - name: command_set
@@ -1816,12 +1724,9 @@ messages:
       mqtt:
         suffix: commands/set
         full_topic: "idryer/{serial}/commands/set"
-        producer: "portal/backend (devices.service.updateDeviceSettings)"
-        consumer: "ActionDispatcher::handleSet или продуктовый CommandHandler"
         qos: 1
         retained: false
         payload:
-          # Каноническая форма от портала (см. devices.service.ts:1320-1340):
           canonical:
             cmd: { type: string, value: "set", required: true }
             id: { type: number, required: true, note: "id пункта меню" }
@@ -1849,9 +1754,9 @@ messages:
           # Альтернативная форма (используется ТОЛЬКО device-internal в iHeater-link self-loopback):
           device_internal_only:
             example: { bind: "moon_en", val: true }
-            note: "Эту форму генерирует iHeater-link сам себе в command_routing.cpp:188-191 (sync toggle меню после link_integration enabled). Portal эту форму НЕ публикует. Bridge handleSet (command_handler.cpp:305-339) поле 'bind' игнорирует — bind-форма не уходит в RP2040."
+            note: "Device-internal форма (iHeater-link синхронизирует toggle меню сам себе после смены интеграции). Portal её НЕ публикует; bridge поле 'bind' игнорирует — в RP2040 не уходит."
           notes:
-            - "iHeater-link/MenuBridge::applySetCommand принимает обе формы (id или bind), но portal шлёт только id-форму."
+            - "iHeater-link принимает обе формы (id или bind), но portal шлёт только id-форму."
             - "Поле 'timestamp' игнорируется handler'ом (legacy bridge), но портал его всегда добавляет."
       uart:
         kind: ConfigPush
@@ -1859,10 +1764,9 @@ messages:
         payload: ConfigChunk
         ack: true
         direction_uart: esp_to_rp2040
-        source_ref: "command_handler.cpp:set/invoke fragmented"
         notes:
           - "Для legacy dryer передаётся через ConfigPush JSON, не через CommandPayload."
-          - "Legacy idryer-link шлёт set/invoke через ConfigPush ОДНИМ фрагментом. Если JSON > CONFIG_CHUNK_DATA_SIZE — лог 'ConfigPush fragmentation not implemented', передача fail-ит. Источник: idryer-link/lib/idryer-protocol/src/cloud/command_handler.cpp:667-695."
+          - "Legacy idryer-link шлёт set/invoke через ConfigPush ОДНИМ фрагментом. Если JSON > CONFIG_CHUNK_DATA_SIZE — передача fail-ит (фрагментация не реализована)."
     status: implemented
 
   - name: command_read_rfid
@@ -1873,7 +1777,6 @@ messages:
         suffix: commands/read_rfid
         full_topic: "idryer/{serial}/commands/read_rfid"
         producer: "portal/backend rfid.handler.ts:333 (verify-after-write trigger) и write-orchestrator.service.ts:247"
-        consumer: "device CommandHandler"
         qos: 1
         retained: false
         payload:
@@ -1901,8 +1804,6 @@ messages:
       mqtt:
         suffix: commands/clear_errors
         full_topic: "idryer/{serial}/commands/clear_errors"
-        producer: "portal/backend (events.gateway: CommandType.CLEAR_ERRORS)"
-        consumer: "device CommandHandler"
         qos: 1
         retained: false
         payload:
@@ -1915,7 +1816,6 @@ messages:
         direction_uart: esp_to_rp2040
         cmd_code: ClearErrors
         cmd_code_id: 0x12
-        source_ref: "command_handler.cpp:519"
     status: implemented_device_only
     notes:
       - "iHeater-link явно игнорирует."
@@ -1971,12 +1871,10 @@ messages:
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 #
 # Архитектура:
-#   ActionDispatcher::handleInvoke (action_dispatcher.cpp:9-21) читает поле
 #   "action" из payload и вызывает зарегистрированный продуктом колбэк
 #   invokeHandler_. Если продукт не вызывал setInvokeHandler — все action'ы
 #   логируются как "unhandled".
 #
-#   Поверх этого IdryerRuntime::onCommand (idryer_runtime.cpp) перехватывает
 #   commandHandler_-колбэк (если зарегистрирован через setCommandHandler) ДО
 #   ActionDispatcher и сам решает, как разруливать commands/invoke.
 #
@@ -1984,7 +1882,6 @@ messages:
 #   - core: единственный встроенный action — device.getConfig (через
 #           default-ветку IdryerRuntime, когда commandHandler_ не задан).
 #   - iheater_link: принимает {action: "heat.start"|"heat.stop", args} в
-#                   onCommand("invoke") (main.cpp:330-344). Прочие action — fallback
 #                   в MenuBridge::applyInvokeCommand, который требует {id}.
 #   - idryer_link:  принимает {cmd:"invoke", id:<int>} и проксирует в RP2040
 #                   через ConfigPush; диспетчинг по action-name НЕ реализован.
@@ -2018,7 +1915,6 @@ invoke_actions:
           notes:
             - "Обрабатывается локально в ESP32 (IdryerRuntime), UART не задействован."
       status: implemented
-      source_ref: "lib/idryer-core/src/runtime/idryer_runtime.cpp:87 (handleInvoke 'device.getConfig')"
       notes:
         - "Перехватывается ДО ActionDispatcher: работает только если продукт НЕ зарегистрировал свой commandHandler через setCommandHandler."
         - "Портал в продакшене этот action не использует — он шлёт commands/get_config напрямую (devices.service.ts:1269). Действие фактически dead-code, но в SDK сохранено."
@@ -2242,7 +2138,6 @@ invoke_actions:
           ack: true
           direction_uart: esp_to_rp2040
       status: implemented
-      source_ref: "idryer-link/lib/idryer-protocol/src/cloud/command_handler.cpp:341-367 (CommandHandler::handleInvoke)"
       notes:
         - "Это id-based-механизм, а не action-name. ESP32 не имеет реестра имён."
         - "Список доступных id определяется menu_v2.yaml на RP2040 (см. секцию rp2040 ниже)."
@@ -2268,11 +2163,6 @@ invoke_actions:
       direction: esp_to_rp2040
       purpose: "Section-level source_ref для всех rp2040 invoke actions ниже."
       status: notes_only
-      source_ref:
-        dispatch: "iDryerControllerV2/src/uart/uart_manager.cpp:1011-1039"
-        compiled_table: "iDryerControllerV2/src/menu/menu_data.cpp"
-        callback_bodies: "iDryerControllerV2/src/menu/user_menu_callbacks.cpp"
-        declarative: "iDryerControllerV2/src/menu/menu_v2.yaml (manifest)"
       notes:
         - "У каждого name ниже — только declarative_line: индекс name в menu_v2.yaml как декларация. Реальный исполняемый код см. в полях выше."
 
@@ -2444,7 +2334,6 @@ invoke_actions:
       direction: esp_to_rp2040
       purpose: "Транспортная заметка: RP2040 не парсит поле 'action' — только числовое 'id'."
       status: notes_only
-      source_ref: "iDryerControllerV2/src/uart/uart_manager.cpp:1011-1039"
       notes:
         - 'uart_manager.cpp читает doc["id"] (uint16_t), валидирует id < MENU__COUNT и item.type == MN_ACTION, шлёт ConfigAck(None) и вызывает item.u.action.invoke().'
         - "Если id невалиден или item не MN_ACTION — ConfigAck(InvalidPayload), действие не выполняется."
@@ -2461,28 +2350,24 @@ uart_only:
     fragmented: false
     ack: false
     purpose: "Ответ ESP32 на Hello: IP-адрес + SSID для отображения на экране MCU."
-    source_ref: "uart_protocol.h:81"
 
   - kind: TelemetryAck
     kind_id: 0x11
     payload: Ack
     direction: esp_to_rp2040
     purpose: "Подтверждение приёма Telemetry (только если флаг ACK_REQ выставлен)."
-    source_ref: "uart_protocol.h:83"
 
   - kind: CommandAck
     kind_id: 0x21
     payload: Ack
     direction: rp2040_to_esp
     purpose: "Подтверждение / отказ на Command (0x20)."
-    source_ref: "uart_protocol.h:90"
 
   - kind: ConfigAck
     kind_id: 0x31
     payload: Ack
     direction: bidirectional
     purpose: "Подтверждение получения ConfigPush (0x30)."
-    source_ref: "uart_protocol.h:92"
 
   - kind: Heartbeat
     kind_id: 0x40
@@ -2493,14 +2378,12 @@ uart_only:
     fragmented: false
     ack: false
     purpose: "Liveness check + сетевой статус. Пропуск heartbeat дольше UART_LINK_LOSS_MS → линк потерян."
-    source_ref: "uart_protocol.h:93 (kind), uart_protocol.h:56-57 (intervals UART_HEARTBEAT_MS/UART_LINK_LOSS_MS), uart_bridge.cpp:94 + iDryerControllerV2/src/uart/uart_manager.cpp:344"
 
   - kind: Error
     kind_id: 0x50
     payload: Error
     direction: bidirectional
     purpose: "Сообщение об ошибке протокола (CRC, sequence, busy, invalid payload, unknown message)."
-    source_ref: "uart_protocol.h:94"
 
   - kind: Log
     kind_id: 0x60
@@ -2514,12 +2397,6 @@ uart_only:
       unitId: "uint8 — связанный юнит (0..3) или 0xFF если событие линка"
     direction: rp2040_to_esp
     purpose: "Структурированные диагностические/лог-сообщения от MCU. Перепаковывается в MQTT events."
-    source_ref:
-      kind_decl: "lib/idryer-core/src/uart/uart_protocol.h:95"
-      transport: "lib/idryer-core/src/uart/uart_bridge.cpp:114-119 (sendLog) — общий sender для raw bytes (transport)"
-      struct_decl: "idryer-link/lib/idryer-protocol/src/uart/uart_protocol.h:301-309 (legacy DryerUart::LogPayload binary struct)"
-      rp2040_producer: "iDryerControllerV2/src/main.cpp:1338-1354 + iDryerControllerV2/src/uart/uart_manager.cpp:1085-1093 — заполняют binary struct"
-      esp_consumer: "idryer-link/src/main.cpp:335-360 (onLog) — парсит binary struct и публикует MQTT events с unitId"
     notes:
       - "Wire-форма — fixed-size BINARY STRUCT (DryerUart::LogPayload). НЕ свободные строки!"
       - "Старая yaml-формулировка 'raw bytes' вводила в заблуждение — transport принимает любые байты, но producer всегда шлёт packed struct."
@@ -2530,49 +2407,42 @@ uart_only:
     direction: rp2040_to_esp
     ack: true
     purpose: "MCU запрашивает старт claiming (привязка устройства к аккаунту)."
-    source_ref: "uart_protocol.h:96, uart_bridge.cpp:129 (sendClaimStart)"
 
   - kind: ClaimStatus
     kind_id: 0x71
     payload: ClaimStatus
     direction: esp_to_rp2040
     purpose: "Статус claiming (PIN, expiresAt, remainingSeconds) для отображения на экране MCU."
-    source_ref: "uart_protocol.h:97"
 
   - kind: ClaimComplete
     kind_id: 0x72
     payload: ClaimComplete
     direction: esp_to_rp2040
     purpose: "Завершение claiming (success + deviceId)."
-    source_ref: "uart_protocol.h:98"
 
   - kind: WsEnable
     kind_id: 0x73
     payload: WsEnable
     direction: rp2040_to_esp
     purpose: "MCU включает/выключает локальный WS-сервер на ESP32."
-    source_ref: "uart_protocol.h:99, uart_manager.h:sendWsEnable"
 
   - kind: WsStatus
     kind_id: 0x74
     payload: WsStatus
     direction: esp_to_rp2040
     purpose: "ESP32 сообщает MCU статус WS-сервера для отображения."
-    source_ref: "uart_protocol.h:100"
 
   - kind: WsResetClients
     kind_id: 0x75
     payload: "пустой"
     direction: rp2040_to_esp
     purpose: "MCU просит сбросить всех привязанных WS-клиентов."
-    source_ref: "uart_protocol.h:101"
 
   - kind: WsStatusRequest
     kind_id: 0x76
     payload: "пустой"
     direction: rp2040_to_esp
     purpose: "MCU запрашивает у ESP32 текущий WsStatus."
-    source_ref: "uart_protocol.h:102"
 
   # Внутренние UART-only коды команд (CommandPayload.command), которых нет в MQTT.
   - kind: Command
@@ -2611,8 +2481,6 @@ mqtt_only:
   - suffix: events
     full_topic: "idryer/{serial}/events"
     direction: device_to_backend
-    producer: "MqttClient::publishEvent() (продукт вызывает явно)"
-    consumer: "portal/backend (events.handler.ts)"
     qos: 0
     retained: false
     interval: "on event"
@@ -2632,9 +2500,7 @@ mqtt_only:
           message: string
           timestamp: ISO8601
           unitId: "ОТСУТСТВУЕТ"
-          source_ref: "idryer-link/src/main.cpp:367-369 (onUartError)"
         mcu_log:
-          source_ref: "idryer-link/src/main.cpp:335-360 (onLog)"
           notes:
             - "free-form event строки; severity — то, что прислал MCU."
       notes:
@@ -2651,8 +2517,6 @@ mqtt_only:
   - suffix: integrations/status
     full_topic: "idryer/{serial}/integrations/status"
     direction: device_to_backend
-    producer: "LinkIntegrationsManager::publishStatus() (опциональный модуль)"
-    consumer: "portal/backend (integrations-status.handler.ts)"
     qos: 0
     retained: true
     interval: "on change; periodic republish every 30s ONLY when active != None"
@@ -2754,7 +2618,6 @@ mqtt_only:
         port: { type: uint16 }
         # дополнительные runtime-поля по мере появления; см. serializer
         updatedAt: { type: ISO8601 }
-      source_ref: "idryer-link/lib/idryer-protocol/src/cloud/link_integrations_manager.cpp:338-449"
       notes:
         - "Реальный payload сильно богаче минимального примера; портал устойчив к extra полям."
         - "Schema определяется LinkIntegrationsManager::publishStatus + serializeXxxSection."
@@ -2763,7 +2626,6 @@ mqtt_only:
   - suffix: rfid/write_result
     full_topic: "idryer/{serial}/rfid/write_result"
     direction: device_to_backend
-    producer: "device firmware (Phase 3, NI на стороне прошивки)"
     consumer: "portal/backend (rfid/write-orchestrator.service.ts:280)"
     qos: 0
     retained: false
@@ -2797,8 +2659,6 @@ mqtt_only:
   - suffix: offline
     full_topic: "idryer/{serial}/offline"
     direction: broker_to_backend
-    producer: "MQTT broker (LWT)"
-    consumer: "portal/backend"
     qos: 1
     qos_note: "broker-side: QoS LWT задаётся в connect-options брокера, а не публикацией с устройства."
     retained: false
@@ -2811,8 +2671,6 @@ mqtt_only:
   - suffix: commands/ping
     full_topic: "idryer/{serial}/commands/ping"
     direction: backend_to_device
-    producer: "portal/backend (mqtt-telemetry.service.ts:805 — publish с явным QoS 0 'для PING')"
-    consumer: "IdryerRuntime (built-in, до commandHandler_)"
     qos: 0
     retained: false
     status: implemented
@@ -2829,8 +2687,6 @@ mqtt_only:
   - suffix: commands/invoke
     full_topic: "idryer/{serial}/commands/invoke"
     direction: backend_to_device
-    producer: "portal/backend (devices.service.updateDeviceSettings cmd=invoke)"
-    consumer: "ActionDispatcher::handleInvoke или продуктовый CommandHandler"
     qos: 1
     retained: false
     status: implemented
@@ -2850,8 +2706,6 @@ mqtt_only:
   - suffix: commands/link_integration
     full_topic: "idryer/{serial}/commands/link_integration"
     direction: backend_to_device
-    producer: "portal/backend (link-integrations.service)"
-    consumer: "LinkIntegrationsManager (через CommandHandler, опциональный модуль)"
     qos: 1
     retained: false
     status: implemented
@@ -2885,17 +2739,12 @@ mqtt_only:
             apiKey: { type: string, max: 64, optional: true }
             ssl: { type: bool, default: false }
             pollIntervalMs: { type: uint32, default: 1000 }
-      source_ref:
-        portal: "iDryerPortal/backend/src/link-integrations/link-integrations.service.ts:70-95"
-        firmware: "lib/idryer-core/src/integrations/common/link_integrations_types.h:36-80"
     notes:
       - "iHeater-link дополнительно синхронизирует toggle меню (moon_en/bambu_en/ha_en) при enabled:true."
 
   - suffix: commands/bambu_apply
     full_topic: "idryer/{serial}/commands/bambu_apply"
     direction: backend_to_device
-    producer: "portal/backend (bambu-apply.service)"
-    consumer: "LinkIntegrationsManager::handleBambuApplyCommand"
     qos: 1
     retained: false
     status: implemented
@@ -2923,9 +2772,6 @@ mqtt_only:
         spoolId: { type: string, optional: true }
         uid: { type: string, optional: true, note: "RFID UID for traceability" }
       required_validation: "BambuApplyPayload::valid() в link_integrations_types.h:100-121"
-      source_ref:
-        portal: "iDryerPortal/backend/src/link-integrations/bambu-apply.service.ts:59-74"
-        firmware: "lib/idryer-core/src/integrations/common/link_integrations_types.h:100-121"
       example:
         trayType: PLA
         colorHex: FFAABBFF
@@ -2942,7 +2788,6 @@ legacy_command_topics:
   - suffix: commands/pause
     full_topic: "idryer/{serial}/commands/pause"
     direction: backend_to_device
-    producer: "legacy portal dead-code path; не использовать в current product scope"
     qos: 1
     retained: false
     status: legacy
@@ -2957,7 +2802,6 @@ legacy_command_topics:
   - suffix: commands/resume
     full_topic: "idryer/{serial}/commands/resume"
     direction: backend_to_device
-    producer: "legacy portal dead-code path; не использовать в current product scope"
     qos: 1
     retained: false
     status: legacy
@@ -2972,7 +2816,6 @@ legacy_command_topics:
   - suffix: commands/update_preset
     full_topic: "idryer/{serial}/commands/update_preset"
     direction: backend_to_device
-    producer: "portal/backend (типизация в mqtt-api.types.ts)"
     qos: 1
     retained: false
     status: design_or_partial
@@ -3458,25 +3301,19 @@ ha_integration_topics:
   topics:
     - pattern: "idryer/{serial}/alerts"
       direction: device_to_ha_broker
-      source_ref: "lib/idryer-core/src/integrations/home_assistant/ha_publisher.cpp:544 (publishAlert) — реальный publish; :214 — discovery state_topic (не сам publish)"
       note: "Алерты для HA dashboard."
     - pattern: "idryer/{serial}/{unit}/{sensorName}"
       direction: device_to_ha_broker
-      source_ref: "ha_publisher.cpp:65"
       note: "Per-sensor значения (temperature/humidity и т.п.)."
     - pattern: "idryer/{serial}/{unit}/set_mode"
       direction: bidirectional
-      source_ref: "ha_publisher.cpp:381 (publish state), :452 (subscribe set)"
     - pattern: "idryer/{serial}/{unit}/{cmdSuffix}"
       direction: ha_to_device
       suffixes: ["set_temp", "set_duration"]
-      source_ref: "ha_publisher.cpp:418, :455, :458"
     - pattern: "idryer/{serial}/{unit}/target_temp"
       direction: device_to_ha_broker
-      source_ref: "ha_publisher.cpp:495"
     - pattern: "idryer/{serial}/{unit}/target_duration"
       direction: device_to_ha_broker
-      source_ref: "ha_publisher.cpp:509"
   notes:
     - "Эти топики НЕ для портала. Для портала используется `mqtt_only[suffix=integrations/status]`."
     - "Направление: устройство ↔ локальный HA-broker (адрес из HaConfig)."
@@ -3519,7 +3356,6 @@ ha_discovery_topics:
   topics:
     - kind: sensor
       pattern: "homeassistant/sensor/idryer_{serial}_{unitStr}_{name}/config"
-      source_ref: "lib/idryer-core/src/integrations/home_assistant/ha_publisher.cpp:72 (makeConfigTopic), :119-144 (payload)"
       entities:
         - {
             name: "temperature",
@@ -3567,7 +3403,6 @@ ha_discovery_topics:
 
     - kind: binary_sensor
       pattern: "homeassistant/binary_sensor/idryer_{serial}_{unitStr}_{name}/config"
-      source_ref: "ha_publisher.cpp:163, :179-200 (payload)"
       entities:
         - {
             name: "fan",
@@ -3585,7 +3420,6 @@ ha_discovery_topics:
 
     - kind: sensor_alerts
       pattern: "homeassistant/sensor/idryer_{serial}_alerts/config"
-      source_ref: "ha_publisher.cpp:210-211"
       note: "Один общий alerts-sensor на устройство (не per-unit)."
       payload_shape:
         name: "iDryer {serial} alerts"
@@ -3595,7 +3429,6 @@ ha_discovery_topics:
 
     - kind: select
       pattern: "homeassistant/select/idryer_{serial}_{unitStr}_mode_control/config"
-      source_ref: "ha_publisher.cpp:374-375, :389-400 (payload)"
       entities:
         - { name: "mode_control", options: ["IDLE", "DRYING", "STORAGE"] }
       payload_shape:
@@ -3608,7 +3441,6 @@ ha_discovery_topics:
 
     - kind: number
       pattern: "homeassistant/number/idryer_{serial}_{unitStr}_{cmdSuffix}/config"
-      source_ref: "ha_publisher.cpp:414-415, :429-442 (payload)"
       entities:
         - {
             name: "set_temp",
@@ -3661,17 +3493,14 @@ bambu_lan_mqtt:
   auth:
     username: "bblp"
     password: "{LAN Access Code из BambuConfig}"
-  source_ref: "lib/idryer-core/src/integrations/bambu/bambu_client.cpp:128-130, :187-201 (старая либа: idryer-protocol/src/cloud/bambu_client.cpp — идентично)"
   topics:
     - pattern: "device/{bambu_serial}/request"
       direction: device_to_printer
       qos: 0
       retained: false
-      source_ref: "bambu_client.cpp:118 (resolved), :253-275 (applyFilament), :294-303 (requestPushAll)"
       commands:
         - name: "ams_filament_setting"
           purpose: "Применить настройки филамента к слоту AMS (Writer mode)."
-          source_ref: "bambu_client.cpp:253-267"
           payload:
             print:
               sequence_id: "string"
@@ -3686,7 +3515,6 @@ bambu_lan_mqtt:
               setting_id: "string"
         - name: "pushall"
           purpose: "Запросить полный snapshot статуса принтера (Reader bootstrap)."
-          source_ref: "bambu_client.cpp:294-303"
           payload:
             pushing:
               sequence_id: "string"
@@ -3696,7 +3524,6 @@ bambu_lan_mqtt:
       direction: printer_to_device
       qos: 0
       retained: false
-      source_ref: "bambu_client.cpp:119 (subscribed), :332-440 (parser)"
       payload_fields_used:
         print:
           gcode_state: "string"
@@ -3734,11 +3561,9 @@ moonraker_websocket:
     tls_template: "wss://{host}:{port}/websocket"
     api_key_query: "?token={apiKey}  # добавляется только если apiKey задан"
     extra_headers: 'Origin: ""   # пустой Origin обязателен — иначе Moonraker отдаёт 403'
-    source_ref: "lib/idryer-core/src/integrations/moonraker/moonraker_client.cpp:76-101 (старая либа: idryer-protocol/src/cloud/moonraker_client.cpp — идентично)"
   on_connect:
     method: "printer.objects.subscribe"
     purpose: "Подписаться на нужные объекты Klipper при WS-CONNECTED."
-    source_ref: "moonraker_client.cpp:139, :170-202"
     request:
       jsonrpc: "2.0"
       method: "printer.objects.subscribe"
@@ -3754,21 +3579,18 @@ moonraker_websocket:
   incoming:
     - kind: notification
       method: "notify_status_update"
-      source_ref: "moonraker_client.cpp:214-223"
       shape:
         jsonrpc: "2.0"
         method: "notify_status_update"
         params: "[<status_object>, <eventtime>]  # status_object — первый элемент"
     - kind: response
       matches: "id из subscribe-запроса"
-      source_ref: "moonraker_client.cpp:225-234"
       shape:
         jsonrpc: "2.0"
         id: "uint32 (echoed)"
         result:
           status: "<status_object>"
     - kind: error
-      source_ref: "moonraker_client.cpp:236-240"
       shape:
         jsonrpc: "2.0"
         id: "uint32 (echoed)"
@@ -3776,7 +3598,6 @@ moonraker_websocket:
           code: "integer"
           message: "string  # пишется в lastError_"
   parsed_status_fields:
-    source_ref: "moonraker_client.cpp:243-358"
     "gcode_macro VIRTUAL_CHAMBER":
       target: "→ MoonrakerStatus.chamberTarget"
       temperature: "→ MoonrakerStatus.chamberTemperature"
@@ -3815,10 +3636,6 @@ local_websocket:
   mdns:
     service: "_idryer._tcp"
     hostname: "{serial}.local"
-  source_ref:
-    current: "lib/idryer-core/src/local_access/local_access.cpp:46-47, :65, :71-74, :160-291"
-    legacy: "/Users/ruslanpavlucenko/Documents/PlatformIO/Projects/idryer-link/src/WsServer.cpp:23, :77-110, :169-300"
-    docs: "lib/idryer-protocol/docs/ru/07-features/02-websocket-local.md (старая либа)"
   policy:
     max_clients: 1
     on_second_connect: "Закрыть соединение второго клиента."
@@ -3830,7 +3647,6 @@ local_websocket:
     messages:
       - kind: auth
         direction: app_to_device
-        source_ref: "local_access.cpp:160-194 (current); WsServer.cpp:240-282 (legacy)"
         request:
           type: "auth"
           token: "string (device_token из настроек)"
@@ -3842,7 +3658,6 @@ local_websocket:
           reason: "invalid_token | not_authorized"
       - kind: command
         direction: app_to_device
-        source_ref: "local_access.cpp:200-236 (current); WsServer.cpp:286-296 (legacy)"
         request:
           type: "command"
           command: "string (имя команды — те же, что и в MQTT messages: get_config, set, invoke, ping, ...)"
@@ -3857,7 +3672,6 @@ local_websocket:
   outgoing:
     envelope_normal: '{ "type": "<type>", "data": <payload> }'
     envelope_fragmented: '{ "type": "<type>", "data": <raw json fragments> }   # для больших payload (config) — собирается префиксом + raw + суффиксом'
-    source_ref: "local_access.cpp:240-291 (current); WsServer.cpp:304-340 (legacy); device_publisher.cpp:26-64 (mapping типов)"
     types:
       - {
           type: "info",
@@ -3924,10 +3738,6 @@ cloud_http_api:
     production: "https://portal.idryer.org/api"
     staging: "https://staging.idryer.org/api"
     note: "Конкретный URL берётся из platformio.ini build_flag IDRYER_PORTAL_API_URL для активного окружения."
-  source_ref:
-    impl: "lib/idryer-protocol/src/cloud/http_api.cpp:37 (provision), :102 (register), :172 (checkClaim)"
-    header: "lib/idryer-protocol/src/cloud/http_api.h:53-72"
-    transport_layer: "lib/idryer-protocol/src/platform/arduino/ArduinoHttpClient.cpp:46,55,105,111"
   prerequisites:
     - "WiFi connected."
     - "NTP sync завершён (TLS требует валидное время — см. ntp_sync секцию)."
@@ -3936,7 +3746,6 @@ cloud_http_api:
       method: POST
       path: "/devices/provision"
       purpose: "Первичная регистрация устройства по serial. Возвращает JWT-токен; deviceId — только если устройство уже было привязано ранее (recovery)."
-      source_ref: "http_api.cpp:37-96"
       request_body:
         serialNumber: "string (hardware serial)"
       response_body:
@@ -3951,7 +3760,6 @@ cloud_http_api:
       method: POST
       path: "/devices/register"
       purpose: "Запрос PIN-кода для привязки устройства к user account. PIN выводится на UI и пользователь вводит его в портал."
-      source_ref: "http_api.cpp:102-166"
       request_body:
         token: "string (deviceToken от provision)"
         serialNumber: "string (optional)"
@@ -3968,7 +3776,6 @@ cloud_http_api:
       method: GET
       path: "/devices/check-claim/{deviceToken}"
       purpose: "Polling: проверить привязал ли пользователь устройство к account'у (PIN введён)."
-      source_ref: "http_api.cpp:172-215"
       request_body: null
       response_body:
         claimed: "bool"
@@ -3997,9 +3804,6 @@ wifi_provisioning:
   protocol: "Improv WiFi (Serial)"
   library: "https://github.com/jnthas/Improv-WiFi-Library.git"
   transport: "Serial (USB-CDC, baud 115200) — тот же порт, что и логирование"
-  source_ref:
-    idryer: "idryer-link/src/main.cpp:54-56 (init), :332-341 (setDeviceInfo), :106-112 (callback), :395-412 (handleSerial)"
-    iheater: "iHeater-link/src/main.cpp:69 (init), :160-167 (setDeviceInfo), :138-140 (callback), :284-309 (handleSerial)"
   device_info:
     chip_family: "CF_ESP32_C3"
     name_idryer: "iDryer Link"
