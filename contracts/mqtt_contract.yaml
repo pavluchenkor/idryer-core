@@ -1146,11 +1146,14 @@ messages:
         interval: "product-defined; default 5000 ms (5 сек)."
         payload:
           json_shape:
-            "units[i].unitId": 'formatUnitId(entry.unitId) → "U1".."U4"'
-            "units[i].temperature": "entry.temperatureC10 / 10.0"
-            "units[i].humidity": "entry.humidityPct10 / 10.0"
-            "units[i].heaterPower": "entry.heaterPowerPct"
-            "units[i].fanStatus": "entry.fanOn == 1"
+            "units[i].unitId": '"U1".."U4"'
+            "units[i].temperature": "float, °C — температура воздуха"
+            "units[i].humidity": "float, %RH — влажность воздуха"
+            "units[i].heaterTemp": "float, °C — температура корпуса нагревателя (при наличии датчика)"
+            "units[i].heaterPower": "int, 0..100 % — мощность нагрева"
+            "units[i].fanStatus": "bool — вентилятор вкл/выкл"
+            "rssi": "int, dBm — уровень WiFi (top-level, шлётся всегда)"
+            "uptime": "uint32, секунды с момента включения (top-level, шлётся всегда)"
           example_climate:
             units:
               - { unitId: U1, temperature: 23.5, humidity: 47.2 }
@@ -1169,18 +1172,9 @@ messages:
                     note: "0 = выключен, 1 = нагрев",
                   }
                 targetTempC: { type: float, unit: "°C" }
-                rssi: { type: int }
-                uptime:
-                  {
-                    type: uint32,
-                    unit: s,
-                    note: "секунды",
-                  }
               extra_unit_fields:
                 "units[0].heaterPower":
                   { type: int, note: "0 или 100 (heating ? 100 : 0)" }
-                "units[0].fanStatus":
-                  { type: bool, note: "всегда false на iheater_link" }
               notes:
                 - "iHeater Link публикует эти поля сверх стандартной units[]-схемы."
                 - "Они НЕ часть общего контракта — потребитель должен ожидать их только для deviceType=iheater_link."
