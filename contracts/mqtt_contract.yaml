@@ -66,8 +66,6 @@ capability_vocabulary:
   weight:
     json_key: "weight"
     config_flag: "hasScales"
-    telemetry_field: "weightG"
-    telemetry_type: "uint16_t"
     description: "Весовой датчик (граммы филамента)"
 
   rfid:
@@ -499,9 +497,8 @@ widgets:
       - "Active session: ActiveSessionBlock (elapsed/duration/targetTemp, кнопка Stop)"
       - "Idle: пресеты + Controls (старт сушки/хранения/профиля)"
     migration_target: |
-      После миграции сушилки на menu_protocol_v1 (см. migration_status.dryer) —
-      переписать на invoke форма B (commands/invoke {action:'drying.start', args:{...}}).
-      Сейчас deferred.
+      После миграции сушилки на menu_protocol_v1 — переписать на invoke форма B
+      (commands/invoke {action:'drying.start', args:{...}}). Сейчас deferred.
     source_ref: "iDryerPortal/frontend-v2/src/components/dashboard/cards/IDryerCard.tsx"
     status: legacy
 
@@ -1230,6 +1227,8 @@ messages:
           notes:
             - "Портал ожидает units[] обязательно."
             - "Dryer и iHeater Link шлют status в одном shape."
+            - "Текущие прошивки эмитят: unitId, mode, sessionNum, target.temperature, target.duration, elapsedTime. progressPercent добавляет интеграционный hook (Bambu/Moonraker)."
+            - "target.humidity и profile-блок (currentStage, totalStages, stageElapsed, stageRemaining, totalRemaining, profileTotalElapsed, stagePhase) зарезервированы для PROFILE-режима и текущими прошивками пока НЕ эмитятся: проброс этапов из UART Status в MQTT ещё не реализован. Все они optional — потребитель обязан корректно работать при их отсутствии."
       uart:
         kind: Status
         kind_id: 0x13
@@ -1251,9 +1250,9 @@ messages:
         interval: "~10s, on change"
         payload:
           json_shape:
-            "weights[i].sensorId": '"W1".."W4" (formatSensorId)'
-            "weights[i].value": "float, граммы (entry.weightGramsC10 / 10.0f)"
-            "weights[i].unitId": '"U1".."U4" (formatUnitId)'
+            "weights[i].sensorId": '"W1".."W4"'
+            "weights[i].value": "float, граммы"
+            "weights[i].unitId": '"U1".."U4"'
           example:
             weights:
               - { sensorId: W1, value: 12.4, unitId: U1 }
@@ -1261,7 +1260,7 @@ messages:
           notes:
             - "Массив weights[] лежит на ВЕРХНЕМ уровне документа, НЕ внутри units[]."
             - "Поле value — float в граммах. В UART payload приходит как weightGramsC10 (uint16, граммы × 10) и делится на 10.0 при сериализации в JSON."
-            - "Старый idryer-link публикует это; idryer-core (Storage Link) — нет."
+            - "Путь весов до портала: отдельный топик idryer/+/weights; backend маршрутизирует входящие строго по суффиксу топика."
       uart:
         kind: Weights
         kind_id: 0x12
@@ -1271,8 +1270,8 @@ messages:
         direction_uart: rp2040_to_esp
     status: implemented_device_only
     notes:
-      - "На стороне idryer-core MqttClient API нет publishWeights — только legacy idryer-link публикует weights."
-      - "Портал слушает 'idryer/+/weights' и имеет weights.handler."
+      - "Публикуется продуктами с весами (Dryer) через SDK DevicePublisher::publishWeights — dual MQTT + Local WS, как telemetry/status."
+      - "Портал: подписка на idryer/+/weights, WeightsHandler сохраняет измерение + Spool.currentWeightGrams и шлёт WS-обновление на фронт."
 
   - name: rfid_event
     direction: device_to_backend
@@ -1472,15 +1471,17 @@ messages:
                 params: { temperature: 55, duration: 240 }
                 timestamp: "2026-04-28T12:00:00Z"
             - name: legacy
+              deprecated: true
               example:
                 unitId: U1
                 targetTemperature: 55.0
                 durationMinutes: 240
+              note: "DEPRECATED. Не поддерживается новыми прошивками и ядром: текущий idryer-link парсит только new-форму (params.temperature, params.duration). Сохранено как историческая справка для старых ESP-билдов в поле. Подлежит удалению из контракта после полного перехода всех устройств на новую прошивку."
           notes:
             - "unitId обязателен (U1..UN). Broadcast (unitId отсутствует / unitId=0xFF) НЕ реализован —
               RP2040 отклоняет unitId=0xFF как InvalidPayload. Реализовать broadcast можно когда
               появится реальная потребность (сценарий: одинаковый материал во всех камерах)."
-            - "Топик для legacy dryer; iHeater Link его не обрабатывает (см. migration_status.iheater_link)."
+            - "Топик для Dryer; iHeater Link его не обрабатывает — у iHeater сушка идёт через invoke."
       uart:
         kind: Command
         kind_id: 0x20
@@ -1562,6 +1563,7 @@ messages:
                     - { temperature: 100, ramp: 600, hold: 6000 }
                 timestamp: "2026-04-28T12:00:00Z"
             - name: legacy
+              deprecated: true
               example:
                 unitId: U1
                 startStage: 0
@@ -1569,11 +1571,12 @@ messages:
                   - { temp: 60, ramp: 300, hold: 1800 }
                   - { temp: 100, ramp: 600, hold: 6000 }
                 timestamp: "2026-04-28T12:00:00Z"
+              note: "DEPRECATED. Не поддерживается новыми прошивками и ядром: текущий idryer-link парсит только new-форму (params.startStage, params.stages[].temperature/ramp/hold). Сохранено как историческая справка для старых ESP-билдов в поле. Подлежит удалению из контракта после полного перехода всех устройств на новую прошивку."
           notes:
             - "Стадий не более 10."
             - "ramp и hold — СЕКУНДЫ."
             - "new: temperature в стадиях — °C целое. stages и startStage внутри params."
-            - "legacy: stages на верхнем уровне, поле temp (°C × 10). Только для старых клиентов."
+            - "legacy (DEPRECATED): stages на верхнем уровне, поле temp в °C × 10. Не парсится текущими прошивками — см. note варианта legacy."
             - "Поле 'mode' DECORATIVE: ни portal sender, ни bridge handler его не парсят. Не включать в новые клиенты."
       uart:
         kind: Command
@@ -2739,10 +2742,6 @@ legacy_command_topics:
 # каноническая норма (canonical_*) и статус. Это карта того, где код ещё
 # догоняет контракт, а не руководство к действию.
 known_mismatches:
-  - id: weights_no_core_api
-    summary: "MqttClient (idryer-core) не имеет publishWeights/publishRfid; есть только в legacy idryer-link."
-    impact: "Storage Link на новой SDK не публикует weights/rfid. Портал слушает оба."
-
   - id: rfid_stack_partial_in_core
     severity: high
     summary: "RFID-стек в core SDK реализован только частично: UART-уровень есть, MQTT-уровень и enum событий — нет."

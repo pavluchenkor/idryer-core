@@ -77,6 +77,9 @@ public:
     /** rfid topic (retained). */
     bool publishRfid(JsonDocument& doc);
 
+    /** weights topic (non-retained). */
+    bool publishWeights(JsonDocument& doc);
+
     /** rfid/write_result (non-retained). Ответ на commands/write_rfid (Variant B). */
     bool publishRfidWriteResult(JsonDocument& doc);
 

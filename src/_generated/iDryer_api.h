@@ -89,7 +89,6 @@ struct Telemetry {
     float      heaterTempC[MAX_UNITS];
     float      heaterPower01[MAX_UNITS];
     bool       fanOn[MAX_UNITS];
-    uint16_t   weightG[MAX_UNITS];
 };
 
 /// User-filled operational status. Published every Config.statusPeriodMs

@@ -58,7 +58,6 @@ TELEMETRY_FIELDS = [
     ("heaterTemp",       "float",   True,    "hasHeaterTemp",  "heater body temperature, °C"),
     ("heaterPower",      "float",   True,    "hasHeaterPower", "normalized heater power, 0..1"),
     ("fanStatus",        "bool",    True,    "hasFanStatus",   "fan running"),
-    ("weight",           "uint16_t","True",  "hasScales",      "filament weight, grams"),
 ]
 
 # Telemetry struct field names that user fills (different from json_keys).
@@ -68,7 +67,6 @@ TELEMETRY_USER_FIELDS = [
     ("heaterTempC",      "float",     "hasHeaterTemp"),
     ("heaterPower01",    "float",     "hasHeaterPower"),
     ("fanOn",            "bool",      "hasFanStatus"),
-    ("weightG",          "uint16_t",  "hasScales"),
 ]
 
 # Integrations — флаги Config.allow* (compile-time выбор).

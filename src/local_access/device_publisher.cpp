@@ -68,6 +68,11 @@ bool DevicePublisher::publishRfid(JsonDocument& doc) {
     return mqtt_->publishRfid(doc);
 }
 
+bool DevicePublisher::publishWeights(JsonDocument& doc) {
+    wsPublish("weights", doc);
+    return mqtt_->publishWeights(doc);
+}
+
 bool DevicePublisher::publishRfidWriteResult(JsonDocument& doc) {
     // Local WS этот ответ не нужен — это специфичная backend-корреляция.
     return mqtt_->publishRfidWriteResult(doc);

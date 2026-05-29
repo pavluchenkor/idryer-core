@@ -255,7 +255,6 @@ Link::Link(const Config& cfg) {
         telemetry.heaterTempC[i]    = 0.0f;
         telemetry.heaterPower01[i]  = 0.0f;
         telemetry.fanOn[i]          = false;
-        telemetry.weightG[i]        = 0;
 
         status.mode[i]        = UnitMode::Idle;
         status.targetTempC[i] = 0.0f;
@@ -595,7 +594,6 @@ void Link::publishTelemetryNow() {
         }
         if (cfg.hasHeaterPower) u["heaterPower"] = (int)roundf(telemetry.heaterPower01[i] * 100.0f);
         if (cfg.hasFanStatus)   u["fanStatus"]   = telemetry.fanOn[i];
-        if (cfg.hasScales)      u["weight"]      = telemetry.weightG[i];
     }
 
     doc["rssi"]   = WiFi.RSSI();
