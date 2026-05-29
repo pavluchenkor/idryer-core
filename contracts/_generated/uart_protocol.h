@@ -144,10 +144,10 @@ enum class PortalUnitStatus : uint8_t {
 
 enum class PortalEventType : uint8_t {
     COMMAND_ACK    = 0,
-    ERROR    = 1,
-    WARNING    = 2,
-    SESSION_COMPLETE    = 3,
-    SESSION_INTERRUPTED    = 4,
+    SESSION_COMPLETE    = 1,
+    SESSION_INTERRUPTED    = 2,
+    STAGE_CHANGED    = 3,
+    PROFILE_COMPLETED    = 4,
     MAINTENANCE_REQUIRED    = 5,
 };
 

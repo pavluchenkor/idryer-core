@@ -595,10 +595,7 @@ enums:
     FRAGMENT: 0x08
     LAST_FRAGMENT: 0x10
 
-  # Используется в MQTT-payload (status.units[].mode и в handlers портала)
-  # Источники:
-  #   firmware (publisher): idryer-link/lib/idryer-protocol/src/cloud/telemetry_publisher.cpp:383-399 (modeToString)
-  #   portal (consumer):    iDryerPortal/backend/src/mqtt-telemetry/mqtt-api.types.ts:316-323 (enum UnitStatus)
+  # Используется в MQTT-payload (status.units[].mode и в handlers портала).
   # Канон 2026-05-01: portal приведён к firmware-семантике (ERROR удалён, UNKNOWN добавлен).
   PortalUnitStatus:
     - IDLE # юнит ждёт команд
@@ -608,13 +605,20 @@ enums:
     - FAULT # ошибка/неисправность (закрывает сессию с reason='error')
     - UNKNOWN # fallback для незнакомого UartDryerMode (НЕ закрывает сессию)
 
+  # Поле events.event — СВОБОДНАЯ строка (ERRCODE_LIST от errbus прошивки +
+  # session-события). Ниже — известные session/ack значения, которые backend
+  # обрабатывает явным switch'ем; произвольные errcode-имена (SENSOR_SHORT и
+  # т.п.) тоже валидны. Severity передаётся отдельным полем `severity`
+  # (INFO/WARN/ERROR/CRIT) — не путать с типом события.
   PortalEventType:
     - COMMAND_ACK
-    - ERROR
-    - WARNING
     - SESSION_COMPLETE
     - SESSION_INTERRUPTED
+    - STAGE_CHANGED
+    - PROFILE_COMPLETED
     - MAINTENANCE_REQUIRED
+    # ERROR / WARNING всё ещё присутствуют в backend EventType enum, но это
+    # legacy — фактически тип ошибки несёт `event` (errcode), важность — `severity`.
 
   # Link integrations (HA / Bambu / Moonraker)
   # ВАЖНО: enum имеет ДВЕ грани сериализации (см. known_mismatches.integration_state_active_serialization):
@@ -1854,7 +1858,7 @@ invoke_actions:
         mode: publish
         topic: "idryer/{serial}/config"
         schema:
-          notes: "Публикация MqttClient::publishConfig() с результатом IProfile::getConfig(doc)."
+          notes: "Публикация полного config в ответ на action."
       bindings:
         mqtt:
           topic_suffix: commands/invoke
@@ -1870,7 +1874,7 @@ invoke_actions:
       status: implemented
       notes:
         - "Перехватывается ДО ActionDispatcher: работает только если продукт НЕ зарегистрировал свой commandHandler через setCommandHandler."
-        - "Портал в продакшене этот action не использует — он шлёт commands/get_config напрямую (devices.service.ts:1269). Действие фактически dead-code, но в SDK сохранено."
+        - "Портал в продакшене этот action не использует — шлёт commands/get_config напрямую. Действие фактически dead-code, но в SDK сохранено."
 
     # led.pulse переехал в invoke_actions.storage_link (см. ниже).
     # SDK сам этот action не обрабатывает — реализация и контракт у продукта.
@@ -1979,7 +1983,6 @@ invoke_actions:
         uart:
           applicable: false
       status: implemented
-      source_ref: "src/storage/led_strip/led_strip_executor.cpp::handlePulse + src/storage/led_strip/led_strip_animations.cpp::animationsOverride"
       notes:
         - "ledCount default 1 — обратная совместимость с одиночным LED."
         - "rainbow внутри ZONE pulse не имеет смысла (зона коротка) — для зоны всегда solid."
@@ -2097,27 +2100,14 @@ invoke_actions:
         - "Если поле 'id' не int — handler пишет WARN и выходит."
 
   # ── RP2040 (MCU; принимает invoke по UART через ConfigPush, не MQTT) ───
-  # source_ref для всей секции:
-  #   dispatch:        iDryerControllerV2/src/uart/uart_manager.cpp:1011-1039
-  #   compiled_table:  iDryerControllerV2/src/menu/menu_data.cpp
-  #   callback_bodies: iDryerControllerV2/src/menu/user_menu_callbacks.cpp
-  #   declarative:     iDryerControllerV2/src/menu/menu_v2.yaml (manifest)
-  # У каждого name ниже — только declarative_line (строка в menu_v2.yaml).
+  # Реализация — в iDryerControllerV2 (menu_v2.yaml декларирует on_invoke,
+  # dispatch по UART в g_menu[id].u.action.invoke()).
   rp2040:
     # Транспортная обёртка: на RP2040 invoke приходит из ESP32 через UART
     # ConfigPush (kind=0x30) в виде JSON {"cmd":"invoke","id":<menu_id>}.
-    # Маршрутизация: uart_manager.cpp:1011-1039 -> g_menu[id].u.action.invoke().
-    # Список ниже — реальные имена C-функций (on_invoke) в menu_v2.yaml,
-    # на которые ссылается item.u.action.invoke. Поле "id" — индекс
-    # MenuItem; конкретные id вычисляются генератором gen_menu_v2.py и
-    # привязки id↔имя нужно смотреть в сгенерированном menu_v2.cpp.
-
-    - name: "<section_source_ref>"
-      direction: esp_to_rp2040
-      purpose: "Section-level source_ref для всех rp2040 invoke actions ниже."
-      status: notes_only
-      notes:
-        - "У каждого name ниже — только declarative_line: индекс name в menu_v2.yaml как декларация. Реальный исполняемый код см. в полях выше."
+    # Список ниже — имена C-функций (on_invoke) из menu_v2.yaml. Поле "id" —
+    # индекс MenuItem, вычисляется генератором; привязки id↔имя — в
+    # сгенерированном menu_v2.cpp.
 
     - name: start_drying
       purpose: "Запустить ручной режим сушки на текущем активном юните (значения dry_temp / dry_time из меню)."
@@ -2129,159 +2119,128 @@ invoke_actions:
           direction_uart: esp_to_rp2040
           ack: true
       status: implemented
-      declarative_line: "iDryerControllerV2/src/menu/menu_v2.yaml:82 (on_invoke: start_drying)"
 
     - name: start_storage
       purpose: "Запустить режим хранения (storage) — поддержание низкой температуры с инверсной логикой."
       status: implemented
-      declarative_line: "iDryerControllerV2/src/menu/menu_v2.yaml:125 (on_invoke: start_storage)"
 
     - name: start_profile
       purpose: "Запустить выбранный профиль (через выбор в подменю profile)."
       status: implemented
-      declarative_line: "iDryerControllerV2/src/menu/menu_v2.yaml:152 (on_invoke: start_profile)"
 
     - name: start_drying_pla
       purpose: "Пресет: PLA."
       status: implemented
-      declarative_line: "iDryerControllerV2/src/menu/menu_v2.yaml:599"
 
     - name: start_drying_pla_cf
       purpose: "Пресет: PLA-CF."
       status: implemented
-      declarative_line: "iDryerControllerV2/src/menu/menu_v2.yaml:630"
 
     - name: start_drying_pla_gf
       purpose: "Пресет: PLA-GF."
       status: implemented
-      declarative_line: "iDryerControllerV2/src/menu/menu_v2.yaml:661"
 
     - name: start_drying_petg
       purpose: "Пресет: PETG."
       status: implemented
-      declarative_line: "iDryerControllerV2/src/menu/menu_v2.yaml:692"
 
     - name: start_drying_petg_cf
       purpose: "Пресет: PETG-CF."
       status: implemented
-      declarative_line: "iDryerControllerV2/src/menu/menu_v2.yaml:723"
 
     - name: start_drying_petg_gf
       purpose: "Пресет: PETG-GF."
       status: implemented
-      declarative_line: "iDryerControllerV2/src/menu/menu_v2.yaml:754"
 
     - name: start_drying_abs
       purpose: "Пресет: ABS."
       status: implemented
-      declarative_line: "iDryerControllerV2/src/menu/menu_v2.yaml:785"
 
     - name: start_drying_abs_cf
       purpose: "Пресет: ABS-CF."
       status: implemented
-      declarative_line: "iDryerControllerV2/src/menu/menu_v2.yaml:816"
 
     - name: start_drying_abs_gf
       purpose: "Пресет: ABS-GF."
       status: implemented
-      declarative_line: "iDryerControllerV2/src/menu/menu_v2.yaml:847"
 
     - name: start_drying_pa
       purpose: "Пресет: PA (Nylon)."
       status: implemented
-      declarative_line: "iDryerControllerV2/src/menu/menu_v2.yaml:878"
 
     - name: start_drying_pa_cf
       purpose: "Пресет: PA-CF."
       status: implemented
-      declarative_line: "iDryerControllerV2/src/menu/menu_v2.yaml:909"
 
     - name: start_drying_pa_gf
       purpose: "Пресет: PA-GF."
       status: implemented
-      declarative_line: "iDryerControllerV2/src/menu/menu_v2.yaml:940"
 
     - name: start_drying_pc
       purpose: "Пресет: PC."
       status: implemented
-      declarative_line: "iDryerControllerV2/src/menu/menu_v2.yaml:971"
 
     - name: start_drying_pc_cf
       purpose: "Пресет: PC-CF."
       status: implemented
-      declarative_line: "iDryerControllerV2/src/menu/menu_v2.yaml:1002"
 
     - name: start_drying_my1
       purpose: "Пользовательский пресет My1."
       status: implemented
-      declarative_line: "iDryerControllerV2/src/menu/menu_v2.yaml:1033"
 
     - name: start_drying_my2
       purpose: "Пользовательский пресет My2."
       status: implemented
-      declarative_line: "iDryerControllerV2/src/menu/menu_v2.yaml:1064"
 
     - name: start_drying_my3
       purpose: "Пользовательский пресет My3."
       status: implemented
-      declarative_line: "iDryerControllerV2/src/menu/menu_v2.yaml:1095"
 
     - name: calib_zero1
       purpose: "Калибровка нуля тензодатчика юнита 1."
       status: implemented
-      declarative_line: "iDryerControllerV2/src/menu/menu_v2.yaml:1174"
 
     - name: calib_kg_1
       purpose: "Калибровка веса (1 кг) юнита 1."
       status: implemented
-      declarative_line: "iDryerControllerV2/src/menu/menu_v2.yaml:1178"
 
     - name: calib_zero2
       purpose: "Калибровка нуля тензодатчика юнита 2."
       status: implemented
-      declarative_line: "iDryerControllerV2/src/menu/menu_v2.yaml:1186"
 
     - name: calib_kg_2
       purpose: "Калибровка веса (1 кг) юнита 2."
       status: implemented
-      declarative_line: "iDryerControllerV2/src/menu/menu_v2.yaml:1190"
 
     - name: calib_zero3
       purpose: "Калибровка нуля тензодатчика юнита 3."
       status: implemented
-      declarative_line: "iDryerControllerV2/src/menu/menu_v2.yaml:1199"
 
     - name: calib_kg_3
       purpose: "Калибровка веса (1 кг) юнита 3."
       status: implemented
-      declarative_line: "iDryerControllerV2/src/menu/menu_v2.yaml:1203"
 
     - name: calib_zero4
       purpose: "Калибровка нуля тензодатчика юнита 4."
       status: implemented
-      declarative_line: "iDryerControllerV2/src/menu/menu_v2.yaml:1212"
 
     - name: calib_kg_4
       purpose: "Калибровка веса (1 кг) юнита 4."
       status: implemented
-      declarative_line: "iDryerControllerV2/src/menu/menu_v2.yaml:1216"
 
     - name: pid_autotune_heater
       purpose: "PID autotune нагревателя (heater)."
       status: implemented
-      declarative_line: "iDryerControllerV2/src/menu/menu_v2.yaml:1356"
 
     - name: pid_autotune_chamber
       purpose: "PID autotune камеры (chamber)."
       status: implemented
-      declarative_line: "iDryerControllerV2/src/menu/menu_v2.yaml:1410"
 
     - name: start_claim
       purpose: "Запросить старт claim-флоу с MCU (ClaimStart 0x70 уйдёт в ESP32)."
       status: disabled
-      declarative_line: "iDryerControllerV2/src/menu/menu_v2.yaml:1605"
       notes:
-        - "Code commented out at iDryerControllerV2/src/menu/user_menu_callbacks.cpp:55-76; UART claim callbacks disabled at uart_manager.cpp:622, 631."
+        - "Закомментировано в прошивке iDryerControllerV2 — UART claim callbacks отключены."
 
     - name: "<rp2040_uart_dispatch_notes>"
       direction: esp_to_rp2040
@@ -2290,7 +2249,7 @@ invoke_actions:
       notes:
         - 'uart_manager.cpp читает doc["id"] (uint16_t), валидирует id < MENU__COUNT и item.type == MN_ACTION, шлёт ConfigAck(None) и вызывает item.u.action.invoke().'
         - "Если id невалиден или item не MN_ACTION — ConfigAck(InvalidPayload), действие не выполняется."
-        - "ACK отправляется ДО вызова invoke() (uart_manager.cpp:1030-1033) — иначе долгие действия (калибровка) превышают COMMAND_REPLY_TIMEOUT_MS=700ms и приводят к ретрансмиссии и многократному выполнению."
+        - "ACK отправляется ДО вызова invoke() — иначе долгие действия (калибровка) превышают command-reply timeout (700ms) и приводят к ретрансмиссии и многократному выполнению."
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 3. UART-only сообщения (нет MQTT-формы)
@@ -2341,7 +2300,6 @@ uart_only:
   - kind: Log
     kind_id: 0x60
     payload: LogPayload
-    payload_struct_ref: "idryer-link/lib/idryer-protocol/src/uart/uart_protocol.h:301-309 (DryerUart::LogPayload — binary struct)"
     payload_layout:
       severity: "char[10] — null-terminated severity string ('CRIT'/'ERROR'/'WARN'/'INFO'/'DEBUG')"
       source: "char[20] — origin tag (e.g., 'MCU', 'PID', 'SENSOR')"
@@ -2405,7 +2363,6 @@ uart_only:
     cmd_code: ResetFault
     cmd_code_id: 0x10
     purpose: "Сброс ошибки на стороне MCU (служебная команда; не приходит из MQTT)."
-    source_ref: "uart_protocol.h:UartCmdCode::ResetFault"
 
   - kind: Command
     kind_id: 0x20
@@ -2414,7 +2371,6 @@ uart_only:
     cmd_code: WifiStatus
     cmd_code_id: 0x11
     purpose: "MCU запрашивает у ESP32 IP-адрес для отображения на экране."
-    source_ref: "uart_protocol.h:UartCmdCode::WifiStatus"
 
   - kind: Command
     kind_id: 0x20
@@ -2423,7 +2379,6 @@ uart_only:
     cmd_code: SetConfig
     cmd_code_id: 0x06
     purpose: "Применить целевые параметры одного юнита (UartConfigPayload)."
-    source_ref: "uart_protocol.h:UartCmdCode::SetConfig"
     notes:
       - "Используется внутри ESP32; не маппится напрямую на MQTT-топик."
 
@@ -2444,7 +2399,6 @@ mqtt_only:
         - event
         - message
         - unitId
-      portal_validator_ref: "iDryerPortal/backend/src/mqtt-telemetry/handlers/events.handler.ts:39-43"
       legacy_firmware_publishes:
         uart_protocol_error:
           severity: '"error" (lowercase)'
@@ -2539,7 +2493,7 @@ mqtt_only:
         currentFilament:
           type: string
           optional: true
-          note: "Тип текущего филамента с принтера ('PLA', 'PETG', 'ABS', ...). Источник — BambuPrinterStatus.trayType. Локально на iHeater используется через C++ callback (auto_heat.cpp:74 + materialTempFromMenu) для chamber-control. Source: link_integrations_manager.cpp:382-393 (idryer-core), link_integrations_manager.cpp:419-430 (legacy idryer-link)."
+          note: "Тип текущего филамента с принтера ('PLA', 'PETG', 'ABS', ...). Источник — BambuPrinterStatus.trayType. Локально на iHeater используется для chamber-control (выбор температуры по материалу)."
         currentTrayInfoIdx:
           type: string
           optional: true
@@ -2547,8 +2501,7 @@ mqtt_only:
         updatedAt: { type: ISO8601 }
         # NB: остальные поля BambuPrinterStatus (gcodeState/progress/remainingSeconds/
         # currentLayer/totalLayers/nozzleTemp*/bedTemp*/chamberTemp*) НЕ эмитятся в MQTT
-        # после чистки 2026-05-01. Доступны только локально через C++ callback
-        # `LinkIntegrationsManager::bambuPrinterStatus()` для on-device логики.
+        # после чистки 2026-05-01. Доступны только локально на устройстве (C++ callback).
       moonraker:
         configured: { type: bool }
         enabled: { type: bool }
@@ -2573,8 +2526,8 @@ mqtt_only:
         updatedAt: { type: ISO8601 }
       notes:
         - "Реальный payload сильно богаче минимального примера; портал устойчив к extra полям."
-        - "Schema определяется LinkIntegrationsManager::publishStatus + serializeXxxSection."
-        - "Periodic republish (~30s) выполняется ТОЛЬКО когда common_.active != ActiveIntegration::None (link_integrations_manager.cpp:240-254). При active=None — только retained snapshot, без периодики."
+        - "Schema определяется сериализатором integrations-status в SDK."
+        - "Periodic republish (~30s) — ТОЛЬКО когда active != None. При active=None — только retained snapshot, без периодики."
 
   - suffix: rfid/write_result
     full_topic: "idryer/{serial}/rfid/write_result"
@@ -2635,7 +2588,7 @@ mqtt_only:
         timestamp: "2026-04-28T12:00:00Z"
     notes:
       - "Effective QoS = min(publisher, subscriber) = 0. Subscribe идёт по wildcard commands/# с QoS 1, но publisher шлёт с QoS 0."
-      - "QoS 0 для ping выбран сознательно (комментарий в mqtt-telemetry.service.ts:805)."
+      - "QoS 0 для ping выбран сознательно."
 
   - suffix: commands/invoke
     full_topic: "idryer/{serial}/commands/invoke"
@@ -2644,8 +2597,8 @@ mqtt_only:
     retained: false
     status: implemented
     routing: |
-      Built-in: action == 'device.getConfig' → IProfile::getConfig() + publishConfig.
-      Иначе ActionDispatcher::handleInvoke (или продуктовый commandHandler_).
+      Built-in: action == 'device.getConfig' → публикация config.
+      Иначе — диспетчеризация в продуктовый invoke-handler.
     payload:
       variants:
         - example: { action: "device.getConfig", args: {} }
@@ -2724,7 +2677,6 @@ mqtt_only:
         settingId: { type: string, optional: true }
         spoolId: { type: string, optional: true }
         uid: { type: string, optional: true, note: "RFID UID for traceability" }
-      required_validation: "BambuApplyPayload::valid() в link_integrations_types.h:100-121"
       example:
         trayType: PLA
         colorHex: FFAABBFF
@@ -3269,8 +3221,7 @@ ha_integration_topics:
     - "Направление: устройство ↔ локальный HA-broker (адрес из HaConfig)."
     - |
       HA broker discovery: если HaConfig.host пустой/невалидный — выполняется fallback
-      `MDNS.queryService("home-assistant","tcp")` (ha_mqtt_client.cpp:54,69 в новой SDK;
-      :72,89 в legacy). Берётся первый IP/port из ответа mDNS.
+      `MDNS.queryService("home-assistant","tcp")`. Берётся первый IP/port из ответа mDNS.
       TXT-записи mDNS-ответа НЕ парсятся, только IP+port.
     - |
       ⚠️ NAMESPACE COLLISION RISK: префикс `idryer/{serial}/*` совпадает с топиками портала.
@@ -3423,9 +3374,9 @@ ha_discovery_topics:
 
   notes:
     - "Все discovery-сообщения публикуются с retained=true — HA забирает их при подключении к broker'у."
-    - "{unitStr} формируется через formatUnitId() — ha_publisher.cpp:48 — и равен 'U1'/'U2'/'U3'."
+    - "{unitStr} формируется через formatUnitId() и равен 'U1'/'U2'/'U3'."
     - "Discovery-payload не содержит availability_topic — устройство онлайн-статус не публикует в HA namespace."
-    - "Точные диапазоны min/max для number — ориентировочные; реальные значения смотреть в ha_publisher.cpp:429-442."
+    - "Точные диапазоны min/max для number — ориентировочные; задаются прошивкой."
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 10. BAMBU LAN MQTT (printer-side topics для прямого LAN-подключения)
@@ -3673,7 +3624,7 @@ local_websocket:
     - "Payload каждого outgoing-type идентичен MQTT-аналогу — переиспользуются те же сериализаторы (publishInfo/Telemetry/Status и т.п.)."
     - "Server-flag включается через UART-команду WsEnable (kind 0x73) от RP2040 — см. uart_only."
     - "Status-сообщения о состоянии WS-сервера обратно RP2040 идут через WsStatus (0x74) и WsStatusRequest (0x76)."
-    - "После успешного auth_ok сервер автоматически дёргает get_config — для bootstrap UI приложения (local_access.cpp:195-198)."
+    - "После успешного auth_ok сервер автоматически дёргает get_config — для bootstrap UI приложения."
     - "Single-client: при втором подключении старый клиент остаётся, новый получает disconnect."
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -3735,7 +3686,7 @@ cloud_http_api:
 
   error_handling:
     - "При HTTP error / parse error — `result.success=false` и retry на следующем тике."
-    - "checkClaim ошибки НЕ логируются (это нормально пока не привязано) — http_api.cpp:191."
+    - "checkClaim ошибки НЕ логируются (это нормально пока устройство не привязано)."
 
   notes:
     - "Все ответы JSON; парсятся через ArduinoJson DynamicJsonDocument."
@@ -3765,7 +3716,7 @@ wifi_provisioning:
   on_credentials_received:
     description: "Improv-callback при успешном получении SSID/password от клиента."
     saves_to: "NVS namespace 'wifi' (поля: 'ssid', 'password', 'configured')"
-    persistence_class: "ArduinoWifiStore (lib/idryer-core/src/platform/arduino/ArduinoWifiStore.h)"
+    persistence_class: "ArduinoWifiStore (idryer-core)"
     side_effects:
       - "Сохранение credentials в NVS."
       - "WiFi.begin(ssid, password) — попытка connect."
@@ -3774,7 +3725,7 @@ wifi_provisioning:
   loop_blocking:
     description: "Improv handleSerial() блокирует Serial поток пока WiFi не сконфигурирован."
     side_effect: "Логирование в Serial подавляется (initArduinoHal(nullptr)) до WiFi-connect — иначе логи смешиваются с Improv-фреймами."
-    re_enable_logging_at: "После успешного connect: initArduinoHal(&Serial) — hal_arduino.h:46-54."
+    re_enable_logging_at: "После успешного connect логирование в Serial включается обратно."
 
   activation:
     production_builds: true
