@@ -2734,13 +2734,10 @@ legacy_command_topics:
 # ─────────────────────────────────────────────────────────────────────────────
 # 6. РАСХОЖДЕНИЯ И ОТКРЫТЫЕ ВОПРОСЫ
 # ─────────────────────────────────────────────────────────────────────────────
-# Полный текст — в mismatches.md. Здесь — короткие пометки, чтобы не потерялись.
-#
-# ВАЖНО: ссылки вида `idryer-link/lib/idryer-protocol/...` ниже указывают на
-# legacy либу, удалённую после переезда на idryer-core. Файлы доступны только
-# в backup: `docs/idryer-link — копия/lib/idryer-protocol/`. Ссылки полезны
-# как историческая справка при миграции функциональности в core SDK; при
-# закрытии соответствующих mismatch'ей ссылки уйдут вместе с записями.
+# Известные несоответствия между контрактом и реализациями. Каждая запись:
+# суть расхождения (summary), влияние (impact), принятое решение (decision),
+# каноническая норма (canonical_*) и статус. Это карта того, где код ещё
+# догоняет контракт, а не руководство к действию.
 known_mismatches:
   - id: weights_no_core_api
     summary: "MqttClient (idryer-core) не имеет publishWeights/publishRfid; есть только в legacy idryer-link."
@@ -2781,20 +2778,16 @@ known_mismatches:
     severity: high
     summary: "Portal DTO принимает обе формы (id ИЛИ action). UART-прокси (idryer-link → RP2040) принимает ТОЛЬКО {id}. Форма {action} без id молча отбрасывается на bridge'е."
     portal_dto:
-      ref: "iDryerPortal/backend/src/devices/devices.service.ts:1330-1334"
       logic: "если есть id (number) ИЛИ action (string) — validation passes"
     handlers_per_path:
       uart_proxy_idryer_link:
-        ref: "idryer-link/src/main.cpp:485-501 (onCommand 'invoke')"
         accepts: "{id} only"
         rejects: "{action} без id → логируется WARN, return"
         reason: "RP2040 диспатчит по индексу пункта меню (menu_data.cpp), action как строка туда не доходит"
       iheater_link:
-        ref: "iHeater-link/src/main.cpp:330-344"
         accepts: "{action: 'heat.start'|'heat.stop', args: {tempC, durationMin}}"
         rejects: "{action} без известного имени → fallback в MenuBridge::applyInvokeCommand, требует {id}"
       core_sdk_runtime_callback:
-        ref: "lib/idryer-core/src/runtime/idryer_runtime.cpp:85-97"
         accepts: "что зарегистрирует продукт. Встроено: action='device.getConfig' → IProfile::getConfig"
     examples:
       works:
@@ -2883,10 +2876,6 @@ known_mismatches:
   - id: events_shape_mismatch
     severity: medium
     summary: "Частичный mismatch: MCU log events работают; UART transport errors дропаются Portal'ом из-за отсутствия unitId."
-    portal_validates: "iDryerPortal/backend/src/mqtt-telemetry/handlers/events.handler.ts:39-43"
-    firmware_publishes:
-      mcu_log_events: "idryer-link/src/main.cpp:335-360 (onLog) — содержит unitId 'U1..U4', работает"
-      uart_transport_errors: "idryer-link/src/main.cpp:367-369 (onUartError) — БЕЗ unitId, severity lowercase, дропается"
     works_today:
       - "MCU LogPayload events (SESSION_COMPLETE, STAGE_CHANGED, OVERHEAT и т.п.) — все 4 поля есть, портал принимает"
     broken_today:
@@ -2924,7 +2913,7 @@ known_mismatches:
         }
       timestamp: { type: string, format: ISO8601, required: true }
     implementation_notes:
-      - "Изменения только в Portal: events.handler.ts:39-43 — снять unitId из обязательных, нормализовать severity к uppercase."
+      - "Изменения только в Portal: снять unitId из обязательных полей валидатора, нормализовать severity к uppercase."
       - "Прошивку трогать не нужно — handleLog продолжает работать как сейчас, handleUartError начнёт доходить."
       - "WS-broadcast и БД-сохранение поддержать unitId=null для system-level событий."
     status: design_or_partial
@@ -2937,10 +2926,6 @@ known_mismatches:
   - id: broadcast_unit_id_unsupported
     severity: low
     summary: "0xFF=ALL присутствует как defensive fallback в bridge, но в реальной работе никогда не достигается. Контракт убирает ALL semantics."
-    bridge_emits: "idryer-link/lib/idryer-protocol/src/cloud/command_handler.cpp:141, 212, 267, 293, 528, 545 (defensive fallback when unitId omitted)"
-    rp2040_rejects: "iDryerControllerV2/src/uart/uart_manager.cpp:447-451 (handleUartCommand); :409-414 (handleUartProfileCommand)"
-    iheater_link_local: "iHeater-link/src/heater/command_routing.cpp:58, 89, 117 — 0xFF используется только для логирования; iHeater single-unit, нет UART, no real broadcast"
-    portal_status: "iDryerPortal/backend/src/mqtt-telemetry/mqtt-telemetry.service.ts:757 — sendStopCommand требует unitId; UI 'Stop all' не существует"
     real_world_status: "Dead path в production — портал никогда не шлёт без unitId, fallback в bridge не срабатывает."
     decision_made: "Variant B — убрать ALL semantics из контракта, никаких изменений в коде не требуется"
     decision_date: "2026-05-01"
@@ -2957,15 +2942,12 @@ known_mismatches:
 
   - id: storage_humidity_dropped
     severity: medium
-    summary: "UART путь Storage обрублен — передаёт только temp. Локальный путь из меню использует все 3 параметра (temp, humidity, priority)."
+    summary: "RESOLVED: UART-путь Storage теперь читает humidity/priority из меню (NVS), как локальный путь. Ранее передавал только temp."
     architecture:
       menu_settings_per_unit:
         storage_temp: "float, default 45°C — целевая температура"
         storage_hum: "uint8, default 12% — целевая влажность"
         storage_hum_priority: "bool, default true — toggle 'по влажности'"
-      controller_api: "DryerController::startStorage(tempC, targetHum, storageByHum) — control.h:203, control.cpp:239+"
-      local_path: "user_menu_callbacks.cpp:162-175 (start_storage) — читает ВСЕ 3 параметра из menu[unit] и зовёт requestMode(Storage, tC, 0, rh, byHum)"
-      uart_path_current: "uart_manager.cpp:466-472 — берёт только tempC, зовёт requestMode(Storage, tempC, 9999) — humidity и priority не передаются и не читаются"
     decision_made: "Variant B — UART path читает humidity/priority из NVS меню (как локальный start_storage)"
     decision_date: "2026-05-01"
     canonical_rule:
@@ -2976,26 +2958,15 @@ known_mismatches:
         - "Для изменения priority: commands/set {id: storage_hum_priority, val: ...}"
         - "Сначала set, потом storage — порядок важен"
       semantic:
-        - "UART start_storage функционально равен локальному start_storage (тот же код-путь по сути)"
+        - "UART start_storage функционально равен локальному start_storage"
         - "При запуске Storage прошивка ВСЕГДА читает все 3 параметра из NVS меню текущего юнита"
-    implementation_notes:
-      - "Прошивка RP2040: править uart_manager.cpp:466-472 — заменить requestMode(Storage, tempC, 9999) на чтение menu.storage_hum[unit] + menu.storage_hum_priority[unit] + вызов 5-аргументной requestMode (как в local_path)."
-      - "tempC в UART payload — опциональный override относительно menu.storage_temp; если 0/missing → использовать menu.storage_temp[unit]."
-      - "Bridge (idryer-link) не трогаем — он по-прежнему форвардит arg1 (humidity) на UART, MCU просто перестанет читать arg1 как humidity и будет читать NVS."
-      - "Portal frontend оставить отдельную крутилку для humidity если нужен per-сессию custom — она будет дёргать commands/set перед commands/storage."
-    status: design_or_partial
-    interop_break: true
-    todo:
-      - "RP2040: переписать handleUartCommand:466-472 (Storage case) под чтение menu.storage_hum[unit] и menu.storage_hum_priority[unit]; вызвать 5-arg requestMode."
-      - "После реализации: command_storage status → implemented в messages."
-      - "Optional: документировать в for-firmware-dev.md паттерн 'set field then issue command'."
+    status: implemented
+    interop_break: false
 
   # ── Block 2026-05-01-full-audit: третья сторона нашла 27 mismatch ────────
   - id: portal_session_routing_storage_profile_bug
     severity: critical
-    summary: "Portal sessions.service.ts:333-344 шлёт в sendStartCommand только {temperature, duration}; mqtt-telemetry.service.ts:718-727 для STORAGE требует humidity, для PROFILE требует profile — оба условия false → fallback в commands/drying."
-    portal_caller: "iDryerPortal/backend/src/sessions/sessions.service.ts:333-344"
-    portal_dispatcher: "iDryerPortal/backend/src/mqtt-telemetry/mqtt-telemetry.service.ts:718-750"
+    summary: "Portal в startSession шлёт только {temperature, duration}; диспетчер для STORAGE требует humidity, для PROFILE — profile, оба условия не выполняются → команда падает в commands/drying."
     impact: "Сессии STORAGE и PROFILE никогда не публикуются на свои каноничные топики; всегда падают в commands/drying. iHeater-link в drying-ветке нет логики STORAGE → команда выполняется как сушка."
     decision_required: |
       1) Portal: расширить startSession передавать humidity для STORAGE и profile для PROFILE;
@@ -3003,15 +2974,12 @@ known_mismatches:
       3) Альтернатива: всегда падать в drying не баг, а намеренный fallback — тогда yaml перенести commands/storage и commands/profile в legacy.
     status: design_or_partial
     interop_break: true
-    found_by: "external audit 2026-05-01-full-audit (cmd_storage_session_fallback_bug, cmd_profile_session_fallback_bug)"
 
   - id: portal_publishes_unsupported_commands
     severity: critical
-    summary: "Portal публикует commands/storage, commands/profile, commands/find, commands/clear_errors, commands/pause, commands/resume через WebSocket events.gateway.ts:380-397, но ни один current-scope продукт (iHeater-link, iDryer-Storage) не имеет consumer-веток."
-    portal_publisher: "iDryerPortal/backend/src/gateway/events.gateway.ts:121-196,355-397"
+    summary: "Portal публикует commands/storage, /profile, /find, /clear_errors, /pause, /resume, но ни один current-scope продукт (iHeater Link, Storage Link) не имеет consumer-веток для них."
     consumers_status:
-      iheater_link: "src/main.cpp — обрабатываются find/clear_errors/get_config/set/invoke/link_integration. drying/storage/stop удалены после миграции на menu_protocol_v1 (запуск/остановка идут через invoke heat.start/heat.stop). find и clear_errors — no-op (нужны для DeviceHeader колокольчика и ClearErrorsButton). profile/read_rfid/write_rfid/pause/resume не зарегистрированы — попадут в Unknown command."
-      idryer_storage: "src/main.cpp:188-209 — handler знает только get_config/set/invoke; остальные команды no-op"
+      iheater_link: "обрабатываются find/clear_errors/get_config/set/invoke/link_integration. drying/storage/stop удалены после миграции на menu_protocol_v1 (запуск/остановка идут через invoke heat.start/heat.stop). find и clear_errors — no-op (нужны для колокольчика DeviceHeader и ClearErrorsButton). profile/read_rfid/write_rfid/pause/resume не зарегистрированы — Unknown command."
     impact: "Portal возвращает {status:'sent'} оператору, но никаких действий на устройстве нет. Тихий interop-баг."
     decision_required: |
       1) Portal: убрать публикацию commands/pause, commands/resume, и для current-scope products также storage/profile/find/clear_errors;
@@ -3019,19 +2987,14 @@ known_mismatches:
       3) ИЛИ: задокументировать как product-specific (только для legacy idryer-link, не для current scope).
     status: design_or_partial
     interop_break: true
-    found_by: "external audit (cmd_storage_live_mismatch_current, cmd_profile_live_mismatch_current, cmd_find_live_mismatch_current, cmd_clear_errors_live_mismatch_current, cmd_pause_live_mismatch_current, cmd_resume_live_mismatch_current)"
 
   - id: integration_state_active_serialization
     severity: high
     summary: "yaml декларирует enums.IntegrationState и enums.ActiveIntegration как numeric/CamelCase, но wire JSON сериализуется в lowercase/snake_case строки."
-    code_truth:
-      integrationStateToString: "lib/idryer-core/src/integrations/common/link_integrations_types.cpp:34-45 — возвращает 'disabled', 'idle', 'connecting', 'online', 'config_missing', 'error'"
-      activeIntegrationToString: "lib/idryer-core/src/integrations/common/link_integrations_types.cpp:12-31 — возвращает 'none', 'ha', 'bambu', 'moonraker'"
     yaml_was: "enums.IntegrationState: [Disabled, Idle, Connecting, Online, ConfigMissing, Error]; enums.ActiveIntegration: {None:0, Ha:1, Bambu:2, Moonraker:3}"
     decision_made: "yaml должен описывать обе грани: numeric C++ enum (для UART/локального кода) И string JSON serialization (для MQTT). Раздельно."
     status: implemented
     interop_break: false
-    found_by: "external audit (GEE-INTEGRATIONSTATE-JSON, GEE-ACTIVEINTEGRATION-JSON, MIN-INTEGRATIONS-ACTIVE, MIN-INTEGRATIONS-STATE)"
     todo:
       - "Поправить yaml: enums.IntegrationState и ActiveIntegration — добавить раздел json_string_form."
       - "Также в integrations/status.payload.*.state и top_level.active — указать что значения lowercase strings."
@@ -3039,39 +3002,26 @@ known_mismatches:
   - id: status_config_delta_not_implemented_in_current
     severity: high
     summary: "yaml messages.status и messages.config_delta помечены как implemented, но current iHeater-link и current iDryer-Storage не имеют publishStatus()/publishConfigDelta() путей."
-    iheater_link:
-      status_publisher: "src/heater/telemetry.cpp:38-84 — публикует только telemetry, не status"
-      config_delta: "src/heater/MenuBridge.cpp:194-211,214-277 — после applySetCommand вызывает publishFullConfig (НЕ publishConfigDelta)"
-    idryer_storage:
-      status_publisher: "src/storage/telemetry/StorageTelemetryPublisher.cpp:10-26 — публикует только telemetry"
-      config_delta: "src/main.cpp:188-209 + src/storage/led_strip/led_strip_profile.cpp:107-145 — apply set, full config publish, нет delta"
     legacy_only: "publishStatus/publishConfigDelta существуют в legacy idryer-link/lib/idryer-protocol — не в current SDK"
     decision_required: |
       1) Понизить status/config_delta до 'legacy_only' или 'planned' в текущем yaml-сегменте current-scope;
       2) ИЛИ: реализовать publishStatus и publishConfigDelta в current iHeater-link и iDryer-Storage.
     status: design_or_partial
     interop_break: true
-    found_by: "external audit (MQTT-D2P-STATUS-001, MQTT-D2P-STATUS-002, MQTT-D2P-CONFIGDELTA-001, MQTT-D2P-CONFIGDELTA-002)"
 
   - id: portal_does_not_subscribe_offline_lwt
     severity: high
     summary: "Device-side LWT настроен ровно как yaml говорит, но Portal не subscribe-ится на idryer/{serial}/offline. Portal online/offline state вычисляется из 60-second telemetry heartbeat timeout."
-    device_side: "lib/idryer-core/src/mqtt/mqtt_client.cpp:64-79 — LWT topic configured correctly"
-    portal_side: "iDryerPortal/backend/src/mqtt-telemetry/mqtt-client.service.ts:82-99 (subscribe list — нет offline) + mqtt-telemetry.service.ts:942-1051 (checkDeviceHeartbeats — реализация heartbeat-timeout)"
     decision_required: |
       1) Portal: добавить subscribe на idryer/+/offline и handler;
       2) ИЛИ: задокументировать в yaml что offline LWT работает только broker-side, портал использует heartbeat timeout (60s).
     status: design_or_partial
     interop_break: true
-    found_by: "external audit (MQTT-D2P-OFFLINE-001)"
 
   - id: cmd_set_bind_variant_not_in_portal
     severity: medium
-    summary: "yaml command_set перечисляет {bind, val} вариант как valid producer-форму, но Portal devices.service.ts:1319-1326 hard-требует numeric id."
-    portal: "iDryerPortal/backend/src/devices/devices.service.ts:1319-1326,1337-1349 — typeof settings.id === 'number' обязательно"
-    fix_in_yaml: "Поле bind/val уже помечено как device_internal_only после моих L-10 правок — это совпадает с аудитом."
+    summary: "Контракт перечислял форму {bind, val} как валидную producer-форму, но Portal требует numeric id. Форма {bind} помечена device_internal_only."
     status: implemented
-    found_by: "external audit (cmd_set_bind_variant_contract_gap)"
 
   - id: invoke_split_iheater_vs_storage
     severity: resolved
@@ -3082,7 +3032,6 @@ known_mismatches:
       WS-контракт: добавлен тип INVOKE с полями action + args.
       Portal gateway: добавлен кейс INVOKE → MQTT commands/invoke.
     status: implemented
-    found_by: "external audit (cmd_invoke_iheater_live_mismatch, cmd_invoke_storage_id_only_mismatch)"
 
   - id: rfid_event_readerId_required_in_portal
     severity: high
@@ -3116,25 +3065,19 @@ known_mismatches:
     spa_status_02: "Status.count: yaml имеет range 0..4 — match"
     decision_made: "Добавить explicit range 0..4 для unitsCount и Weights.count."
     status: implemented
-    found_by: "external audit (SPA-HELLO-07, SPA-WEIGHTS-01)"
     todo:
       - "yaml: добавить range '0..4' к payloads.Hello.fields.unitsCount и payloads.Weights.fields.count."
 
   - id: ha_publisher_loop_bound_bugs
     severity: high
     summary: "Shared HA consumer (ha_publisher.cpp) использует неправильные upper bounds в loop'ах: Telemetry/Status truncate to 3 (i<3), Weights использует i<8 для weights[4] — потенциальный read past array."
-    code_evidence:
-      telemetry: "lib/idryer-core/src/integrations/home_assistant/ha_publisher.cpp:298-315 — loop `i < data.count && i < 3`"
-      status: "lib/idryer-core/src/integrations/home_assistant/ha_publisher.cpp:331-337 — loop `i < data.count && i < 3`"
-      weights: "lib/idryer-core/src/integrations/home_assistant/ha_publisher.cpp:353-359 — loop `i < data.count && i < 8` (НО weights[4]!)"
     impact: "Telemetry/Status: 4-й юнит не публикуется в HA. Weights: при некорректном count>4 чтение за пределами массива (UB)."
     decision_required: |
       1) Поправить ha_publisher.cpp loops: i<4 везде (либо использовать NUM_UNITS константу).
     status: design_or_partial
     interop_break: false
-    found_by: "external audit (SPA-TELEM-03, SPA-STATUS-03, SPA-WEIGHTS-02)"
     todo:
-      - "Code-fix: lib/idryer-core/src/integrations/home_assistant/ha_publisher.cpp:298,331,353 — заменить magic 3/8 на 4 или NUM_UNITS."
+      - "Code-fix в SDK (HA-publisher): заменить magic-границы циклов 3/8 на 4 (или NUM_UNITS)."
 
   - id: rfid_event_readerId_note_wrong_path
     severity: medium
@@ -3151,40 +3094,28 @@ known_mismatches:
   - id: config_legacy_binary_broken
     severity: high
     summary: "yaml payloads.Config описывает legacy binary UartConfigPayload (8 bytes), но RP2040 handleUartConfig не парсит его как struct — копирует байты в chunkPayload.data и runs deserializeJson на бинарных байтах."
-    code_evidence:
-      yaml_decl: "payloads.Config: targetTemperatureC10/targetHumidityPct/durationMinutes/fanDutyPct (8 bytes binary struct из uart_protocol.h:241-245)"
-      rp2040_handler: "iDryerControllerV2/src/uart/uart_manager.cpp:907-915,921-927 — handleUartConfig копирует payload в chunkPayload.data и зовёт deserializeJson(); binary НЕ парсится корректно"
     impact: "Legacy binary ConfigPush никогда не сработает на current RP2040 firmware."
     decision_required: |
       1) Снять path с binary ConfigPush (статус 'legacy/broken') в yaml;
       2) ИЛИ: исправить handleUartConfig чтобы реально парсил binary struct.
     status: design_or_partial
     interop_break: true
-    found_by: "external audit (BLK-CONFIG-LEGACY)"
     todo:
       - "yaml: payloads.Config — пометить как legacy_broken; не использовать как канон."
 
   - id: log_payload_struct_not_string
     severity: high
     summary: "yaml payloads.Log описывает 'raw bytes (UART_MAX_PAYLOAD)' — свободно-формальные строки. Реальный producer на RP2040 шлёт fixed-size binary DryerUart::LogPayload struct с полями severity/source/event/message."
-    code_evidence:
-      legacy_struct: "idryer-link/lib/idryer-protocol/src/uart/uart_protocol.h:301-309 (DryerUart::LogPayload) — fixed binary struct"
-      rp2040_producer: "iDryerControllerV2/src/main.cpp:1338-1354 + src/uart/uart_manager.cpp:1085-1093 — заполняет binary struct"
     decision_made: "yaml: payloads.Log должен описывать binary struct (severity[N], source[M], event[K], message[L], unitId), не 'raw bytes'."
     status: implemented
-    found_by: "external audit (BLK-LOG-STRUCT)"
     todo:
       - "yaml: payloads.Log — заменить 'raw bytes' на binary struct DryerUart::LogPayload."
 
   - id: claimstatus_expiresAt_no_producer
     severity: high
     summary: "yaml payloads.ClaimStatus.fields.expiresAt описывает absolute uint32 unix epoch, но в current code-paths нет producer'а который реально его заполняет. Cloud claim callback экспонирует только pin + remainingSeconds; reference UART forwarder тоже шлёт status/pin/remainingSeconds, expiresAt=0."
-    code_evidence:
-      cloud_callback: "lib/idryer-core/src/cloud/cloud_state_machine.cpp:209-226 + http_api.cpp:95-102"
-      reference_forwarder: "reference/dryer/DryerDevice.cpp:84-90"
     decision_made: "yaml: payloads.ClaimStatus.fields.expiresAt — пометить optional + note 'currently always 0; producer не доказан'."
     status: implemented
-    found_by: "external audit (BLK-CLAIMSTATUS-EXPIRESAT)"
     todo:
       - "yaml: ClaimStatus.expiresAt — optional + note про отсутствие producer'а."
 
