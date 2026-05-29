@@ -1105,9 +1105,7 @@ messages:
           product_variants:
             iheater_link:
               notes:
-                - "info.units[0].unitId публикуется как ЧИСЛО 0, а не строка 'U1'."
-                - "Это противоречит rules.unit_id_format ('string U1..U4') — но Portal type для InfoPayload тоже numeric."
-                - "Для info это исторически фиксированное расхождение."
+                - "info.units[0].unitId — числовой (0..3). Это единственное сообщение с числовым unitId; остальные используют строковый U1..U4 (см. rules.unit_id_format)."
               extra_fields:
                 capabilities:
                   {
@@ -1171,7 +1169,7 @@ messages:
                 outputMode:
                   {
                     type: int,
-                    note: "static_cast<int>(out.mode); в коде поле — int, не string",
+                    note: "0 = выключен, 1 = нагрев",
                   }
                 targetTempC: { type: float, unit: "°C" }
                 rssi: { type: int }
@@ -1179,7 +1177,7 @@ messages:
                   {
                     type: uint32,
                     unit: s,
-                    note: "millis()/1000 — секунды, не миллисекунды",
+                    note: "секунды",
                   }
               extra_unit_fields:
                 "units[0].heaterPower":
@@ -2309,7 +2307,7 @@ uart_only:
     direction: rp2040_to_esp
     purpose: "Структурированные диагностические/лог-сообщения от MCU. Перепаковывается в MQTT events."
     notes:
-      - "Wire-форма — fixed-size BINARY STRUCT (DryerUart::LogPayload). НЕ свободные строки!"
+      - "Wire-форма — fixed-size binary struct (поля severity/source/event/message — фиксированные char-буферы)."
       - "Старая yaml-формулировка 'raw bytes' вводила в заблуждение — transport принимает любые байты, но producer всегда шлёт packed struct."
 
   - kind: ClaimStart
@@ -2566,7 +2564,7 @@ mqtt_only:
     full_topic: "idryer/{serial}/offline"
     direction: broker_to_backend
     qos: 1
-    qos_note: "broker-side: QoS LWT задаётся в connect-options брокера, а не публикацией с устройства."
+    qos_note: "QoS LWT задаётся в connect-options брокера (broker-side)."
     retained: false
     interval: "on unexpected disconnect only"
     status: implemented
