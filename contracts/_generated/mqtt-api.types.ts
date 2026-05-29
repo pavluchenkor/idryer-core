@@ -111,7 +111,7 @@ export enum UartFlags {
 
 export type PortalUnitStatus = "IDLE" | "DRYING" | "STORAGE" | "PROFILE" | "FAULT" | "UNKNOWN";
 
-export type PortalEventType = "COMMAND_ACK" | "ERROR" | "WARNING" | "SESSION_COMPLETE" | "SESSION_INTERRUPTED" | "MAINTENANCE_REQUIRED";
+export type PortalEventType = "COMMAND_ACK" | "SESSION_COMPLETE" | "SESSION_INTERRUPTED" | "STAGE_CHANGED" | "PROFILE_COMPLETED" | "MAINTENANCE_REQUIRED";
 
 export type IntegrationState = "config_missing" | "connecting" | "disabled" | "error" | "idle" | "online";
 
