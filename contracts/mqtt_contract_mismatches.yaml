@@ -1,0 +1,390 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# iDryer protocol — known mismatches (drift tracker)
+# ─────────────────────────────────────────────────────────────────────────────
+# Спутник-файл к mqtt_contract.yaml. Перечисляет известные расхождения
+# между контрактом и реализациями. Каждая запись: суть (summary), влияние
+# (impact), принятое решение (decision), каноническая норма (canonical_*)
+# и статус. Это карта того, где код ещё догоняет контракт, а не руководство
+# к действию.
+#
+# Кросс-ссылки в mqtt_contract.yaml формата `known_mismatches.<id>`
+# указывают на записи здесь.
+# ─────────────────────────────────────────────────────────────────────────────
+
+known_mismatches:
+  - id: rfid_stack_partial_in_core
+    severity: high
+    summary: "RFID-стек в core SDK реализован только частично: UART-уровень есть, MQTT-уровень и enum событий — нет."
+    present_in_core:
+      - "UART transport: lib/idryer-core/src/uart/uart_bridge.cpp (sendRfid/sendRfidReadData/sendRfidWriteData + handlers)"
+      - "UART structs: lib/idryer-core/src/uart/uart_protocol.h:300-314 (UartRfidPayload, UartRfidDataPayload)"
+      - "UART message kinds: Rfid=0x14, RfidReadData=0x1A, RfidWriteData=0x1B"
+      - "UART command codes: ReadRfid=0x07, WriteRfid=0x08"
+    missing_in_core:
+      - "Enum class RfidEvent {TagDetected=1, TagRemoved=2, ReaderUnavailable=3} — есть только в legacy idryer-link/lib/idryer-protocol/src/uart/uart_protocol.h:398-403"
+      - "MqttClient::publishRfid() / publishRfidData() — отсутствуют в idryer-core/src/mqtt/mqtt_client.h"
+      - "TelemetryPublisher::publishRfid + rfidEventToString() — отсутствуют в idryer-core (есть в idryer-link/lib/idryer-protocol/src/cloud/telemetry_publisher.cpp:197-410)"
+    impact: |
+      При портировании любого продукта с RFID (новый Storage / Dryer на core SDK) разработчик
+      обнаружит, что нечем сериализовать UartRfidPayload в JSON для MQTT, и нет enum для
+      интерпретации `event` поля. Придётся либо реимплементировать тонкий слой в продукте,
+      либо доперенести из legacy в core.
+    decision_required: |
+      1) Перенести RfidEvent enum + publishRfid/publishRfidData + rfidEventToString из
+         legacy idryer-link в idryer-core (рекомендую — единый source of truth);
+      2) ИЛИ оставить как есть, и в каждом продукте писать свою сериализацию
+         (мусорно, но работает).
+    status: design_or_partial
+    interop_break: false
+    needs_action_for_new_products: true
+  - id: rfid_topic_overload
+    summary: "rfid_event и rfid_read_data делят один MQTT-топик idryer/{serial}/rfid; разделяются по shape."
+    impact: "Портал имеет два handler-а (rfid.handler.ts и rfid-data.handler.ts) с разной логикой."
+  - id: portal_pause_resume_orphan
+    summary: "Портал умеет публиковать commands/pause / commands/resume; ни одна прошивка их не обрабатывает."
+    impact: "Команды no-op. Помечено status:legacy."
+  - id: invoke_payload_shape
+    severity: high
+    summary: "Portal DTO принимает обе формы (id ИЛИ action). UART-прокси (idryer-link → RP2040) принимает ТОЛЬКО {id}. Форма {action} без id молча отбрасывается на bridge'е."
+    portal_dto:
+      logic: "если есть id (number) ИЛИ action (string) — validation passes"
+    handlers_per_path:
+      uart_proxy_idryer_link:
+        accepts: "{id} only"
+        rejects: "{action} без id → логируется WARN, return"
+        reason: "RP2040 диспатчит по индексу пункта меню (menu_data.cpp), action как строка туда не доходит"
+      iheater_link:
+        accepts: "{action: 'heat.start'|'heat.stop', args: {tempC, durationMin}}"
+        rejects: "{action} без известного имени → fallback в MenuBridge::applyInvokeCommand, требует {id}"
+      core_sdk_runtime_callback:
+        accepts: "что зарегистрирует продукт. Встроено: action='device.getConfig' → IProfile::getConfig"
+    examples:
+      works:
+        payload: { cmd: "invoke", id: 5 }
+        flow: "Portal → bridge (id=5) → ConfigPush JSON → RP2040 ищет menu[5].on_invoke → колбэк выполнен"
+      silently_dropped:
+        payload: { cmd: "invoke", action: "start_drying" }
+        flow: "Portal: HTTP 200 OK → MQTT publish → bridge: data['id'].is<int>()==false → лог WARN, return → RP2040: НИЧЕГО НЕ ПОЛУЧИЛ → пользователь: UI показывает 'отправлено', действие НЕ выполнено"
+    decision_required: |
+      1) Bridge учится резолвить action в id через menu mapping (требует копии меню или dynamic lookup в bridge);
+      2) ИЛИ Portal требует id (action остаётся только для логов и UI);
+      3) ИЛИ Portal сам резолвит action→id перед публикацией MQTT (frontend знает структуру меню из get_config).
+    impact: "INTEROP-RISK: тихий no-op без ошибки. Любой будущий клиент (mobile, third-party SDK) который шлёт {action} без id столкнётся с этим silent drop'ом."
+    status: design_or_partial
+    interop_break: true
+  - id: command_get_config_vs_invoke
+    summary: "commands/get_config и invoke device.getConfig дублируют друг друга."
+    impact: "Оба поддерживаются. Долгосрочная цель — оставить только invoke."
+  # ── Interop-баги между Portal/legacy bridge/RP2040 (требуют решения по коду) ──
+  - id: write_rfid_payload_mismatch
+    severity: critical
+    summary: "Portal посылает {commandId, unitId, expectedUid, ttlMs, format, data, timestamp}; legacy firmware ждёт {unitId, data, verify}; iHeater игнорирует"
+    portal_publishes: "iDryerPortal/backend/src/rfid/write-orchestrator.service.ts:211-234"
+    firmware_consumes: "idryer-link/lib/idryer-protocol/src/cloud/command_handler.cpp:415-512"
+    iheater_ignores: "iHeater-link/src/heater/command_routing.cpp:206-215"
+    decision_made: "Variant B — firmware aligns to Portal payload"
+    decision_date: "2026-05-01"
+    canonical_payload:
+      commandId:
+        {
+          type: string,
+          format: uuid_v4,
+          required: true,
+          purpose: "корреляция запроса с ответом в rfid/write_result",
+        }
+      unitId:
+        {
+          type: int_or_string,
+          required: true,
+          note: "число 0..3 либо 'U1'..'U4'",
+        }
+      expectedUid:
+        {
+          type: string,
+          format: hex,
+          required: true,
+          purpose: "UID метки с предыдущего read; гарантия записи на ту же метку",
+        }
+      ttlMs:
+        {
+          type: uint32,
+          required: true,
+          default: 15000,
+          note: "таймаут на стороне устройства",
+        }
+      format:
+        {
+          type: string,
+          required: true,
+          note: "тип кодирования: ndef / bambu / proprietary — селектор драйвера записи",
+        }
+      data:
+        {
+          type: string,
+          format: base64,
+          required: true,
+          purpose: "готовый бинарь, формируется на портале; устройство пишет байт-в-байт",
+        }
+      timestamp: { type: string, format: ISO8601, required: true }
+    expected_response:
+      topic: "idryer/{serial}/rfid/write_result"
+      payload:
+        commandId: "echo из запроса"
+        status: "'ok' | 'failed'"
+        error: "string при failed"
+    implementation_notes:
+      - "Портал уже формирует бинарь — прошивка просто пишет байты, не парсит data."
+      - "iHeater Link продолжает игнорировать write_rfid (нет RFID-ридера) — это нормально."
+      - "После реализации обновить status entry messages.rfid_write_data: design_or_partial → implemented."
+    status: design_or_partial
+    interop_break: true
+    todo:
+      - "Реализовать на стороне idryer-link / RP2040 приём нового payload"
+      - "Реализовать публикацию rfid/write_result"
+
+  - id: events_shape_mismatch
+    severity: medium
+    summary: "Частичный mismatch: MCU log events работают; UART transport errors дропаются Portal'ом из-за отсутствия unitId."
+    works_today:
+      - "MCU LogPayload events (SESSION_COMPLETE, STAGE_CHANGED, OVERHEAT и т.п.) — все 4 поля есть, портал принимает"
+    broken_today:
+      - "UART CRC errors, frame errors, ACK timeouts — нет unitId, отбрасывается на валидации портала"
+    decision_made: "Variant B — Portal makes unitId optional for transport-level errors"
+    decision_date: "2026-05-01"
+    canonical_payload:
+      severity:
+        {
+          type: string,
+          required: true,
+          enum: ["CRIT", "ERROR", "WARN", "INFO"],
+          note: "Portal должен нормализовать к uppercase",
+        }
+      event:
+        {
+          type: string,
+          required: true,
+          note: "тип события (PROTOCOL_ERROR_REMOTE, SESSION_COMPLETE, ...)",
+        }
+      message: { type: string, required: true }
+      unitId:
+        {
+          type: string,
+          optional: true,
+          format: "U1..U4 OR omitted",
+          note: "опционально — для transport-level errors отсутствует, для unit-events обязательно",
+        }
+      source:
+        {
+          type: string,
+          optional: true,
+          default: "SYSTEM",
+          note: "'UART' / 'MCU' / 'WIFI' / etc",
+        }
+      timestamp: { type: string, format: ISO8601, required: true }
+    implementation_notes:
+      - "Изменения только в Portal: снять unitId из обязательных полей валидатора, нормализовать severity к uppercase."
+      - "Прошивку трогать не нужно — handleLog продолжает работать как сейчас, handleUartError начнёт доходить."
+      - "WS-broadcast и БД-сохранение поддержать unitId=null для system-level событий."
+    status: design_or_partial
+    interop_break: false
+    interop_partial: true
+    todo:
+      - "Portal: events.handler.ts валидация — unitId optional, severity .toUpperCase()"
+      - "Portal: WS event payload и БД-схема — поддержать null unitId"
+
+  - id: broadcast_unit_id_unsupported
+    severity: low
+    summary: "0xFF=ALL присутствует как defensive fallback в bridge, но в реальной работе никогда не достигается. Контракт убирает ALL semantics."
+    real_world_status: "Dead path в production — портал никогда не шлёт без unitId, fallback в bridge не срабатывает."
+    decision_made: "Variant B — убрать ALL semantics из контракта, никаких изменений в коде не требуется"
+    decision_date: "2026-05-01"
+    canonical_rule:
+      unitId_required: true
+      unitId_format: "string 'U1'..'U4' (over MQTT) / uint8 0..3 (over UART)"
+      no_broadcast: "Если нужно действие на нескольких юнитах — портал/клиент разворачивает в N отдельных команд."
+    implementation_notes:
+      - "Контракт обновлён: payloads.Command.fields.unitId — required, без 0xFF=ALL."
+      - "Код прошивок и портала менять НЕ нужно: defensive fallback в bridge безвреден (мёртвый код в проде); iHeater-link использует 0xFF только в логах."
+      - "RP2040 уже корректно reject-ит 0xFF — изменений не требуется."
+    status: resolved_by_contract
+    interop_break: false
+
+  - id: storage_humidity_dropped
+    severity: medium
+    summary: "RESOLVED: UART-путь Storage теперь читает humidity/priority из меню (NVS), как локальный путь. Ранее передавал только temp."
+    architecture:
+      menu_settings_per_unit:
+        storage_temp: "float, default 45°C — целевая температура"
+        storage_hum: "uint8, default 12% — целевая влажность"
+        storage_hum_priority: "bool, default true — toggle 'по влажности'"
+    decision_made: "Variant B — UART path читает humidity/priority из NVS меню (как локальный start_storage)"
+    decision_date: "2026-05-01"
+    canonical_rule:
+      command_storage_payload:
+        - "params.temperature — опционально; если не указано → используется menu.storage_temp[unit]"
+        - "humidity и priority в payload НЕ принимаются"
+        - "Для изменения humidity: commands/set {id: storage_hum, val: ...}"
+        - "Для изменения priority: commands/set {id: storage_hum_priority, val: ...}"
+        - "Сначала set, потом storage — порядок важен"
+      semantic:
+        - "UART start_storage функционально равен локальному start_storage"
+        - "При запуске Storage прошивка ВСЕГДА читает все 3 параметра из NVS меню текущего юнита"
+    status: implemented
+    interop_break: false
+
+  # ── Block 2026-05-01-full-audit: третья сторона нашла 27 mismatch ────────
+  - id: portal_session_routing_storage_profile_bug
+    severity: critical
+    summary: "Portal в startSession шлёт только {temperature, duration}; диспетчер для STORAGE требует humidity, для PROFILE — profile, оба условия не выполняются → команда падает в commands/drying."
+    impact: "Сессии STORAGE и PROFILE никогда не публикуются на свои каноничные топики; всегда падают в commands/drying. iHeater-link в drying-ветке нет логики STORAGE → команда выполняется как сушка."
+    decision_required: |
+      1) Portal: расширить startSession передавать humidity для STORAGE и profile для PROFILE;
+      2) Portal: убрать precondition'ы в sendStartCommand (или inverse: пропускать null поля корректно);
+      3) Альтернатива: всегда падать в drying не баг, а намеренный fallback — тогда yaml перенести commands/storage и commands/profile в legacy.
+    status: design_or_partial
+    interop_break: true
+
+  - id: portal_publishes_unsupported_commands
+    severity: critical
+    summary: "Portal публикует commands/storage, /profile, /find, /clear_errors, /pause, /resume, но ни один current-scope продукт (iHeater Link, Storage Link) не имеет consumer-веток для них."
+    consumers_status:
+      iheater_link: "обрабатываются find/clear_errors/get_config/set/invoke/link_integration. drying/storage/stop удалены после миграции на menu_protocol_v1 (запуск/остановка идут через invoke heat.start/heat.stop). find и clear_errors — no-op (нужны для колокольчика DeviceHeader и ClearErrorsButton). profile/read_rfid/write_rfid/pause/resume не зарегистрированы — Unknown command."
+    impact: "Portal возвращает {status:'sent'} оператору, но никаких действий на устройстве нет. Тихий interop-баг."
+    decision_required: |
+      1) Portal: убрать публикацию commands/pause, commands/resume, и для current-scope products также storage/profile/find/clear_errors;
+      2) ИЛИ: реализовать consumer-ветки в текущих продуктах;
+      3) ИЛИ: задокументировать как product-specific (только для legacy idryer-link, не для current scope).
+    status: design_or_partial
+    interop_break: true
+
+  - id: integration_state_active_serialization
+    severity: high
+    summary: "yaml декларирует enums.IntegrationState и enums.ActiveIntegration как numeric/CamelCase, но wire JSON сериализуется в lowercase/snake_case строки."
+    yaml_was: "enums.IntegrationState: [Disabled, Idle, Connecting, Online, ConfigMissing, Error]; enums.ActiveIntegration: {None:0, Ha:1, Bambu:2, Moonraker:3}"
+    decision_made: "yaml должен описывать обе грани: numeric C++ enum (для UART/локального кода) И string JSON serialization (для MQTT). Раздельно."
+    status: implemented
+    interop_break: false
+    todo:
+      - "Поправить yaml: enums.IntegrationState и ActiveIntegration — добавить раздел json_string_form."
+      - "Также в integrations/status.payload.*.state и top_level.active — указать что значения lowercase strings."
+
+  - id: status_config_delta_not_implemented_in_current
+    severity: high
+    summary: "yaml messages.status и messages.config_delta помечены как implemented, но current iHeater-link и current iDryer-Storage не имеют publishStatus()/publishConfigDelta() путей."
+    legacy_only: "publishStatus/publishConfigDelta существуют в legacy idryer-link/lib/idryer-protocol — не в current SDK"
+    decision_required: |
+      1) Понизить status/config_delta до 'legacy_only' или 'planned' в текущем yaml-сегменте current-scope;
+      2) ИЛИ: реализовать publishStatus и publishConfigDelta в current iHeater-link и iDryer-Storage.
+    status: design_or_partial
+    interop_break: true
+
+  - id: portal_does_not_subscribe_offline_lwt
+    severity: high
+    summary: "Device-side LWT настроен ровно как yaml говорит, но Portal не subscribe-ится на idryer/{serial}/offline. Portal online/offline state вычисляется из 60-second telemetry heartbeat timeout."
+    decision_required: |
+      1) Portal: добавить subscribe на idryer/+/offline и handler;
+      2) ИЛИ: задокументировать в yaml что offline LWT работает только broker-side, портал использует heartbeat timeout (60s).
+    status: design_or_partial
+    interop_break: true
+
+  - id: cmd_set_bind_variant_not_in_portal
+    severity: medium
+    summary: "Контракт перечислял форму {bind, val} как валидную producer-форму, но Portal требует numeric id. Форма {bind} помечена device_internal_only."
+    status: implemented
+
+  - id: invoke_split_iheater_vs_storage
+    severity: resolved
+    summary: "iHeater-link теперь принимает commands/invoke с action=heat.start/heat.stop. Storage — action-based (led.pulse). Gap закрыт."
+    resolution: |
+      iHeater-link: onCommand('invoke') расширен — heat.start и heat.stop обрабатываются
+      до MenuBridge. Старые top-level 'drying'/'stop' сохранены как legacy.
+      WS-контракт: добавлен тип INVOKE с полями action + args.
+      Portal gateway: добавлен кейс INVOKE → MQTT commands/invoke.
+    status: implemented
+
+  - id: rfid_event_readerId_required_in_portal
+    severity: high
+    summary: "yaml payloads.Rfid.fields.readerId описывает поле как опциональный физический индекс, но Portal rfid.handler.ts:43-48 dropит event если readerId отсутствует."
+    portal: "iDryerPortal/backend/src/mqtt-telemetry/handlers/rfid.handler.ts:43-48 — required-чек"
+    legacy_publisher: "idryer-link/lib/idryer-protocol/src/cloud/telemetry_publisher.cpp:221-225 — всегда отправляет readerId"
+    note: "Сейчас runtime работает потому что legacy всегда шлёт. Контракт слишком расслабленный для будущих/новых producer'ов."
+    decision_made: "yaml: пометить readerId как required для MQTT JSON-формы (UART struct и так его всегда несёт)."
+    status: implemented
+    found_by: "external audit (RFID-003)"
+    todo:
+      - "Поправить payloads.Rfid.fields.readerId — добавить required:true для MQTT serialization."
+
+  - id: rfid_write_result_unitId_string_only_in_portal
+    severity: high
+    summary: "yaml mqtt_only[rfid/write_result] разрешает unitId как 'U1..U4' OR uint8 0..3. Portal pending-write lookup использует deviceId:unitId как ключ — если firmware вернёт numeric 0..3, ключ станет 'deviceId:0', а pending хранит 'deviceId:U1' → match не найдётся."
+    portal_writer: "iDryerPortal/backend/src/rfid/write-orchestrator.service.ts:154-159,211-230 — store pending key с string unitId 'U2'"
+    portal_reader: "iDryerPortal/backend/src/rfid/write-orchestrator.service.ts:288-295 — lookup по тому же составному ключу"
+    decision_made: "yaml: в rfid/write_result.json_shape пометить unitId — STRICTLY string 'U1..U4' (не numeric)."
+    status: implemented
+    found_by: "external audit (RFID-011)"
+    todo:
+      - "Уточнить json_shape в mqtt_only[rfid/write_result] — unitId только string."
+
+  - id: count_fields_upper_bounds_missing
+    severity: high
+    summary: "Поля count в payloads.Hello.unitsCount, .Telemetry.count, .Status.count, .Weights.count в yaml без upper bounds, реальный wire array — [4]. Это позволяет недостоверным consumer-loop циклам."
+    spa_hello_07: "Hello.unitsCount: yaml uint8 без range; wire — units[4]; current RP2040 product subset MENU_MAX_UNITS=3"
+    spa_weights_01: "Weights.count: yaml uint8 без range; wire — weights[4]; producer clamp i<4"
+    spa_telem_02: "Telemetry.count: yaml имеет range 0..4 — match"
+    spa_status_02: "Status.count: yaml имеет range 0..4 — match"
+    decision_made: "Добавить explicit range 0..4 для unitsCount и Weights.count."
+    status: implemented
+    todo:
+      - "yaml: добавить range '0..4' к payloads.Hello.fields.unitsCount и payloads.Weights.fields.count."
+
+  - id: ha_publisher_loop_bound_bugs
+    severity: high
+    summary: "Shared HA consumer (ha_publisher.cpp) использует неправильные upper bounds в loop'ах: Telemetry/Status truncate to 3 (i<3), Weights использует i<8 для weights[4] — потенциальный read past array."
+    impact: "Telemetry/Status: 4-й юнит не публикуется в HA. Weights: при некорректном count>4 чтение за пределами массива (UB)."
+    decision_required: |
+      1) Поправить ha_publisher.cpp loops: i<4 везде (либо использовать NUM_UNITS константу).
+    status: design_or_partial
+    interop_break: false
+    todo:
+      - "Code-fix в SDK (HA-publisher): заменить magic-границы циклов 3/8 на 4 (или NUM_UNITS)."
+
+  - id: rfid_event_readerId_note_wrong_path
+    severity: medium
+    summary: "yaml payloads.Rfid.fields.readerId.note описывает поведение '0xFF resolution by unitId', но это поведение для ВХОДЯЩЕГО RfidWriteData write fragment (RP2040 main.cpp:1061-1069), НЕ для исходящего Rfid (0x14) event."
+    rfid_event_path: "RP2040 main.cpp:2022-2031, 2063-2067 — sender всегда заполняет readerId конкретным числом"
+    rfid_write_data_path: "RP2040 main.cpp:1061-1069 — для входящего write-fragment LINK может слать 0xFF, RP2040 резолвит по unitId"
+    decision_made: "yaml: переместить '0xFF resolution' note из payloads.Rfid.fields.readerId в payloads.RfidData.fields.readerId — там это уместно."
+    status: implemented
+    found_by: "external audit (SPA-RFID-02)"
+    todo:
+      - "yaml: payloads.Rfid.fields.readerId — убрать '0xFF resolution' note, оставить только 'physical reader index'."
+      - "yaml: payloads.RfidData.fields.readerId — добавить note про '0xFF=auto-resolve by unitId' для incoming write-fragments."
+
+  - id: config_legacy_binary_broken
+    severity: high
+    summary: "yaml payloads.Config описывает legacy binary UartConfigPayload (8 bytes), но RP2040 handleUartConfig не парсит его как struct — копирует байты в chunkPayload.data и runs deserializeJson на бинарных байтах."
+    impact: "Legacy binary ConfigPush никогда не сработает на current RP2040 firmware."
+    decision_required: |
+      1) Снять path с binary ConfigPush (статус 'legacy/broken') в yaml;
+      2) ИЛИ: исправить handleUartConfig чтобы реально парсил binary struct.
+    status: design_or_partial
+    interop_break: true
+    todo:
+      - "yaml: payloads.Config — пометить как legacy_broken; не использовать как канон."
+
+  - id: log_payload_struct_not_string
+    severity: high
+    summary: "yaml payloads.Log описывает 'raw bytes (UART_MAX_PAYLOAD)' — свободно-формальные строки. Реальный producer на RP2040 шлёт fixed-size binary DryerUart::LogPayload struct с полями severity/source/event/message."
+    decision_made: "yaml: payloads.Log должен описывать binary struct (severity[N], source[M], event[K], message[L], unitId), не 'raw bytes'."
+    status: implemented
+    todo:
+      - "yaml: payloads.Log — заменить 'raw bytes' на binary struct DryerUart::LogPayload."
+
+  - id: claimstatus_expiresAt_no_producer
+    severity: high
+    summary: "yaml payloads.ClaimStatus.fields.expiresAt описывает absolute uint32 unix epoch, но в current code-paths нет producer'а который реально его заполняет. Cloud claim callback экспонирует только pin + remainingSeconds; reference UART forwarder тоже шлёт status/pin/remainingSeconds, expiresAt=0."
+    decision_made: "yaml: payloads.ClaimStatus.fields.expiresAt — пометить optional + note 'currently always 0; producer не доказан'."
+    status: implemented
+    todo:
+      - "yaml: ClaimStatus.expiresAt — optional + note про отсутствие producer'а."
+
