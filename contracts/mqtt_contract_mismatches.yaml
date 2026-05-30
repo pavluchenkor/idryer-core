@@ -40,9 +40,6 @@ known_mismatches:
   - id: rfid_topic_overload
     summary: "rfid_event и rfid_read_data делят один MQTT-топик idryer/{serial}/rfid; разделяются по shape."
     impact: "Портал имеет два handler-а (rfid.handler.ts и rfid-data.handler.ts) с разной логикой."
-  - id: portal_pause_resume_orphan
-    summary: "Портал умеет публиковать commands/pause / commands/resume; ни одна прошивка их не обрабатывает."
-    impact: "Команды no-op. Помечено status:legacy."
   - id: invoke_payload_shape
     severity: high
     summary: "Portal DTO принимает обе формы (id ИЛИ action). UART-прокси (idryer-link → iDryerControllerV2) принимает ТОЛЬКО {id}. Форма {action} без id молча отбрасывается на bridge'е."
