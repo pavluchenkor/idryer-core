@@ -189,47 +189,6 @@ known_mismatches:
       - "Portal: events.handler.ts валидация — unitId optional, severity .toUpperCase()"
       - "Portal: WS event payload и БД-схема — поддержать null unitId"
 
-  - id: broadcast_unit_id_unsupported
-    severity: low
-    summary: "0xFF=ALL присутствует как defensive fallback в bridge, но в реальной работе никогда не достигается. Контракт убирает ALL semantics."
-    real_world_status: "Dead path в production — портал никогда не шлёт без unitId, fallback в bridge не срабатывает."
-    decision_made: "Variant B — убрать ALL semantics из контракта, никаких изменений в коде не требуется"
-    decision_date: "2026-05-01"
-    canonical_rule:
-      unitId_required: true
-      unitId_format: "string 'U1'..'U4' (over MQTT) / uint8 0..3 (over UART)"
-      no_broadcast: "Если нужно действие на нескольких юнитах — портал/клиент разворачивает в N отдельных команд."
-    implementation_notes:
-      - "Контракт обновлён: payloads.Command.fields.unitId — required, без 0xFF=ALL."
-      - "Код прошивок и портала менять НЕ нужно: defensive fallback в bridge безвреден (мёртвый код в проде); iHeater-link использует 0xFF только в логах."
-      - "iDryerControllerV2 уже корректно reject-ит 0xFF — изменений не требуется."
-    status: resolved_by_contract
-    interop_break: false
-
-  - id: storage_humidity_dropped
-    severity: medium
-    summary: "RESOLVED: UART-путь Storage теперь читает humidity/priority из меню (NVS), как локальный путь. Ранее передавал только temp."
-    architecture:
-      menu_settings_per_unit:
-        storage_temp: "float, default 45°C — целевая температура"
-        storage_hum: "uint8, default 12% — целевая влажность"
-        storage_hum_priority: "bool, default true — toggle 'по влажности'"
-    decision_made: "Variant B — UART path читает humidity/priority из NVS меню (как локальный start_storage)"
-    decision_date: "2026-05-01"
-    canonical_rule:
-      command_storage_payload:
-        - "params.temperature — опционально; если не указано → используется menu.storage_temp[unit]"
-        - "humidity и priority в payload НЕ принимаются"
-        - "Для изменения humidity: commands/set {id: storage_hum, val: ...}"
-        - "Для изменения priority: commands/set {id: storage_hum_priority, val: ...}"
-        - "Сначала set, потом storage — порядок важен"
-      semantic:
-        - "UART start_storage функционально равен локальному start_storage"
-        - "При запуске Storage прошивка ВСЕГДА читает все 3 параметра из NVS меню текущего юнита"
-    status: implemented
-    interop_break: false
-
-  # ── Block 2026-05-01-full-audit: третья сторона нашла 27 mismatch ────────
   - id: portal_session_routing_storage_profile_bug
     severity: critical
     summary: "Portal в startSession шлёт только {temperature, duration}; диспетчер для STORAGE требует humidity, для PROFILE — profile, оба условия не выполняются → команда падает в commands/drying."
@@ -254,17 +213,6 @@ known_mismatches:
     status: design_or_partial
     interop_break: true
 
-  - id: integration_state_active_serialization
-    severity: high
-    summary: "yaml декларирует enums.IntegrationState и enums.ActiveIntegration как numeric/CamelCase, но wire JSON сериализуется в lowercase/snake_case строки."
-    yaml_was: "enums.IntegrationState: [Disabled, Idle, Connecting, Online, ConfigMissing, Error]; enums.ActiveIntegration: {None:0, Ha:1, Bambu:2, Moonraker:3}"
-    decision_made: "yaml должен описывать обе грани: numeric C++ enum (для UART/локального кода) И string JSON serialization (для MQTT). Раздельно."
-    status: implemented
-    interop_break: false
-    todo:
-      - "Поправить yaml: enums.IntegrationState и ActiveIntegration — добавить раздел json_string_form."
-      - "Также в integrations/status.payload.*.state и top_level.active — указать что значения lowercase strings."
-
   - id: status_config_delta_not_implemented_in_current
     severity: high
     summary: "yaml messages.status и messages.config_delta помечены как implemented, но current iHeater-link и current iDryer-Storage не имеют publishStatus()/publishConfigDelta() путей."
@@ -283,21 +231,6 @@ known_mismatches:
       2) ИЛИ: задокументировать в yaml что offline LWT работает только broker-side, портал использует heartbeat timeout (60s).
     status: design_or_partial
     interop_break: true
-
-  - id: cmd_set_bind_variant_not_in_portal
-    severity: medium
-    summary: "Контракт перечислял форму {bind, val} как валидную producer-форму, но Portal требует numeric id. Форма {bind} помечена device_internal_only."
-    status: implemented
-
-  - id: invoke_split_iheater_vs_storage
-    severity: resolved
-    summary: "iHeater-link теперь принимает commands/invoke с action=heat.start/heat.stop. Storage — action-based (led.pulse). Gap закрыт."
-    resolution: |
-      iHeater-link: onCommand('invoke') расширен — heat.start и heat.stop обрабатываются
-      до MenuBridge. Старые top-level 'drying'/'stop' сохранены как legacy.
-      WS-контракт: добавлен тип INVOKE с полями action + args.
-      Portal gateway: добавлен кейс INVOKE → MQTT commands/invoke.
-    status: implemented
 
   - id: rfid_event_readerId_required_in_portal
     severity: high
@@ -321,18 +254,6 @@ known_mismatches:
     found_by: "external audit (RFID-011)"
     todo:
       - "Уточнить json_shape в mqtt_only[rfid/write_result] — unitId только string."
-
-  - id: count_fields_upper_bounds_missing
-    severity: high
-    summary: "Поля count в payloads.Hello.unitsCount, .Telemetry.count, .Status.count, .Weights.count в yaml без upper bounds, реальный wire array — [4]. Это позволяет недостоверным consumer-loop циклам."
-    spa_hello_07: "Hello.unitsCount: yaml uint8 без range; wire — units[4]; current iDryerControllerV2 product subset MENU_MAX_UNITS=3"
-    spa_weights_01: "Weights.count: yaml uint8 без range; wire — weights[4]; producer clamp i<4"
-    spa_telem_02: "Telemetry.count: yaml имеет range 0..4 — match"
-    spa_status_02: "Status.count: yaml имеет range 0..4 — match"
-    decision_made: "Добавить explicit range 0..4 для unitsCount и Weights.count."
-    status: implemented
-    todo:
-      - "yaml: добавить range '0..4' к payloads.Hello.fields.unitsCount и payloads.Weights.fields.count."
 
   - id: ha_publisher_loop_bound_bugs
     severity: high
@@ -368,20 +289,4 @@ known_mismatches:
     interop_break: true
     todo:
       - "yaml: payloads.Config — пометить как legacy_broken; не использовать как канон."
-
-  - id: log_payload_struct_not_string
-    severity: high
-    summary: "yaml payloads.Log описывает 'raw bytes (UART_MAX_PAYLOAD)' — свободно-формальные строки. Реальный producer на iDryerControllerV2 шлёт fixed-size binary DryerUart::LogPayload struct с полями severity/source/event/message."
-    decision_made: "yaml: payloads.Log должен описывать binary struct (severity[N], source[M], event[K], message[L], unitId), не 'raw bytes'."
-    status: implemented
-    todo:
-      - "yaml: payloads.Log — заменить 'raw bytes' на binary struct DryerUart::LogPayload."
-
-  - id: claimstatus_expiresAt_no_producer
-    severity: high
-    summary: "yaml payloads.ClaimStatus.fields.expiresAt описывает absolute uint32 unix epoch, но в current code-paths нет producer'а который реально его заполняет. Cloud claim callback экспонирует только pin + remainingSeconds; reference UART forwarder тоже шлёт status/pin/remainingSeconds, expiresAt=0."
-    decision_made: "yaml: payloads.ClaimStatus.fields.expiresAt — пометить optional + note 'currently always 0; producer не доказан'."
-    status: implemented
-    todo:
-      - "yaml: ClaimStatus.expiresAt — optional + note про отсутствие producer'а."
 
