@@ -365,7 +365,7 @@ static_assert(sizeof(UartRfidDataPayload) == 199, "UartRfidDataPayload must be 1
 struct UartCmdPayload {
     UartCmdCode command;
     uint8_t    targetState;  ///< целевой режим (для Start: Drying/Storage/Profile)
-    uint8_t    unitId;  ///< Конкретный юнит, обязательно
+    uint8_t    unitId;  ///< Конкретный юнит, обязательно (0
     uint8_t    reserved[2];  ///< wire-padding между unitId и arg0 для выравнивания uint32; должен быть 0
     uint32_t    arg0;  ///< Семантика зависит от command/targetState
     uint32_t    arg1;  ///< Семантика зависит от command/targetState
@@ -443,7 +443,7 @@ static_assert(sizeof(UartErrorPayload) == 4, "UartErrorPayload must be 4 bytes (
 struct UartClaimStatusPayload {
     UartClaimStatus status;
     char    pin[9];
-    uint32_t    expiresAt;  ///< Зарезервировано: поле есть в wire-структуре, но текущие производители его не зап
+    uint32_t    expiresAt;  ///< Зарезервировано в wire-структуре
     uint32_t    remainingSeconds;  ///< Основное поле для UI
 } __attribute__((packed));
 static_assert(sizeof(UartClaimStatusPayload) == 18, "UartClaimStatusPayload must be 18 bytes (yaml-computed)");

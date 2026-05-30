@@ -51,11 +51,6 @@ constexpr const char* TOPIC_COMMAND_SET                = "commands/set";
 constexpr const char* TOPIC_COMMAND_READ_RFID          = "commands/read_rfid";
 constexpr const char* TOPIC_COMMAND_CLEAR_ERRORS       = "commands/clear_errors";
 
-// legacy (deprecated, для обратной совместимости)
-constexpr const char* LEGACY_CMD_PAUSE                    = "commands/pause";
-constexpr const char* LEGACY_CMD_RESUME                   = "commands/resume";
-constexpr const char* LEGACY_CMD_UPDATE_PRESET            = "commands/update_preset";
-
 // ── QoS и retained-флаги (из yaml.bindings.mqtt / mqtt_only) ─────
 
 constexpr uint8_t QOS_INFO                         = 0;

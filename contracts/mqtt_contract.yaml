@@ -106,6 +106,43 @@ device_profiles:
     capabilities: ["heater", "fan", "weight", "rfid"]
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Поддержка топиков по продуктам
+# ─────────────────────────────────────────────────────────────────────────────
+# Какие продукты обрабатывают каждый MQTT-топик. Список = продукты, у
+# которых топик задействован. Топик, к продукту не относящийся, в его
+# список не включён.
+#
+# Источник правды по «кто что поддерживает»: эта таблица. В описаниях
+# отдельных messages.* и invoke_actions.* такие сведения не дублируются.
+product_topic_support:
+
+  # Device → Backend (publish):
+  info:                   [iheater_link, storage_link, dryer_v3]
+  telemetry:              [iheater_link, storage_link, dryer_v3]
+  status:                 [iheater_link, storage_link, dryer_v3]
+  weights:                [dryer_v3]
+  events:                 [iheater_link, storage_link, dryer_v3]
+  config:                 [iheater_link, storage_link, dryer_v3]
+  config/delta:           [iheater_link, storage_link, dryer_v3]
+  rfid:                   [dryer_v3]
+  rfid/write_result:      [dryer_v3]
+  integrations/status:    [iheater_link]
+  offline:                [iheater_link, storage_link, dryer_v3]  # LWT
+
+  # Backend → Device (commands):
+  commands/get_config:    [iheater_link, storage_link, dryer_v3]
+  commands/set:           [iheater_link, storage_link, dryer_v3]
+  commands/invoke:        [iheater_link, storage_link, dryer_v3]
+  commands/find:          [iheater_link, storage_link, dryer_v3]
+  commands/clear_errors:  [dryer_v3]
+  commands/drying:        [dryer_v3]    # legacy; iheater использует commands/invoke heat.start
+  commands/storage:       [dryer_v3]    # legacy
+  commands/profile:       [dryer_v3]    # legacy
+  commands/stop:          [dryer_v3]    # legacy; iheater использует commands/invoke heat.stop
+  commands/read_rfid:     [dryer_v3]
+  commands/write_rfid:    [dryer_v3]
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Источники правды
 # ─────────────────────────────────────────────────────────────────────────────
 source_of_truth:
@@ -1366,7 +1403,6 @@ messages:
               }
           notes:
             - "INTEROP-BREAK: Portal payload и legacy consumer несовместимы — см. known_mismatches.write_rfid_payload_mismatch."
-            - "iHeater-link явно игнорирует commands/write_rfid (src/heater/command_routing.cpp:206-215)."
       uart:
         kind: RfidWriteData
         kind_id: 0x1B
@@ -1450,7 +1486,7 @@ messages:
 
   - name: command_drying
     direction: backend_to_device
-    purpose: "Запуск сушки. Legacy-канал для dryer (iDryer V3): конвертируется в UART Command(Start, targetState=Drying). iHeater Link на menu_protocol_v1 этот топик больше не обрабатывает — для него backend шлёт commands/invoke {action:'heat.start'}."
+    purpose: "Запуск сушки. Legacy-канал, конвертируется в UART Command(Start, targetState=Drying)."
     bindings:
       mqtt:
         suffix: commands/drying
@@ -1475,7 +1511,6 @@ messages:
             - "unitId обязателен (U1..UN). Broadcast (unitId отсутствует / unitId=0xFF) НЕ реализован —
               iDryerControllerV2 отклоняет unitId=0xFF как InvalidPayload. Реализовать broadcast можно когда
               появится реальная потребность (сценарий: одинаковый материал во всех камерах)."
-            - "Топик для Dryer; iHeater Link его не обрабатывает — у iHeater сушка идёт через invoke."
       uart:
         kind: Command
         kind_id: 0x20
@@ -1533,8 +1568,6 @@ messages:
         cmd_code_id: 0x01
         cmd_targetState: "Storage (2)"
     status: implemented
-    notes:
-      - "iHeater Link этот топик не обрабатывает — Storage-режима у iHeater нет."
 
   - name: command_profile
     direction: backend_to_device
@@ -1611,7 +1644,6 @@ messages:
         cmd_code_id: 0x02
     status: implemented
     notes:
-      - "iHeater Link этот топик не обрабатывает — backend для IHEATER_LINK шлёт commands/invoke {action:'heat.stop'}."
       - "0xFF=ALL не поддерживается iDryerControllerV2 (reject); broadcast не реализован — портал всегда шлёт конкретный unitId."
 
   - name: command_find
@@ -1746,8 +1778,6 @@ messages:
         cmd_code_id: 0x07
         source_ref: "command_handler.cpp:393 (handleReadRfid)"
     status: implemented_device_only
-    notes:
-      - "iHeater-link явно игнорирует."
 
   - name: command_clear_errors
     direction: backend_to_device
@@ -1769,8 +1799,6 @@ messages:
         cmd_code: ClearErrors
         cmd_code_id: 0x12
     status: implemented_device_only
-    notes:
-      - "iHeater-link явно игнорирует."
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 2. INVOKE-ACTIONS (универсальный конверт commands/invoke)

@@ -40,6 +40,14 @@
     },
     "canonical_roles":    { "type": "object", "additionalProperties": true },
     "widgets":            { "type": "object", "additionalProperties": true },
+    "product_topic_support": {
+      "type": "object",
+      "description": "Топик → список продуктов, которые его обрабатывают.",
+      "additionalProperties": {
+        "type": "array",
+        "items": { "type": "string" }
+      }
+    },
     "source_of_truth": { "$ref": "#/$defs/SourceOfTruth" },
     "rules": { "$ref": "#/$defs/Rules" },
     "uart_kind_ranges": { "$ref": "#/$defs/UartKindRanges" },
