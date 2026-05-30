@@ -438,22 +438,24 @@ widgets:
     applies_to: [iheater_link]
     purpose: "Карточка нагревателя. Локальный draft state для temp/duration, не затрагивает меню."
     telemetry:
-      - "temperature (от Bambu/Moonraker если интеграция активна)"
+      - "chamberTemp — температура камеры от активной интеграции (Bambu или Moonraker); приходит только при наличии датчика камеры у принтера"
     status_signals:
-      - "status.mode (DRYING|Idle)"
-      - "status.targetTempC"
-      - "status.elapsedTime, status.durationS — для прогресс-бара"
+      - "status.units[0].mode (IDLE | DRYING)"
+      - "status.units[0].target.temperature (float °C) — текущая цель нагрева"
+      - "status.units[0].elapsedTime (sec) — для прогресс-бара"
+      - "status.units[0].target.duration (min) — для прогресс-бара"
+      - "progress = elapsedTime / (target.duration × 60)"
     body_idle:
-      - "input: Температура (range из контракта 30..120 °C, draft state)"
-      - "input: Время (range 0..1440 min, 0=∞, draft state)"
+      - "input: Температура — поле ввода tempC; стартовое значение из меню устройства (menu.heat_temp)"
+      - "input: Время — поле ввода durationMin; стартовое значение из меню устройства (menu.heat_duration); 0 = бесконечно"
       - "button: Старт → commands/invoke {action:'heat.start', args:{tempC, durationMin}}"
     body_active:
-      - "display: targetTempC"
-      - "progress: status.elapsedTime / status.durationS (если durationS>0)"
+      - "display: status.units[0].target.temperature"
+      - "progress: elapsedTime / (target.duration × 60), показывать если target.duration > 0"
       - "button: Стоп → commands/invoke {action:'heat.stop'}"
     mockup_idle: |
       ┌─ iHeater Link · Idle · ▂▂▂▆ ─────────┐
-      │  🌡 23.5 °C (от Bambu, опц.)          │
+      │  🌡 23.5 °C (chamberTemp от интеграции) │
       │  ─────────────────────────────────    │
       │  Темп  [  60  ] °C                    │
       │  Время [   0  ] мин (0=∞)             │
@@ -462,7 +464,7 @@ widgets:
     mockup_active: |
       ┌─ iHeater Link · DRYING · ▂▂▂▆ ───────┐
       │  🌡 58.2 °C  →  цель 60 °C            │
-      │  ──────████░░░░░░  12/30 мин          │  ← progressbar если durationS>0
+      │  ──────████░░░░░░  12/30 мин          │  ← progressbar если target.duration > 0
       │  [⏹ Стоп]                             │
       └───────────────────────────────────────┘
     source_ref: "iDryerPortal/frontend-v2/src/components/dashboard/cards/HeaterCard.tsx"
@@ -1171,6 +1173,11 @@ messages:
                     note: "0 = выключен, 1 = нагрев",
                   }
                 targetTempC: { type: float, unit: "°C" }
+                chamberTemp:
+                  type: float
+                  unit: "°C"
+                  optional: true
+                  note: "Температура камеры от активной интеграции (Bambu или Moonraker). Приходит только если у принтера реально есть датчик камеры. Отсутствие поля = нет датчика (см. rules.telemetry_null_policy)."
               extra_unit_fields:
                 "units[0].heaterPower":
                   { type: int, note: "0 или 100 (heating ? 100 : 0)" }
@@ -1902,16 +1909,15 @@ invoke_actions:
         ledIndex:
           type: int
           required: false
-          range: [0, 299]
-          notes: "Стартовый LED. Если присутствует — режим ZONE PULSE."
+          notes: "Стартовый LED. Если присутствует — режим ZONE PULSE. Верхняя граница — длина ленты конкретного устройства (из меню)."
         ledCount:
           type: int
           required: false
           default: 1
-          range: [1, 300]
           notes: |
             Количество подряд идущих LED, начиная с ledIndex.
             Default 1 → backward compat с прошлым «1 слот = 1 LED».
+            Верхняя граница — длина ленты конкретного устройства (из меню).
 
         # ── Mode 2: GLOBAL ANIMATION OVERRIDE ───────────────────────
         animation:
@@ -1998,8 +2004,7 @@ invoke_actions:
         tempC:
           type: float
           required: true
-          range: [20, 120]
-          notes: "Целевая температура нагревателя в °C."
+          notes: "Целевая температура нагревателя в °C. Допустимый диапазон — у конкретного устройства в его меню (heat_temp)."
         durationMin:
           type: int
           required: false
