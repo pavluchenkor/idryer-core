@@ -109,11 +109,11 @@ device_profiles:
 # Источники правды
 # ─────────────────────────────────────────────────────────────────────────────
 source_of_truth:
-  # Контракт — единственный источник правды о протоколе. Реализации живут в
-  # репозиториях ниже; конкретные файлы/строки в контракте НЕ фиксируются
-  # (устаревают при рефакторинге) — ищите grep'ом по имени топика/поля.
+  # Контракт — единственный источник правды о протоколе; описывает его
+  # независимо от расположения кода. Пути к реализации меняются при
+  # рефакторинге — ищите grep'ом по имени топика/поля.
   repositories:
-    idryer-core:        "SDK на ESP32 — MQTT/UART транспорт, action dispatch, интеграции, header-only menu_commands"
+    idryer-core:        "SDK на ESP32 — MQTT/UART транспорт, action dispatch, интеграции, menu_commands"
     iHeater-link:       "Прошивка iHeater (single-chip ESP32) — нагрев, Bambu/Moonraker"
     iDryer-Storage:     "Прошивка Storage (single-chip ESP32) — LED, SHT-сенсоры"
     idryer-link:        "ESP32-мост для Dryer/Storage поверх UART к контроллеру"
@@ -139,7 +139,7 @@ rules:
   lwt_topic: "idryer/{serial}/offline"
   max_payload_bytes: 16384
   config_chunk_threshold_bytes: 16000
-  unit_id_format: "string U1..U4 (по соглашению портала); внутри MCU — uint8_t 0..3. ИСКЛЮЧЕНИЕ: info.units[].unitId — numeric 0..3 (исторически; так шлют iHeater-link и legacy dryer; Portal InfoPayload type тоже numeric)."
+  unit_id_format: "В MQTT-JSON — строка U1..U4 (telemetry, status, weights, rfid, команды). Исключение: info.units[].unitId — число 0..3 (единственное сообщение с числовым unitId). Внутри MCU и на UART — uint8_t 0..3."
 
   mqtt_session: "clean_session=false; keepalive=60s"
   publish_qos: "Все device→backend publish — QoS 0 (MQTT-клиент прошивки не задаёт publish-QoS). Subscribe (commands/*) — QoS 1. LWT (offline) — broker-side."
@@ -198,9 +198,8 @@ rules:
                          если не задан явно.
 
       Назначение для устройства: settimeofday() при получении любой portal-команды.
-      RTC-времени на железе нет; NTP не используется. Time-sync целиком построен
-      на этой конвенции. До первой portal-команды время = 1970-01-01 (TLS handshake
-      работает: ESP32 mbedtls в этой сборке не валидирует cert validity period).
+      RTC на железе нет, NTP не используется — синхронизация времени держится
+      только на этой конвенции. До первой команды часы устройства = 1970-01-01.
 
     field: "timestamp"
     format: "ISO 8601 UTC (`YYYY-MM-DDTHH:MM:SS[.sss]Z`)"
@@ -313,8 +312,8 @@ canonical_roles:
     labels: { ru: "Записать метку", en: "Write tag" }
 
   # ── iHeater Link — в статусе in_progress ─────────────────────────────────
-  # Integration toggles (interlock): только один из трёх активен.
-  # Эксклюзивность обеспечивает MenuBridge::applySetCommand.
+  # Integration toggles (interlock): активна максимум одна из трёх.
+  # Включение одной автоматически выключает остальные (enforced на устройстве).
   iheater.bambu_enabled:
     type: bool
     widget: toggle
@@ -503,7 +502,7 @@ widgets:
     status: legacy
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Перечисления (enum) — копируются 1:1 из uart_protocol.h
+# Перечисления (enum) wire-уровня — источник для генерации uart_protocol.h (1:1).
 # ─────────────────────────────────────────────────────────────────────────────
 enums:
   UartRfidEvent:
@@ -602,11 +601,10 @@ enums:
     - FAULT # ошибка/неисправность (закрывает сессию с reason='error')
     - UNKNOWN # fallback для незнакомого UartDryerMode (НЕ закрывает сессию)
 
-  # Поле events.event — СВОБОДНАЯ строка (ERRCODE_LIST от errbus прошивки +
-  # session-события). Ниже — известные session/ack значения, которые backend
-  # обрабатывает явным switch'ем; произвольные errcode-имена (SENSOR_SHORT и
-  # т.п.) тоже валидны. Severity передаётся отдельным полем `severity`
-  # (INFO/WARN/ERROR/CRIT) — не путать с типом события.
+  # events.event — СВОБОДНАЯ строка (не фиксированный список). Значения:
+  #   • известные session/ack-события (перечислены ниже) — backend обрабатывает явной логикой;
+  #   • errcode прошивки (напр. SENSOR_SHORT) — тоже валидны, backend логирует как есть.
+  # Важность несёт отдельное поле severity (INFO/WARN/ERROR/CRIT), не само событие.
   PortalEventType:
     - COMMAND_ACK
     - SESSION_COMPLETE
@@ -614,8 +612,6 @@ enums:
     - STAGE_CHANGED
     - PROFILE_COMPLETED
     - MAINTENANCE_REQUIRED
-    # ERROR / WARNING всё ещё присутствуют в backend EventType enum, но это
-    # legacy — фактически тип ошибки несёт `event` (errcode), важность — `severity`.
 
   # Link integrations (HA / Bambu / Moonraker)
   # ВАЖНО: enum имеет ДВЕ грани сериализации (см. known_mismatches.integration_state_active_serialization):
@@ -655,18 +651,20 @@ enums:
         Moonraker: "moonraker"
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Общие payload-схемы (на которые ссылаются messages / invoke_actions)
+# UART-бинарные payload-структуры (упакованные, передаются байт-в-байт ESP↔MCU).
+# Источник для генерации uart_protocol.h. Ссылки на них — в messages.*.uart и invoke_actions.
+# MQTT-нагрузка — это JSON, она описана в messages.*.json_shape.
 #
 # КОНВЕНЦИЯ ЕДИНИЦ ИЗМЕРЕНИЯ (temperatures):
-#   - На MQTT (между порталом/мобильным и ESP-bridge) температуры передаются
-#     как целые °C (human-readable).
+#   - На MQTT температуры в человекочитаемых °C:
+#       • команды (портал→устройство): целые °C (напр. params.temperature: 55);
+#       • телеметрия/статус (устройство→портал): float °C (напр. 23.5).
 #   - На UART (между ESP-bridge и MCU) все температуры кодируются как
 #     `°C × 10` int. ESP-bridge умножает на 10 при отправке UART,
 #     MCU делит на 10 при приёме. Поля: Profile.stages[].temp,
 #     Command.arg0 (для Start drying/storage), Telemetry.temperatureC10,
 #     Telemetry.targetTempC10, Config.targetTemperatureC10.
-#   - Точность 0.1 °C на проводе соответствует разрешению термосенсоров
-#     (SHT31, термисторы) и держит единый int-формат без float.
+#   - ×10 = точность 0.1 °C целыми числами.
 # ─────────────────────────────────────────────────────────────────────────────
 payloads:
   UartUnitConfig:
@@ -996,7 +994,7 @@ payloads:
         type: uint32
         unit: "unix epoch"
         optional: true
-        note: "В current code-paths producer'а нет: cloud claim callback экспонирует только pin+remainingSeconds; reference UART forwarder шлёт expiresAt=0. См. known_mismatches.claimstatus_expiresAt_no_producer."
+        note: "Зарезервировано: поле есть в wire-структуре, но текущие производители его не заполняют (шлют 0). Потребителю опираться на remainingSeconds. Producer не реализован — known_mismatches.claimstatus_expiresAt_no_producer."
       remainingSeconds:
         {
           type: uint32,
@@ -1037,7 +1035,8 @@ payloads:
         }
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 1. СООБЩЕНИЯ С ОБОИМИ BINDINGS (MQTT + UART)
+# 1. СКВОЗНЫЕ СООБЩЕНИЯ (идут и по UART, и по MQTT)
+#    Одна запись = обе «ноги» пути: uart: (ESP↔MCU) и mqtt: (ESP↔портал).
 # ─────────────────────────────────────────────────────────────────────────────
 messages:
   - name: info
@@ -1102,7 +1101,7 @@ messages:
           product_variants:
             iheater_link:
               notes:
-                - "info.units[0].unitId — числовой (0..3). Это единственное сообщение с числовым unitId; остальные используют строковый U1..U4 (см. rules.unit_id_format)."
+                - "info.units[0].unitId — число 0..3 (единственное сообщение с числовым unitId; остальные — строка U1..U4). Историческое соглашение — потребитель info должен ожидать число."
               extra_fields:
                 capabilities:
                   {
@@ -2407,7 +2406,7 @@ mqtt_only:
             - "free-form event строки; severity — то, что прислал MCU."
       notes:
         - "INTEROP-BREAK: реальный shape противоречив между публишерами (legacy) и валидатором (Portal). См. known_mismatches.events_shape_mismatch."
-        - "Тип события — из EventType (COMMAND_ACK / ERROR / WARNING / SESSION_COMPLETE / ...) — но Portal требует именно 'event' (не 'type') и lower-level legacy не нормализует regsitr."
+        - "Имя поля типа события — `event` (не `type`). Значение — свободная строка: известные session/ack-события (COMMAND_ACK, SESSION_COMPLETE, ...) либо errcode прошивки. Важность — отдельное поле `severity` (INFO/WARN/ERROR/CRIT, UPPERCASE)."
       example_minimal_for_portal:
         severity: ERROR
         event: SESSION_COMPLETE
