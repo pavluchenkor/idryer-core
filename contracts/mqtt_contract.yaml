@@ -198,25 +198,10 @@ rules:
   telemetry_null_policy:
     rule: "Отсутствие поля = нет данных."
     description: |
-      Float-поля telemetry (temperature, humidity, heaterTemp и т.п.) — если
-      датчик не подключён ИЛИ ни одного валидного reading'а ещё не было, поле
-      В PAYLOAD НЕ ВКЛЮЧАЕТСЯ ВООБЩЕ. Не пишем 0.0, не пишем null — поля
-      просто нет в JSON.
-
-      Реализация:
-      - Прошивка-продукт ставит NAN в `telemetry.airTempC[i]` (или подобное
-        float-поле) когда датчик не отвечает.
-      - SDK (idryer-core `iDryer.cpp` publishTelemetry) проверяет `isnan(v)`
-        и пропускает поле в JSON-сериализации.
-      - Frontend (TelemetryRow.tsx) фильтрует cells с `value === undefined`,
-        пустые блоки не рисует.
-
-      Преимущества:
-      - Экономия трафика (нет null-полей в payload).
-      - Семантика чистая: «нет поля» = «нет данных», нет ambiguous 0.0.
-      - Frontend единообразно обрабатывает «датчик архитектурно отсутствует»
-        (cfg.has*=false) и «датчик не отвечает» (NAN) — оба случая = поле
-        отсутствует в JSON.
+      Float-поля telemetry (temperature, humidity, heaterTemp и т.п.) есть
+      в JSON только когда у устройства есть валидное значение от датчика.
+      Если датчик не подключён или valid reading'а ещё не было — поле
+      в payload отсутствует. Значения 0.0 / null для пропуска не используются.
     applies_to:
       - "telemetry.temperature (airTempC)"
       - "telemetry.humidity (airHumidityPct)"
@@ -921,7 +906,7 @@ payloads:
             {
               type: uint16,
               unit: "seconds",
-              note: "wire-level семантика — секунды (комментарий 'minutes' в коде устарел)",
+              note: "wire-level — секунды",
             }
           hold:
             {
@@ -1600,7 +1585,6 @@ messages:
             - "ramp и hold — СЕКУНДЫ."
             - "new: temperature в стадиях — °C целое. stages и startStage внутри params."
             - "legacy (DEPRECATED): stages на верхнем уровне, поле temp в °C × 10. Не парсится текущими прошивками — см. note варианта legacy."
-            - "Поле 'mode' DECORATIVE: ни portal sender, ни bridge handler его не парсят. Не включать в новые клиенты."
       uart:
         kind: Command
         kind_id: 0x20
@@ -1836,25 +1820,8 @@ messages:
 #   указано здесь для контекста, чтобы было видно границу между каналами.
 #
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-#
-# Архитектура:
-#   "action" из payload и вызывает зарегистрированный продуктом колбэк
-#   invokeHandler_. Если продукт не вызывал setInvokeHandler — все action'ы
-#   логируются как "unhandled".
-#
-#   commandHandler_-колбэк (если зарегистрирован через setCommandHandler) ДО
-#   ActionDispatcher и сам решает, как разруливать commands/invoke.
-#
-# Поэтому реальный список "что принимается" разный у каждого продукта:
-#   - core: единственный встроенный action — device.getConfig (через
-#           default-ветку IdryerRuntime, когда commandHandler_ не задан).
-#   - iheater_link: принимает {action: "heat.start"|"heat.stop", args} в
-#                   в MenuBridge::applyInvokeCommand, который требует {id}.
-#   - idryer_link:  принимает {cmd:"invoke", id:<int>} и проксирует в iDryerControllerV2
-#                   через ConfigPush (диспетчинг по числовому id).
-#   - rp2040:       на UART через ConfigPush принимает {cmd:"invoke", id} и
-#                   вызывает MenuItem.action.invoke() для item с type=MN_ACTION.
-#                   Доступные действия = on_invoke в menu_v2.yaml.
+# Поддержка форм по продуктам — в product_topic_support (Form A / Form B
+# определяются по payload-shape, обрабатываются в invoke_actions.<product>).
 # ─────────────────────────────────────────────────────────────────────────────
 invoke_actions:
   # ── Встроенные в SDK (доступны всем продуктам по умолчанию) ───────────
@@ -2586,14 +2553,10 @@ mqtt_only:
 # `known_mismatches.<id>` указывают на записи в том файле.
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 7. TODO — что не удалось верифицировать автоматически
+# HA-PUBLISHER топики (publishing к локальному HA-broker)
 # ─────────────────────────────────────────────────────────────────────────────
-# ─────────────────────────────────────────────────────────────────────────────
-# 8. HA-PUBLISHER топики (publishing к локальному HA-broker)
-# ─────────────────────────────────────────────────────────────────────────────
-# Эти топики публикуются устройством В НАМЕСПЕЙСЕ idryer/{serial}/...,
-# но направлены на ЛОКАЛЬНЫЙ HA MQTT-broker (не на портал).
-# Не должны интерферировать с topic-namespace портала.
+# Топики публикуются устройством в namespace idryer/{serial}/..., но летят
+# на локальный HA MQTT-broker. Живут отдельно от topic-namespace портала.
 ha_integration_topics:
   topics:
     - pattern: "idryer/{serial}/alerts"
