@@ -45,14 +45,14 @@ known_mismatches:
     impact: "Команды no-op. Помечено status:legacy."
   - id: invoke_payload_shape
     severity: high
-    summary: "Portal DTO принимает обе формы (id ИЛИ action). UART-прокси (idryer-link → RP2040) принимает ТОЛЬКО {id}. Форма {action} без id молча отбрасывается на bridge'е."
+    summary: "Portal DTO принимает обе формы (id ИЛИ action). UART-прокси (idryer-link → iDryerControllerV2) принимает ТОЛЬКО {id}. Форма {action} без id молча отбрасывается на bridge'е."
     portal_dto:
       logic: "если есть id (number) ИЛИ action (string) — validation passes"
     handlers_per_path:
       uart_proxy_idryer_link:
         accepts: "{id} only"
         rejects: "{action} без id → логируется WARN, return"
-        reason: "RP2040 диспатчит по индексу пункта меню (menu_data.cpp), action как строка туда не доходит"
+        reason: "iDryerControllerV2 диспатчит по индексу пункта меню (menu_data.cpp), action как строка туда не доходит"
       iheater_link:
         accepts: "{action: 'heat.start'|'heat.stop', args: {tempC, durationMin}}"
         rejects: "{action} без известного имени → fallback в MenuBridge::applyInvokeCommand, требует {id}"
@@ -61,10 +61,10 @@ known_mismatches:
     examples:
       works:
         payload: { cmd: "invoke", id: 5 }
-        flow: "Portal → bridge (id=5) → ConfigPush JSON → RP2040 ищет menu[5].on_invoke → колбэк выполнен"
+        flow: "Portal → bridge (id=5) → ConfigPush JSON → iDryerControllerV2 ищет menu[5].on_invoke → колбэк выполнен"
       silently_dropped:
         payload: { cmd: "invoke", action: "start_drying" }
-        flow: "Portal: HTTP 200 OK → MQTT publish → bridge: data['id'].is<int>()==false → лог WARN, return → RP2040: НИЧЕГО НЕ ПОЛУЧИЛ → пользователь: UI показывает 'отправлено', действие НЕ выполнено"
+        flow: "Portal: HTTP 200 OK → MQTT publish → bridge: data['id'].is<int>()==false → лог WARN, return → iDryerControllerV2: НИЧЕГО НЕ ПОЛУЧИЛ → пользователь: UI показывает 'отправлено', действие НЕ выполнено"
     decision_required: |
       1) Bridge учится резолвить action в id через menu mapping (требует копии меню или dynamic lookup в bridge);
       2) ИЛИ Portal требует id (action остаётся только для логов и UI);
@@ -75,7 +75,7 @@ known_mismatches:
   - id: command_get_config_vs_invoke
     summary: "commands/get_config и invoke device.getConfig дублируют друг друга."
     impact: "Оба поддерживаются. Долгосрочная цель — оставить только invoke."
-  # ── Interop-баги между Portal/legacy bridge/RP2040 (требуют решения по коду) ──
+  # ── Interop-баги между Portal/legacy bridge/iDryerControllerV2 (требуют решения по коду) ──
   - id: write_rfid_payload_mismatch
     severity: critical
     summary: "Portal посылает {commandId, unitId, expectedUid, ttlMs, format, data, timestamp}; legacy firmware ждёт {unitId, data, verify}; iHeater игнорирует"
@@ -139,7 +139,7 @@ known_mismatches:
     status: design_or_partial
     interop_break: true
     todo:
-      - "Реализовать на стороне idryer-link / RP2040 приём нового payload"
+      - "Реализовать на стороне idryer-link / iDryerControllerV2 приём нового payload"
       - "Реализовать публикацию rfid/write_result"
 
   - id: events_shape_mismatch
@@ -205,7 +205,7 @@ known_mismatches:
     implementation_notes:
       - "Контракт обновлён: payloads.Command.fields.unitId — required, без 0xFF=ALL."
       - "Код прошивок и портала менять НЕ нужно: defensive fallback в bridge безвреден (мёртвый код в проде); iHeater-link использует 0xFF только в логах."
-      - "RP2040 уже корректно reject-ит 0xFF — изменений не требуется."
+      - "iDryerControllerV2 уже корректно reject-ит 0xFF — изменений не требуется."
     status: resolved_by_contract
     interop_break: false
 
@@ -328,7 +328,7 @@ known_mismatches:
   - id: count_fields_upper_bounds_missing
     severity: high
     summary: "Поля count в payloads.Hello.unitsCount, .Telemetry.count, .Status.count, .Weights.count в yaml без upper bounds, реальный wire array — [4]. Это позволяет недостоверным consumer-loop циклам."
-    spa_hello_07: "Hello.unitsCount: yaml uint8 без range; wire — units[4]; current RP2040 product subset MENU_MAX_UNITS=3"
+    spa_hello_07: "Hello.unitsCount: yaml uint8 без range; wire — units[4]; current iDryerControllerV2 product subset MENU_MAX_UNITS=3"
     spa_weights_01: "Weights.count: yaml uint8 без range; wire — weights[4]; producer clamp i<4"
     spa_telem_02: "Telemetry.count: yaml имеет range 0..4 — match"
     spa_status_02: "Status.count: yaml имеет range 0..4 — match"
@@ -350,9 +350,9 @@ known_mismatches:
 
   - id: rfid_event_readerId_note_wrong_path
     severity: medium
-    summary: "yaml payloads.Rfid.fields.readerId.note описывает поведение '0xFF resolution by unitId', но это поведение для ВХОДЯЩЕГО RfidWriteData write fragment (RP2040 main.cpp:1061-1069), НЕ для исходящего Rfid (0x14) event."
-    rfid_event_path: "RP2040 main.cpp:2022-2031, 2063-2067 — sender всегда заполняет readerId конкретным числом"
-    rfid_write_data_path: "RP2040 main.cpp:1061-1069 — для входящего write-fragment LINK может слать 0xFF, RP2040 резолвит по unitId"
+    summary: "yaml payloads.Rfid.fields.readerId.note описывает поведение '0xFF resolution by unitId', но это поведение для ВХОДЯЩЕГО RfidWriteData write fragment (iDryerControllerV2 main.cpp:1061-1069), НЕ для исходящего Rfid (0x14) event."
+    rfid_event_path: "iDryerControllerV2 main.cpp:2022-2031, 2063-2067 — sender всегда заполняет readerId конкретным числом"
+    rfid_write_data_path: "iDryerControllerV2 main.cpp:1061-1069 — для входящего write-fragment LINK может слать 0xFF, iDryerControllerV2 резолвит по unitId"
     decision_made: "yaml: переместить '0xFF resolution' note из payloads.Rfid.fields.readerId в payloads.RfidData.fields.readerId — там это уместно."
     status: implemented
     found_by: "external audit (SPA-RFID-02)"
@@ -362,8 +362,8 @@ known_mismatches:
 
   - id: config_legacy_binary_broken
     severity: high
-    summary: "yaml payloads.Config описывает legacy binary UartConfigPayload (8 bytes), но RP2040 handleUartConfig не парсит его как struct — копирует байты в chunkPayload.data и runs deserializeJson на бинарных байтах."
-    impact: "Legacy binary ConfigPush никогда не сработает на current RP2040 firmware."
+    summary: "yaml payloads.Config описывает legacy binary UartConfigPayload (8 bytes), но iDryerControllerV2 handleUartConfig не парсит его как struct — копирует байты в chunkPayload.data и runs deserializeJson на бинарных байтах."
+    impact: "Legacy binary ConfigPush никогда не сработает на current iDryerControllerV2 firmware."
     decision_required: |
       1) Снять path с binary ConfigPush (статус 'legacy/broken') в yaml;
       2) ИЛИ: исправить handleUartConfig чтобы реально парсил binary struct.
@@ -374,7 +374,7 @@ known_mismatches:
 
   - id: log_payload_struct_not_string
     severity: high
-    summary: "yaml payloads.Log описывает 'raw bytes (UART_MAX_PAYLOAD)' — свободно-формальные строки. Реальный producer на RP2040 шлёт fixed-size binary DryerUart::LogPayload struct с полями severity/source/event/message."
+    summary: "yaml payloads.Log описывает 'raw bytes (UART_MAX_PAYLOAD)' — свободно-формальные строки. Реальный producer на iDryerControllerV2 шлёт fixed-size binary DryerUart::LogPayload struct с полями severity/source/event/message."
     decision_made: "yaml: payloads.Log должен описывать binary struct (severity[N], source[M], event[K], message[L], unitId), не 'raw bytes'."
     status: implemented
     todo:

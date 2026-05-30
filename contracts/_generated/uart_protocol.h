@@ -306,7 +306,7 @@ struct UartHelloPayload {
     uint32_t    firmwareVersion;
     uint32_t    workTimeCounter;
     char    hardwareVersion[8];
-    uint8_t    unitsCount;  ///< Wire array units[4]; current RP2040 product subset MENU_MAX_UNITS=3, но контракт
+    uint8_t    unitsCount;  ///< Wire array units[4]; current iDryerControllerV2 product subset MENU_MAX_UNITS=3,
     UartUnitConfig units[4];
     char    mcuSerial[17];  ///< flash ID hex + '\0'
 } __attribute__((packed));
@@ -344,7 +344,7 @@ static_assert(sizeof(UartWeightsPayload) == 17, "UartWeightsPayload must be 17 b
 /// Событие RFID-ридера: метка обнаружена / снята / ридер недоступен.
 struct UartRfidPayload {
     uint8_t    event;  ///< Wire-уровневый numeric enum
-    uint8_t    readerId;  ///< Физический индекс ридера на RP2040 (0
+    uint8_t    readerId;  ///< Физический индекс ридера на iDryerControllerV2 (0
     char    tag[32];  ///< HEX-строка ID метки
     uint8_t    unitId;  ///< Логический индекс камеры (0
     uint8_t    _pad[2];  ///< trailing wire-padding для выравнивания структуры; должен быть 0
@@ -353,7 +353,7 @@ static_assert(sizeof(UartRfidPayload) == 37, "UartRfidPayload must be 37 bytes (
 
 /// Фрагмент данных метки (до 888 байт суммарно через несколько фрагментов).
 struct UartRfidDataPayload {
-    uint8_t    readerId;  ///< Для ВХОДЯЩИХ write-fragments LINK→RP2040 может быть 0xFF — RP2040 main
+    uint8_t    readerId;  ///< Для ВХОДЯЩИХ write-fragments LINK→iDryerControllerV2 может быть 0xFF — iDryerCon
     uint8_t    unitId;  ///< Логический индекс камеры (0
     char    tag[32];
     uint8_t    fragment[163];
@@ -418,9 +418,9 @@ static_assert(sizeof(UartLogPayload) == 163, "UartLogPayload must be 163 bytes (
 /// Keep-alive MCU↔ESP32 + сетевой статус для UI.
 struct UartHeartbeatPayload {
     uint32_t    uptimeSeconds;
-    int16_t    wifiRssiDbm;  ///< RP2040 шлёт всегда 0 (нет WiFi у MCU)
-    uint16_t    errorsSinceBoot;  ///< RP2040 stub-шлёт 0
-    UartLinkCloudState cloudState;  ///< Имеет смысл только в направлении ESP32→RP2040 (статус облака)
+    int16_t    wifiRssiDbm;  ///< iDryerControllerV2 шлёт всегда 0 (нет WiFi у MCU)
+    uint16_t    errorsSinceBoot;  ///< iDryerControllerV2 stub-шлёт 0
+    UartLinkCloudState cloudState;  ///< Имеет смысл только в направлении ESP32→iDryerControllerV2 (статус облака)
 } __attribute__((packed));
 static_assert(sizeof(UartHeartbeatPayload) == 9, "UartHeartbeatPayload must be 9 bytes (yaml-computed)");
 

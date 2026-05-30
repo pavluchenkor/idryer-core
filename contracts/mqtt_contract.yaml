@@ -20,7 +20,7 @@ version: 3
 updated: "2026-05-08"
 owner: "idryer-core"
 scope: |
-  Полный протокол iDryer: MQTT (устройство ↔ облако) + UART (RP2040 ↔ ESP32 bridge).
+  Полный протокол iDryer: MQTT (устройство ↔ облако) + UART (iDryerControllerV2 ↔ ESP32 bridge).
   Один источник правды для обеих сторон. Каждое сообщение, у которого есть и MQTT-,
   и UART-форма, описано через bindings; чисто-MQTT и чисто-UART — отдельными секциями.
 
@@ -217,7 +217,7 @@ rules:
       effect: "settimeofday() при наличии валидного timestamp в любой portal-команде."
       excludes:
         - "Local-WS команды (минуют MQTT-приём) — клиент сам знает своё время, не должен менять системное."
-        - "UART команды от RP2040 — RP2040 синхронизируется через ESP, не наоборот."
+        - "UART команды от iDryerControllerV2 — iDryerControllerV2 синхронизируется через ESP, не наоборот."
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Статус миграции на menu_protocol_v1: iHeater Link и Storage Link — мигрированы
@@ -711,7 +711,7 @@ payloads:
         {
           type: uint8,
           range: "0..4",
-          note: "Wire array units[4]; current RP2040 product subset MENU_MAX_UNITS=3, но контракт фиксирует общий 0..4 limit.",
+          note: "Wire array units[4]; current iDryerControllerV2 product subset MENU_MAX_UNITS=3, но контракт фиксирует общий 0..4 limit.",
         }
       units: { type: "UartUnitConfig[4]" }
       mcuSerial: { type: "char[17]", note: "flash ID hex + '\\0'" }
@@ -808,11 +808,11 @@ payloads:
       readerId:
         type: uint8
         required_for_mqtt: true
-        note: "Физический индекс ридера на RP2040 (0..N-1). Producer (RP2040 main.cpp:2022-2031, 2063-2067) ВСЕГДА заполняет конкретным числом для исходящих Rfid (0x14) event payload. Portal rfid.handler.ts:43-48 dropит event без readerId — поэтому REQUIRED для MQTT JSON-формы. NB: '0xFF auto-resolve by unitId' — это для ВХОДЯЩИХ RfidData write fragments (см. payloads.RfidData.fields.readerId), НЕ для Rfid event."
+        note: "Физический индекс ридера на iDryerControllerV2 (0..N-1). Producer (iDryerControllerV2 main.cpp:2022-2031, 2063-2067) ВСЕГДА заполняет конкретным числом для исходящих Rfid (0x14) event payload. Portal rfid.handler.ts:43-48 dropит event без readerId — поэтому REQUIRED для MQTT JSON-формы. NB: '0xFF auto-resolve by unitId' — это для ВХОДЯЩИХ RfidData write fragments (см. payloads.RfidData.fields.readerId), НЕ для Rfid event."
       tag: { type: "char[32]", note: "HEX-строка ID метки" }
       unitId:
         type: uint8
-        note: "Логический индекс камеры (0..3). Маппинг reader→unit в rfidManager на RP2040, настраиваемый. Используется ВСЕМИ слоями выше UART (LINK, MQTT, portal)."
+        note: "Логический индекс камеры (0..3). Маппинг reader→unit в rfidManager на iDryerControllerV2, настраиваемый. Используется ВСЕМИ слоями выше UART (LINK, MQTT, portal)."
       _pad:
         {
           type: "uint8[2]",
@@ -826,12 +826,12 @@ payloads:
       readerId:
         {
           type: uint8,
-          note: "Для ВХОДЯЩИХ write-fragments LINK→RP2040 может быть 0xFF — RP2040 main.cpp:1061-1069 сам найдёт ридер по unitId. Для ИСХОДЯЩИХ read-fragments RP2040→LINK всегда заполнено конкретным значением.",
+          note: "Для ВХОДЯЩИХ write-fragments LINK→iDryerControllerV2 может быть 0xFF — iDryerControllerV2 main.cpp:1061-1069 сам найдёт ридер по unitId. Для ИСХОДЯЩИХ read-fragments iDryerControllerV2→LINK всегда заполнено конкретным значением.",
         }
       unitId:
         {
           type: uint8,
-          note: "Логический индекс камеры (0..3). Используется для авто-резолва readerId на стороне RP2040.",
+          note: "Логический индекс камеры (0..3). Используется для авто-резолва readerId на стороне iDryerControllerV2.",
         }
       tag: { type: "char[32]" }
       fragment: { type: "uint8[163]" }
@@ -863,7 +863,7 @@ payloads:
         }
       arg0:
         type: uint32
-        note: "Семантика зависит от command/targetState. Для Start drying/storage — целевая температура в °C × 10 (ESP умножает params.temperature × 10, RP2040 делит / 10 при приёме). Единая конвенция с Profile.stages[].temp и Telemetry.temperatureC10."
+        note: "Семантика зависит от command/targetState. Для Start drying/storage — целевая температура в °C × 10 (ESP умножает params.temperature × 10, iDryerControllerV2 делит / 10 при приёме). Единая конвенция с Profile.stages[].temp и Telemetry.temperatureC10."
       arg1:
         type: uint32
         note: "Семантика зависит от command/targetState. Для Start drying — duration в минутах. Для Start storage — целевая влажность (current MCU игнорирует, см. known_mismatches.storage_humidity_dropped)."
@@ -882,7 +882,7 @@ payloads:
             {
               type: uint16,
               scaling: { factor: 0.1, unit: "°C" },
-              note: "ESP-bridge формирует это поле умножением MQTT-поля params.stages[].temperature (целое °C) на 10; RP2040 при потреблении делит на 10. Единая конвенция для всех температур в UART payload-ах — см. также Telemetry.temperatureC10, Telemetry.targetTempC10, Command.arg0.",
+              note: "ESP-bridge формирует это поле умножением MQTT-поля params.stages[].temperature (целое °C) на 10; iDryerControllerV2 при потреблении делит на 10. Единая конвенция для всех температур в UART payload-ах — см. также Telemetry.temperatureC10, Telemetry.targetTempC10, Command.arg0.",
             }
           ramp:
             {
@@ -907,7 +907,7 @@ payloads:
       durationMinutes: { type: uint16 }
       fanDutyPct: { type: uint16 }
     notes:
-      - "См. known_mismatches.config_legacy_binary_broken — current RP2040 firmware НЕ может корректно принять binary ConfigPush. Использовать ConfigPush JSON через chunked path вместо этого."
+      - "См. known_mismatches.config_legacy_binary_broken — current iDryerControllerV2 firmware НЕ может корректно принять binary ConfigPush. Использовать ConfigPush JSON через chunked path вместо этого."
 
   ConfigChunk:
     description: |
@@ -942,7 +942,7 @@ payloads:
           note: "связанный юнит (0..3) или 0xFF если событие линка",
         }
     notes:
-      - "Wire-форма — fixed-size binary struct. RP2040 заполняет поля и шлёт через sendLog (raw bytes transport)."
+      - "Wire-форма — fixed-size binary struct. iDryerControllerV2 заполняет поля и шлёт через sendLog (raw bytes transport)."
       - "ESP32-сторона парсит struct и публикует MQTT events с unitId."
 
   Heartbeat:
@@ -953,21 +953,21 @@ payloads:
       wifiRssiDbm:
         {
           type: int16,
-          note: "RP2040 шлёт всегда 0 (нет WiFi у MCU). Реальный RSSI — ESP32→RP2040 направлении.",
+          note: "iDryerControllerV2 шлёт всегда 0 (нет WiFi у MCU). Реальный RSSI — ESP32→iDryerControllerV2 направлении.",
         }
       errorsSinceBoot:
         {
           type: uint16,
-          note: "RP2040 stub-шлёт 0. Реальные счётчики ошибок ведутся на ESP32.",
+          note: "iDryerControllerV2 stub-шлёт 0. Реальные счётчики ошибок ведутся на ESP32.",
         }
       cloudState:
         {
           type: enum,
           ref: UartLinkCloudState,
-          note: "Имеет смысл только в направлении ESP32→RP2040 (статус облака). Когда RP2040 шлёт heartbeat, это поле = 0 (Idle).",
+          note: "Имеет смысл только в направлении ESP32→iDryerControllerV2 (статус облака). Когда iDryerControllerV2 шлёт heartbeat, это поле = 0 (Idle).",
         }
     notes:
-      - "Heartbeat двунаправленный: обе стороны шлют. Direction-specific семантика: wifiRssiDbm/errorsSinceBoot/cloudState заполняются только ESP32-стороной. RP2040 ставит в эти поля 0."
+      - "Heartbeat двунаправленный: обе стороны шлют. Direction-specific семантика: wifiRssiDbm/errorsSinceBoot/cloudState заполняются только ESP32-стороной. iDryerControllerV2 ставит в эти поля 0."
 
   Ack:
     description: "Подтверждение принятого фрейма."
@@ -1060,7 +1060,7 @@ messages:
               firmwareVersion — версия прошивки ESP32 Link (bridge-чип). Для ДваЧип устройств
               (iDryer Dryer v3) ESP32 публикует свою версию из VERSION_STR.
             - |
-              mcuFirmwareVersion — версия прошивки RP2040 контроллера (опционально).
+              mcuFirmwareVersion — версия прошивки iDryerControllerV2 контроллера (опционально).
               ESP32 получает её из UART Hello payload.firmwareVersion и должен передавать
               в info JSON. Если поле отсутствует — портал считает версию контроллера неизвестной.
               Формат: "MAJOR.MINOR.PATCH" (строка).
@@ -1072,7 +1072,7 @@ messages:
             mcuFirmwareVersion:
               type: string
               optional: true
-              note: "Версия прошивки RP2040 контроллера. Декодируется из UART Hello.firmwareVersion (uint32 MAJOR<<16|MINOR<<8|PATCH). Отсутствует для ОдинЧип устройств."
+              note: "Версия прошивки iDryerControllerV2 контроллера. Декодируется из UART Hello.firmwareVersion (uint32 MAJOR<<16|MINOR<<8|PATCH). Отсутствует для ОдинЧип устройств."
             hardwareVersion:
               type: string
               required: true
@@ -1317,7 +1317,7 @@ messages:
         retained: true
         payload:
           json_shape:
-            readerId: "uint8 — физический индекс ридера на RP2040"
+            readerId: "uint8 — физический индекс ридера на iDryerControllerV2"
             unitId: "uint8 — логический индекс камеры (0..3)"
             tagId: "string — UID метки (HEX)"
             format: "string — кодировка блока ('ndef' / 'bambu' / 'raw'), наличие этого поля отличает rfid_read_data от rfid_event"
@@ -1472,7 +1472,7 @@ messages:
               note: "DEPRECATED. Не поддерживается новыми прошивками и ядром: текущий idryer-link парсит только new-форму (params.temperature, params.duration). Сохранено как историческая справка для старых ESP-билдов в поле. Подлежит удалению из контракта после полного перехода всех устройств на новую прошивку."
           notes:
             - "unitId обязателен (U1..UN). Broadcast (unitId отсутствует / unitId=0xFF) НЕ реализован —
-              RP2040 отклоняет unitId=0xFF как InvalidPayload. Реализовать broadcast можно когда
+              iDryerControllerV2 отклоняет unitId=0xFF как InvalidPayload. Реализовать broadcast можно когда
               появится реальная потребность (сценарий: одинаковый материал во всех камерах)."
             - "Топик для Dryer; iHeater Link его не обрабатывает — у iHeater сушка идёт через invoke."
       uart:
@@ -1611,7 +1611,7 @@ messages:
     status: implemented
     notes:
       - "iHeater Link этот топик не обрабатывает — backend для IHEATER_LINK шлёт commands/invoke {action:'heat.stop'}."
-      - "0xFF=ALL не поддерживается RP2040 (reject); broadcast не реализован — портал всегда шлёт конкретный unitId."
+      - "0xFF=ALL не поддерживается iDryerControllerV2 (reject); broadcast не реализован — портал всегда шлёт конкретный unitId."
 
   - name: command_find
     direction: backend_to_device
@@ -1705,7 +1705,7 @@ messages:
           # Альтернативная форма (используется ТОЛЬКО device-internal в iHeater-link self-loopback):
           device_internal_only:
             example: { bind: "moon_en", val: true }
-            note: "Device-internal форма (iHeater-link синхронизирует toggle меню сам себе после смены интеграции). Portal её НЕ публикует; bridge поле 'bind' игнорирует — в RP2040 не уходит."
+            note: "Device-internal форма (iHeater-link синхронизирует toggle меню сам себе после смены интеграции). Portal её НЕ публикует; bridge поле 'bind' игнорирует — в iDryerControllerV2 не уходит."
           notes:
             - "iHeater-link принимает обе формы (id или bind), но portal шлёт только id-форму."
             - "Поле 'timestamp' игнорируется handler'ом (legacy bridge), но портал его всегда добавляет."
@@ -1834,7 +1834,7 @@ messages:
 #           default-ветку IdryerRuntime, когда commandHandler_ не задан).
 #   - iheater_link: принимает {action: "heat.start"|"heat.stop", args} в
 #                   в MenuBridge::applyInvokeCommand, который требует {id}.
-#   - idryer_link:  принимает {cmd:"invoke", id:<int>} и проксирует в RP2040
+#   - idryer_link:  принимает {cmd:"invoke", id:<int>} и проксирует в iDryerControllerV2
 #                   через ConfigPush; диспетчинг по action-name НЕ реализован.
 #   - rp2040:       на UART через ConfigPush принимает {cmd:"invoke", id} и
 #                   вызывает MenuItem.action.invoke() для item с type=MN_ACTION.
@@ -2044,23 +2044,23 @@ invoke_actions:
       notes:
         - "Заменяет top-level команду 'stop'. Старая 'stop' сохранена для обратной совместимости."
 
-  # ── idryer-link (legacy Storage Link, ESP32 + RP2040 по UART) ──────────
+  # ── idryer-link (legacy Storage Link, ESP32 + iDryerControllerV2 по UART) ──────────
   idryer_link:
     - name: "<by_id>"
       direction: backend_to_device
-      purpose: "Вызов action из MCU-меню по числовому id; ESP32 проксирует в RP2040 через ConfigPush."
+      purpose: "Вызов action из MCU-меню по числовому id; ESP32 проксирует в iDryerControllerV2 через ConfigPush."
       args:
         id:
           {
             type: int,
             required: true,
-            notes: "Индекс MenuItem в g_menu (RP2040), для которого type=MN_ACTION.",
+            notes: "Индекс MenuItem в g_menu (iDryerControllerV2), для которого type=MN_ACTION.",
           }
         action:
           {
             type: string,
             required: false,
-            notes: "Поле принимается порталом в DTO, но в idryer-link/RP2040 не парсится — фактически no-op.",
+            notes: "Поле принимается порталом в DTO, но в idryer-link/iDryerControllerV2 не парсится — фактически no-op.",
           }
         timestamp:
           {
@@ -2071,7 +2071,7 @@ invoke_actions:
           }
       reply:
         mode: none
-        notes: "Подтверждение приходит на UART как ConfigAck (0x31) от RP2040; в MQTT эхо не публикуется."
+        notes: "Подтверждение приходит на UART как ConfigAck (0x31) от iDryerControllerV2; в MQTT эхо не публикуется."
       bindings:
         mqtt:
           topic_suffix: commands/invoke
@@ -2090,33 +2090,33 @@ invoke_actions:
       status: implemented
       notes:
         - "Это id-based-механизм, а не action-name. ESP32 не имеет реестра имён."
-        - "Список доступных id определяется menu_v2.yaml на RP2040 (см. секцию rp2040 ниже)."
+        - "Список доступных id определяется menu_v2.yaml на iDryerControllerV2 (см. секцию rp2040 ниже)."
         - "Если поле 'id' не int — handler пишет WARN и выходит."
 
-  # ── RP2040 (MCU; принимает invoke по UART через ConfigPush) ─────────────
+  # ── iDryerControllerV2 (MCU; принимает invoke по UART через ConfigPush) ─────────────
   #
   # Контракт фиксирует только транспорт и правила диспатча. Конкретный
   # набор пунктов меню (имена on_invoke, числовые id, диапазоны, persist)
-  # — в menu_v2.yaml на стороне RP2040-продукта и раздаётся потребителям
+  # — в menu_v2.yaml на стороне iDryerControllerV2-продукта и раздаётся потребителям
   # в рантайме через config_full (см. messages.config_full, commands/get_config).
   #
   rp2040:
     - name: "<by_id>"
       direction: esp_to_rp2040
-      purpose: "Вызов action-пункта меню RP2040 по числовому id; ESP32 проксирует JSON через UART ConfigPush."
+      purpose: "Вызов action-пункта меню iDryerControllerV2 по числовому id; ESP32 проксирует JSON через UART ConfigPush."
       args:
         id:
           type: uint16
           required: true
           notes: |
-            Индекс MenuItem в g_menu (RP2040), для которого type=MN_ACTION.
+            Индекс MenuItem в g_menu (iDryerControllerV2), для которого type=MN_ACTION.
             Привязки id↔имя on_invoke генерируются в menu_v2.cpp из menu_v2.yaml.
             Актуальный набор id потребитель получает из config_full
             (commands/get_config или invoke device.getConfig).
       bindings:
         mqtt:
           applicable: false
-          note: "RP2040 на MQTT не подписан; портал шлёт invoke на ESP32, тот проксирует в RP2040."
+          note: "iDryerControllerV2 на MQTT не подписан; портал шлёт invoke на ESP32, тот проксирует в iDryerControllerV2."
         uart:
           kind: ConfigPush
           kind_id: 0x30
@@ -2134,7 +2134,7 @@ invoke_actions:
           многократному выполнению.
         on_invalid: "ConfigAck(InvalidPayload); действие не выполняется."
       source_of_truth:
-        menu_items: "menu_v2.yaml на стороне RP2040-продукта"
+        menu_items: "menu_v2.yaml на стороне iDryerControllerV2-продукта"
         runtime_discovery: "config_full payload в ответ на commands/get_config"
       status: implemented
 
@@ -3059,8 +3059,8 @@ local_websocket:
 
   notes:
     - "Payload каждого outgoing-type идентичен MQTT-аналогу — переиспользуются те же сериализаторы (publishInfo/Telemetry/Status и т.п.)."
-    - "Server-flag включается через UART-команду WsEnable (kind 0x73) от RP2040 — см. uart_only."
-    - "Status-сообщения о состоянии WS-сервера обратно RP2040 идут через WsStatus (0x74) и WsStatusRequest (0x76)."
+    - "Server-flag включается через UART-команду WsEnable (kind 0x73) от iDryerControllerV2 — см. uart_only."
+    - "Status-сообщения о состоянии WS-сервера обратно iDryerControllerV2 идут через WsStatus (0x74) и WsStatusRequest (0x76)."
     - "После успешного auth_ok сервер автоматически дёргает get_config — для bootstrap UI приложения."
     - "Single-client: при втором подключении старый клиент остаётся, новый получает disconnect."
 
@@ -3129,7 +3129,7 @@ cloud_http_api:
     - "Все ответы JSON; парсятся через ArduinoJson DynamicJsonDocument."
     - "TLS на production обязателен (deviceToken — JWT, нельзя по plain HTTP)."
     - "После успешного claim — этот HTTP API больше не вызывается, вся коммуникация переходит на MQTT (idryer/{serial}/...)."
-    - "ClaimStatus/ClaimComplete UART kinds (0x71/0x72) синхронизируют ESP↔RP2040 на разных стадиях этого флоу — см. messages."
+    - "ClaimStatus/ClaimComplete UART kinds (0x71/0x72) синхронизируют ESP↔iDryerControllerV2 на разных стадиях этого флоу — см. messages."
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 14. WIFI PROVISIONING (Improv WiFi Serial protocol)
