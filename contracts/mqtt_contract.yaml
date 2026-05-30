@@ -733,8 +733,8 @@ payloads:
         type: "UartTelemetryEntry[4]"
         item_fields:
           unitId: { type: uint8, range: "0..3" }
-          temperatureC10: { type: int16, unit: "°C × 10" }
-          humidityPct10: { type: uint16, unit: "%RH × 10" }
+          temperatureC10: { type: int16,  scaling: { factor: 0.1, unit: "°C" } }
+          humidityPct10:  { type: uint16, scaling: { factor: 0.1, unit: "%RH" } }
           heaterPowerPct: { type: uint8, unit: "0..100 %" }
           fanOn: { type: uint8, encoding: "0/1" }
 
@@ -749,7 +749,7 @@ payloads:
           unitId: { type: uint8 }
           mode: { type: enum, ref: UartDryerMode }
           sessionNum: { type: uint32 }
-          targetTempC10: { type: int16, unit: "°C × 10" }
+          targetTempC10: { type: int16, scaling: { factor: 0.1, unit: "°C" } }
           targetHumidityPct: { type: uint16, unit: "%RH" }
           durationMinutes: { type: uint16 }
           elapsedSeconds: { type: uint32 }
@@ -786,7 +786,7 @@ payloads:
         item_fields:
           sensorId: { type: uint8 }
           unitId: { type: uint8 }
-          weightGramsC10: { type: uint16, unit: "g × 10" }
+          weightGramsC10: { type: uint16, scaling: { factor: 0.1, unit: "g" } }
 
   Rfid:
     cpp_name: UartRfidPayload
@@ -881,8 +881,8 @@ payloads:
           temp:
             {
               type: uint16,
-              unit: "°C × 10",
-              note: "Wire-формат °C × 10. ESP-bridge умножает MQTT-поле params.stages[].temperature (целое °C) на 10 при формировании UART payload; RP2040 делит на 10 при потреблении. Единая конвенция для всех температур в UART payload-ах — см. также Telemetry.temperatureC10, Telemetry.targetTempC10, Command.arg0.",
+              scaling: { factor: 0.1, unit: "°C" },
+              note: "ESP-bridge формирует это поле умножением MQTT-поля params.stages[].temperature (целое °C) на 10; RP2040 при потреблении делит на 10. Единая конвенция для всех температур в UART payload-ах — см. также Telemetry.temperatureC10, Telemetry.targetTempC10, Command.arg0.",
             }
           ramp:
             {
@@ -902,7 +902,7 @@ payloads:
     description: "Целевые параметры одного юнита (legacy ConfigPush; не фрагментированный). LEGACY/BROKEN — не использовать."
     status: legacy_broken
     fields:
-      targetTemperatureC10: { type: int16, unit: "°C × 10" }
+      targetTemperatureC10: { type: int16, scaling: { factor: 0.1, unit: "°C" } }
       targetHumidityPct: { type: uint16, unit: "%RH" }
       durationMinutes: { type: uint16 }
       fanDutyPct: { type: uint16 }

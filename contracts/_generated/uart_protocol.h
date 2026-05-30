@@ -232,6 +232,12 @@ struct UartTelemetryEntry {
     uint16_t    humidityPct10;
     uint8_t    heaterPowerPct;
     uint8_t    fanOn;
+
+    // ── Scaling accessors (auto-generated) ──
+    inline float getTemperature() const { return temperatureC10 * 0.1f; }  ///< °C
+    inline void  setTemperature(float v) { temperatureC10 = (int16_t)(v / 0.1f); }
+    inline float getHumidity() const { return humidityPct10 * 0.1f; }  ///< %RH
+    inline void  setHumidity(float v) { humidityPct10 = (uint16_t)(v / 0.1f); }
 } __attribute__((packed));
 static_assert(sizeof(UartTelemetryEntry) == 7, "UartTelemetryEntry must be 7 bytes (yaml-computed)");
 
@@ -251,6 +257,10 @@ struct UartStatusEntry {
     uint8_t    totalStages;
     UartStagePhase stagePhase;
     uint8_t    _pad;  ///< trailing padding для выравнивания entry; должен быть 0
+
+    // ── Scaling accessors (auto-generated) ──
+    inline float getTargetTemp() const { return targetTempC10 * 0.1f; }  ///< °C
+    inline void  setTargetTemp(float v) { targetTempC10 = (int16_t)(v / 0.1f); }
 } __attribute__((packed));
 static_assert(sizeof(UartStatusEntry) == 32, "UartStatusEntry must be 32 bytes (yaml-computed)");
 
@@ -259,14 +269,22 @@ struct UartWeightEntry {
     uint8_t    sensorId;
     uint8_t    unitId;
     uint16_t    weightGramsC10;
+
+    // ── Scaling accessors (auto-generated) ──
+    inline float getWeightGrams() const { return weightGramsC10 * 0.1f; }  ///< g
+    inline void  setWeightGrams(float v) { weightGramsC10 = (uint16_t)(v / 0.1f); }
 } __attribute__((packed));
 static_assert(sizeof(UartWeightEntry) == 4, "UartWeightEntry must be 4 bytes (yaml-computed)");
 
 /// Entry-record для inline-массивов в payload'ах.
 struct UartProfileStage {
-    uint16_t    temp;  ///< Wire-формат °C × 10
+    uint16_t    temp;  ///< ESP-bridge формирует это поле умножением MQTT-поля params
     uint16_t    ramp;  ///< wire-level семантика — секунды (комментарий 'minutes' в коде устарел)
     uint16_t    hold;  ///< wire-level семантика — секунды
+
+    // ── Scaling accessors (auto-generated) ──
+    inline float getTemp() const { return temp * 0.1f; }  ///< °C
+    inline void  setTemp(float v) { temp = (uint16_t)(v / 0.1f); }
 } __attribute__((packed));
 static_assert(sizeof(UartProfileStage) == 6, "UartProfileStage must be 6 bytes (yaml-computed)");
 
@@ -370,6 +388,10 @@ struct UartConfigPayload {
     uint16_t    targetHumidityPct;
     uint16_t    durationMinutes;
     uint16_t    fanDutyPct;
+
+    // ── Scaling accessors (auto-generated) ──
+    inline float getTargetTemperature() const { return targetTemperatureC10 * 0.1f; }  ///< °C
+    inline void  setTargetTemperature(float v) { targetTemperatureC10 = (int16_t)(v / 0.1f); }
 } __attribute__((packed));
 static_assert(sizeof(UartConfigPayload) == 8, "UartConfigPayload must be 8 bytes (yaml-computed)");
 

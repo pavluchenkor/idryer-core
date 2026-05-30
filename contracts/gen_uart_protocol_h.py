@@ -215,11 +215,57 @@ def collect_inline_entry_structs(payloads: dict) -> list[tuple[str, dict, int | 
     return [(name, fdict, sz) for name, (fdict, sz) in seen.items()]
 
 
+# ── Scaling accessors (DBC-style) ────────────────────────────────────
+
+_RAW_TYPE_MAP = {
+    "uint8":  "uint8_t",  "uint16": "uint16_t", "uint32": "uint32_t",
+    "int8":   "int8_t",   "int16":  "int16_t",  "int32":  "int32_t",
+}
+
+
+def _strip_scaling_suffix(name: str) -> str:
+    """Убирает суффикс масштаба ('C10', 'Pct10') из имени поля для accessor-имени."""
+    for suffix in ("C10", "Pct10"):
+        if name.endswith(suffix):
+            return name[: -len(suffix)]
+    return name
+
+
+def _capitalize_first(name: str) -> str:
+    return (name[0].upper() + name[1:]) if name else name
+
+
+def render_scaling_accessors(field_name: str, raw_yaml_type: str, scaling: dict) -> list[str]:
+    """Возвращает строки C++ accessor-методов get/set для поля со scaling-блоком.
+
+    Линейная конверсия (DBC-style): physical = raw * factor + offset.
+    """
+    factor = scaling.get("factor")
+    offset = scaling.get("offset")
+    unit = scaling.get("unit", "")
+    raw_c_type = _RAW_TYPE_MAP.get(raw_yaml_type, raw_yaml_type)
+    base = _capitalize_first(_strip_scaling_suffix(field_name))
+    get_name = f"get{base}"
+    set_name = f"set{base}"
+    if offset:
+        get_expr = f"({field_name} * {factor}f) + {offset}f"
+        set_expr = f"({raw_c_type})((v - {offset}f) / {factor}f)"
+    else:
+        get_expr = f"{field_name} * {factor}f"
+        set_expr = f"({raw_c_type})(v / {factor}f)"
+    unit_doc = f"  ///< {unit}" if unit else ""
+    return [
+        f"    inline float {get_name}() const {{ return {get_expr}; }}{unit_doc}".rstrip(),
+        f"    inline void  {set_name}(float v) {{ {field_name} = {set_expr}; }}",
+    ]
+
+
 def render_entry_struct(name: str, item_fields: dict, per_size: int | None,
                         enums: dict, payloads: dict, cpp_name_map: dict | None = None) -> str:
     """Рендерит вспомогательную struct'у для UartXxxEntry."""
     out = [f"/// Entry-record для inline-массивов в payload'ах."]
     out.append(f"struct {name} {{")
+    accessors_block: list[str] = []
     for fname, fspec in item_fields.items():
         if fname in SKIP_FIELDS:
             continue
@@ -230,6 +276,14 @@ def render_entry_struct(name: str, item_fields: dict, per_size: int | None,
             if n:
                 note = "  ///< " + str(n).split('.')[0][:80]
         out.append(f"    {decl};{note}")
+        if isinstance(fspec, dict) and isinstance(fspec.get("scaling"), dict):
+            accessors_block.extend(
+                render_scaling_accessors(fname, fspec.get("type", ""), fspec["scaling"])
+            )
+    if accessors_block:
+        out.append("")
+        out.append("    // ── Scaling accessors (auto-generated) ──")
+        out.extend(accessors_block)
     out.append("} __attribute__((packed));")
     if per_size is not None:
         out.append(
@@ -252,6 +306,7 @@ def render_payload(yaml_key: str, definition: dict, enums: dict, payloads: dict,
         for line in desc.splitlines():
             out.append(f"/// {line}".rstrip())
     out.append(f"struct {cpp_name} {{")
+    accessors_block: list[str] = []
     for fname, fspec in fields.items():
         if fname in SKIP_FIELDS:
             continue
@@ -262,6 +317,14 @@ def render_payload(yaml_key: str, definition: dict, enums: dict, payloads: dict,
             if n:
                 note = "  ///< " + str(n).split('.')[0][:80]
         out.append(f"    {decl};{note}")
+        if isinstance(fspec, dict) and isinstance(fspec.get("scaling"), dict):
+            accessors_block.extend(
+                render_scaling_accessors(fname, fspec.get("type", ""), fspec["scaling"])
+            )
+    if accessors_block:
+        out.append("")
+        out.append("    // ── Scaling accessors (auto-generated) ──")
+        out.extend(accessors_block)
     out.append("} __attribute__((packed));")
     if computed_size is not None:
         out.append(

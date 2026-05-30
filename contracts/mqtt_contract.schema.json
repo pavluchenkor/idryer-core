@@ -183,6 +183,18 @@
       "additionalProperties": { "$ref": "#/$defs/FieldSpec" }
     },
 
+    "Scaling": {
+      "description": "Linear scaling: physical_value = raw_value * factor + offset. DBC-style. Из этого блока генератор делает inline accessors (get/set) с автоматической конверсией raw↔physical.",
+      "type": "object",
+      "required": ["factor", "unit"],
+      "additionalProperties": false,
+      "properties": {
+        "factor": { "type": "number" },
+        "offset": { "type": "number" },
+        "unit":   { "type": "string" }
+      }
+    },
+
     "FieldSpec": {
       "description": "Inline или block-стиль описания поля. Mandatory: type. Optional: остальное.",
       "oneOf": [
@@ -199,6 +211,7 @@
             "count": { "type": "integer", "minimum": 1 },
             "item_fields": { "$ref": "#/$defs/FieldsBlock" },
             "unit": { "type": "string" },
+            "scaling": { "$ref": "#/$defs/Scaling" },
             "encoding": { "type": "string" },
             "default": {},
             "required": { "type": "boolean" },
