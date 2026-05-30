@@ -133,7 +133,7 @@ product_topic_support:
   commands/get_config:    [iheater_link, storage_link, dryer_v3]
   commands/set:           [iheater_link, storage_link, dryer_v3]
   commands/invoke:        [iheater_link, storage_link, dryer_v3]
-  commands/find:          [iheater_link, storage_link, dryer_v3]
+  commands/find:          [dryer_v3]
   commands/clear_errors:  [dryer_v3]
   commands/drying:        [dryer_v3]    # legacy; iheater использует commands/invoke heat.start
   commands/storage:       [dryer_v3]    # legacy
@@ -235,15 +235,15 @@ rules:
                          если не задан явно.
 
       Назначение для устройства: settimeofday() при получении любой portal-команды.
-      RTC на железе нет, NTP не используется — синхронизация времени держится
-      только на этой конвенции. До первой команды часы устройства = 1970-01-01.
+      Синхронизация времени устройства держится только на этой конвенции.
+      До первой команды часы устройства = 1970-01-01.
 
     field: "timestamp"
     format: "ISO 8601 UTC (`YYYY-MM-DDTHH:MM:SS[.sss]Z`)"
 
     portal_to_device:
       coverage: "ВСЕ commands/* кроме `bambu_apply` и `link_integration` (config-команды без time-sync semantics)."
-      added_by: "Каждый portal-сервис при формировании payload (НЕ через global interceptor)."
+      added_by: "Каждый portal-сервис при формировании payload."
 
     device_to_portal:
       coverage: "ВСЕ publish-сообщения (info, telemetry, status, weights, rfid, config, config/delta, events, integrations/status)."
@@ -632,7 +632,7 @@ enums:
     - STORAGE # режим хранения
     - PROFILE # многоэтапный профиль
     - FAULT # ошибка/неисправность (закрывает сессию с reason='error')
-    - UNKNOWN # fallback для незнакомого UartDryerMode (НЕ закрывает сессию)
+    - UNKNOWN # fallback для незнакомого UartDryerMode (сессия остаётся открытой)
 
   # events.event — СВОБОДНАЯ строка (не фиксированный список). Значения:
   #   • известные session/ack-события (перечислены ниже) — backend обрабатывает явной логикой;
@@ -1214,7 +1214,6 @@ messages:
                   { type: int, note: "0 или 100 (heating ? 100 : 0)" }
               notes:
                 - "iHeater Link публикует эти поля сверх стандартной units[]-схемы."
-                - "Они НЕ часть общего контракта — потребитель должен ожидать их только для deviceType=iheater_link."
       uart:
         kind: Telemetry
         kind_id: 0x10
@@ -1289,7 +1288,7 @@ messages:
               - { sensorId: W1, value: 12.4, unitId: U1 }
               - { sensorId: W2, value: 28.7, unitId: U1 }
           notes:
-            - "Массив weights[] лежит на ВЕРХНЕМ уровне документа, НЕ внутри units[]."
+            - "Массив weights[] лежит на верхнем уровне документа."
             - "Поле value — float в граммах. В UART payload приходит как weightGramsC10 (uint16, граммы × 10) и делится на 10.0 при сериализации в JSON."
             - "Путь весов до портала: отдельный топик idryer/+/weights; backend маршрутизирует входящие строго по суффиксу топика."
       uart:
@@ -1432,7 +1431,7 @@ messages:
           shape_full:
             v: "uint — revision номер меню (incrementing). REQUIRED — портал валидирует наличие."
             menu: "object — продукт-специфичная структура меню (генерируется menu_buildFullJson)."
-            note: "Полный (нечанкованный) payload использует 'v', НЕ 'rev'. Поле 'rev' существует только в config_delta. Не путать!"
+            note: "Полный (нечанкованный) payload использует 'v'. Поле 'rev' существует только в config_delta."
           shape_chunked:
             tid: "uint — transferId, общий для всех чанков одного transfer'а"
             idx: "uint — индекс текущего чанка (0..total-1)"
@@ -1508,9 +1507,7 @@ messages:
                 durationMinutes: 240
               note: "DEPRECATED. Не поддерживается новыми прошивками и ядром: текущий idryer-link парсит только new-форму (params.temperature, params.duration). Сохранено как историческая справка для старых ESP-билдов в поле. Подлежит удалению из контракта после полного перехода всех устройств на новую прошивку."
           notes:
-            - "unitId обязателен (U1..UN). Broadcast (unitId отсутствует / unitId=0xFF) НЕ реализован —
-              iDryerControllerV2 отклоняет unitId=0xFF как InvalidPayload. Реализовать broadcast можно когда
-              появится реальная потребность (сценарий: одинаковый материал во всех камерах)."
+            - "unitId обязателен (U1..UN). Для действия на нескольких юнитах клиент шлёт N отдельных команд (iDryerControllerV2 отклоняет unitId=0xFF как InvalidPayload)."
       uart:
         kind: Command
         kind_id: 0x20
@@ -1554,7 +1551,6 @@ messages:
             params: {}
             timestamp: "2026-04-28T12:00:00Z"
           notes:
-            - "Поле humidity в payload НЕ принимается; priority тоже не принимается."
             - "humidity/priority устройство читает из menu (NVS) — задавайте их заранее через commands/set."
       uart:
         kind: Command
@@ -1617,12 +1613,10 @@ messages:
         notes:
           - "Тот же UART kind 0x20, но payload — UartProfilePayload (64 B), не UartCmdPayload (13 B)."
     status: implemented
-    notes:
-      - "На iHeater-link не поддерживается."
 
   - name: command_stop
     direction: backend_to_device
-    purpose: "Остановка одного юнита. Broadcast (все юниты) НЕ поддерживается — для остановки нескольких клиент шлёт N отдельных команд."
+    purpose: "Остановка одного юнита. Для остановки нескольких клиент шлёт N отдельных команд."
     bindings:
       mqtt:
         suffix: commands/stop
@@ -1644,7 +1638,7 @@ messages:
         cmd_code_id: 0x02
     status: implemented
     notes:
-      - "0xFF=ALL не поддерживается iDryerControllerV2 (reject); broadcast не реализован — портал всегда шлёт конкретный unitId."
+      - "Портал шлёт конкретный unitId (0..3); iDryerControllerV2 отклоняет 0xFF как InvalidPayload."
 
   - name: command_find
     direction: backend_to_device
@@ -1666,8 +1660,6 @@ messages:
         cmd_code: Find
         cmd_code_id: 0x03
     status: implemented
-    notes:
-      - "На iHeater-link не поддерживается."
 
   - name: command_get_config
     direction: backend_to_device
@@ -1683,9 +1675,6 @@ messages:
           actual:
             example: { timestamp: "2026-04-28T12:00:00Z" }
             note: "Portal публикует ровно { timestamp }. Других полей не добавляет."
-          # Theoretical (приняты прошивкой, но портал НЕ шлёт):
-          theoretical_other_forms:
-            note: "Прошивка примет также пустой {} или {unitId:'U1'} — handler не валидирует поля. Но portal-side ни одну из этих форм НЕ публикует. Не полагаться."
       uart:
         kind: Command
         kind_id: 0x20
@@ -1725,7 +1714,7 @@ messages:
               {
                 type: string,
                 format: ISO8601,
-                note: "поле есть в payload, но handler НЕ читает",
+                note: "опциональное",
               }
             example:
               {
@@ -1738,10 +1727,10 @@ messages:
           # Альтернативная форма (используется ТОЛЬКО device-internal в iHeater-link self-loopback):
           device_internal_only:
             example: { bind: "moon_en", val: true }
-            note: "Device-internal форма (iHeater-link синхронизирует toggle меню сам себе после смены интеграции). Portal её НЕ публикует; bridge поле 'bind' игнорирует — в iDryerControllerV2 не уходит."
+            note: "Device-internal форма: iHeater-link синхронизирует toggle меню сам себе после смены интеграции. Только для внутреннего use устройства; на UART не уходит."
           notes:
             - "iHeater-link принимает обе формы (id или bind), но portal шлёт только id-форму."
-            - "Поле 'timestamp' игнорируется handler'ом (legacy bridge), но портал его всегда добавляет."
+            - "Поле 'timestamp' опциональное; портал его всегда добавляет."
       uart:
         kind: ConfigPush
         kind_id: 0x30
@@ -1750,7 +1739,7 @@ messages:
         direction_uart: esp_to_rp2040
         notes:
           - "Для legacy dryer передаётся через ConfigPush JSON, не через CommandPayload."
-          - "Legacy idryer-link шлёт set/invoke через ConfigPush ОДНИМ фрагментом. Если JSON > CONFIG_CHUNK_DATA_SIZE — передача fail-ит (фрагментация не реализована)."
+          - "Передача через ConfigPush — один фрагмент. Размер JSON ограничен CONFIG_CHUNK_DATA_SIZE."
     status: implemented
 
   - name: command_read_rfid
@@ -1808,8 +1797,7 @@ messages:
 # Канонические формы payload (зафиксировано 2026-05-27)
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 #
-# Существуют ДВЕ формы commands/invoke. Обе валидны, обе остаются — они решают
-# разные задачи и НЕ конкурируют.
+# Существуют ДВЕ формы commands/invoke. Обе валидны и решают разные задачи.
 #
 # ── Форма A — по id (action из меню) ─────────────────────────────────────────
 #   {"cmd":"invoke", "id":<int>, "timestamp":"..."}
@@ -1818,9 +1806,8 @@ messages:
 #   эмулирует физическую кнопку на дисплее/энкодере (так бы сделал пользователь
 #   локально).
 #
-#   Args НЕ передаются — структурно меню не предусматривает аргументов.
-#   Action в menu.yaml = функция void(). Параметры процесса должны быть взяты
-#   из меню устройства (например menu.heat_temp), сохранённые ранее через `set`.
+#   Action в menu.yaml = функция void(). Параметры процесса берутся
+#   из меню устройства (например menu.heat_temp), заданные ранее через `set`.
 #
 #   Используется: DeviceMenu на портале при клике "Execute" на action-пункте,
 #   физический интерфейс устройства (там где есть).
@@ -1864,14 +1851,13 @@ messages:
 #   - iheater_link: принимает {action: "heat.start"|"heat.stop", args} в
 #                   в MenuBridge::applyInvokeCommand, который требует {id}.
 #   - idryer_link:  принимает {cmd:"invoke", id:<int>} и проксирует в iDryerControllerV2
-#                   через ConfigPush; диспетчинг по action-name НЕ реализован.
+#                   через ConfigPush (диспетчинг по числовому id).
 #   - rp2040:       на UART через ConfigPush принимает {cmd:"invoke", id} и
 #                   вызывает MenuItem.action.invoke() для item с type=MN_ACTION.
 #                   Доступные действия = on_invoke в menu_v2.yaml.
 # ─────────────────────────────────────────────────────────────────────────────
 invoke_actions:
-  # ── Встроенные в SDK (доступны всем продуктам, если они НЕ перехватывают
-  #    command через setCommandHandler) ──────────────────────────────────────
+  # ── Встроенные в SDK (доступны всем продуктам по умолчанию) ───────────
   core:
     - name: device.getConfig
       direction: backend_to_device
@@ -1896,7 +1882,6 @@ invoke_actions:
             - "Обрабатывается локально в ESP32 (IdryerRuntime), UART не задействован."
       status: implemented
       notes:
-        - "Перехватывается ДО ActionDispatcher: работает только если продукт НЕ зарегистрировал свой commandHandler через setCommandHandler."
         - "Портал в продакшене этот action не использует — шлёт commands/get_config напрямую. Действие фактически dead-code, но в SDK сохранено."
 
     # led.pulse переехал в invoke_actions.storage_link (см. ниже).
@@ -1922,7 +1907,7 @@ invoke_actions:
              idle_*color), но через invoke и с произвольным RGB цветом
              (не из 8-цветной палитры меню).
 
-             Override живёт в RAM устройства, НЕ persist'ится в NVS:
+             Override живёт только в RAM устройства:
                • reboot ESP                 → возврат к menu-defaults;
                • любой commands/set по меню → override снимается.
              "animation": "off" — снять override (вернуться к menu-state).
@@ -2082,7 +2067,7 @@ invoke_actions:
           {
             type: string,
             required: false,
-            notes: "Поле принимается порталом в DTO, но в idryer-link/iDryerControllerV2 не парсится — фактически no-op.",
+            notes: "Опциональное поле; на UART не пробрасывается.",
           }
         timestamp:
           {
@@ -2345,7 +2330,7 @@ mqtt_only:
             type: string,
             enum_ref: "ActiveIntegration.json_string_form",
             values: ["none", "ha", "bambu", "moonraker"],
-            note: "Wire-форма lowercase string, НЕ numeric. См. enums.ActiveIntegration.",
+            note: "Wire-форма — lowercase string. См. enums.ActiveIntegration.",
           }
         updatedAt: { type: ISO8601 }
       ha:
@@ -2409,8 +2394,8 @@ mqtt_only:
           note: "Идентификатор tray из AMS (если есть). Источник — BambuPrinterStatus.trayInfoIdx."
         updatedAt: { type: ISO8601 }
         # NB: остальные поля BambuPrinterStatus (gcodeState/progress/remainingSeconds/
-        # currentLayer/totalLayers/nozzleTemp*/bedTemp*/chamberTemp*) НЕ эмитятся в MQTT
-        # после чистки 2026-05-01. Доступны только локально на устройстве (C++ callback).
+        # currentLayer/totalLayers/nozzleTemp*/bedTemp*/chamberTemp*) доступны только
+        # локально на устройстве через C++ callback; в MQTT они не уходят.
       moonraker:
         configured: { type: bool }
         enabled: { type: bool }
@@ -2627,12 +2612,12 @@ ha_integration_topics:
     - pattern: "idryer/{serial}/{unit}/target_duration"
       direction: device_to_ha_broker
   notes:
-    - "Эти топики НЕ для портала. Для портала используется `mqtt_only[suffix=integrations/status]`."
+    - "Для портала используется `mqtt_only[suffix=integrations/status]`."
     - "Направление: устройство ↔ локальный HA-broker (адрес из HaConfig)."
     - |
       HA broker discovery: если HaConfig.host пустой/невалидный — выполняется fallback
       `MDNS.queryService("home-assistant","tcp")`. Берётся первый IP/port из ответа mDNS.
-      TXT-записи mDNS-ответа НЕ парсятся, только IP+port.
+      Парсится только IP+port из mDNS-ответа.
     - |
       ⚠️ NAMESPACE COLLISION RISK: префикс `idryer/{serial}/*` совпадает с топиками портала.
       Разделение обеспечивается ТОЛЬКО разными broker-endpoint'ами (HaConfig.host vs portal MQTT host).
@@ -2649,7 +2634,7 @@ ha_integration_topics:
 # Подписки/команды от HA приходят в namespace idryer/... (см. ha_integration_topics).
 ha_discovery_topics:
   namespace: "homeassistant"
-  broker: "HaConfig.host (локальный, НЕ портал)"
+  broker: "HaConfig.host (локальный)"
   retained: true
   qos: 0
   identifiers:
@@ -2792,7 +2777,7 @@ ha_discovery_topics:
 # 10. BAMBU LAN MQTT (printer-side topics для прямого LAN-подключения)
 # ─────────────────────────────────────────────────────────────────────────────
 # Устройство выступает MQTT-клиентом локального broker'а внутри Bambu принтера.
-# НЕ namespace idryer/... — это проприетарный namespace device/{serial}/... самого Bambu.
+# Bambu использует свой проприетарный namespace device/{serial}/...
 # Подключение по mqtts:// (TLS self-signed, setInsecure), auth через LAN Access Code.
 # Два режима использования: Reader (только подписка + pushall запрос),
 # Writer (применяет настройки фламента в AMS).
@@ -2852,7 +2837,7 @@ bambu_lan_mqtt:
             tray_now: "number (если 254 → используется vt_tray)"
             ams: "array<{tray: array<{tray_type, tray_info_idx}>}>"
             vt_tray: "object (tray_type, tray_info_idx) — внешняя катушка"
-      note: "Парсер игнорирует все остальные поля report'а — Bambu публикует много, нам нужны только указанные."
+      note: "Парсер читает только указанные поля; остальное в report'е не используется."
 
   notes:
     - "Подключение инициируется только когда BambuConfig.enabled=true и заполнены ip/lan_access_code/serial."
@@ -3096,7 +3081,7 @@ cloud_http_api:
 
   error_handling:
     - "При HTTP error / parse error — `result.success=false` и retry на следующем тике."
-    - "checkClaim ошибки НЕ логируются (это нормально пока устройство не привязано)."
+    - "checkClaim возвращает ошибку молча (нормально, пока устройство не привязано)."
 
   notes:
     - "Все ответы — JSON."
