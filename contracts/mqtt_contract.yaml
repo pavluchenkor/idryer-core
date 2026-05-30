@@ -243,7 +243,7 @@ canonical_roles:
   #                   если роль неизвестна — портал берёт n: от устройства
   #   args_schema — для actions с runtime-параметрами (опционально)
 
-  # ── Сушилка (Dryer) — в статусе deferred ─────────────────────────────────
+  # ── Сушилка (Dryer) ──────────────────────────────────────────────────────
   drying.target_temperature:
     type: float
     unit: "°C"
@@ -311,7 +311,7 @@ canonical_roles:
     args_schema: { tagData: base64_888B }
     labels: { ru: "Записать метку", en: "Write tag" }
 
-  # ── iHeater Link — в статусе in_progress ─────────────────────────────────
+  # ── iHeater Link ─────────────────────────────────────────────────────────
   # Integration toggles (interlock): активна максимум одна из трёх.
   # Включение одной автоматически выключает остальные (enforced на устройстве).
   iheater.bambu_enabled:
@@ -345,7 +345,7 @@ canonical_roles:
   # canonical role. Если понадобится UI на портале — отдельный widget
   # типа MaterialsTable, а не 27 индивидуальных ролей.
 
-  # ── Storage Link — в статусе in_progress ─────────────────────────────────
+  # ── Storage Link ─────────────────────────────────────────────────────────
   storage.led_count:
     type: uint
     widget: number
@@ -467,7 +467,6 @@ widgets:
       │  ──────████░░░░░░  12/30 мин          │  ← progressbar если target.duration > 0
       │  [⏹ Стоп]                             │
       └───────────────────────────────────────┘
-    source_ref: "iDryerPortal/frontend-v2/src/components/dashboard/cards/HeaterCard.tsx"
     status: implemented_2026-05-27
 
   StorageCard:
@@ -488,7 +487,6 @@ widgets:
       │  [Solid       ▾]  [🎨]                │
       │  [Turn On]     [Turn Off]             │
       └───────────────────────────────────────┘
-    source_ref: "iDryerPortal/frontend-v2/src/components/dashboard/cards/StorageCard.tsx"
     status: implemented_2026-05-27
 
   IDryerCard:
@@ -497,10 +495,6 @@ widgets:
     body:
       - "Active session: ActiveSessionBlock (elapsed/duration/targetTemp, кнопка Stop)"
       - "Idle: пресеты + Controls (старт сушки/хранения/профиля)"
-    migration_target: |
-      После миграции сушилки на menu_protocol_v1 — переписать на invoke форма B
-      (commands/invoke {action:'drying.start', args:{...}}). Сейчас deferred.
-    source_ref: "iDryerPortal/frontend-v2/src/components/dashboard/cards/IDryerCard.tsx"
     status: legacy
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -616,7 +610,7 @@ enums:
     - MAINTENANCE_REQUIRED
 
   # Link integrations (HA / Bambu / Moonraker)
-  # ВАЖНО: enum имеет ДВЕ грани сериализации (см. known_mismatches.integration_state_active_serialization):
+  # У enum две формы сериализации:
   #   - C++ enum class (для UART, локального кода): CamelCase
   #   - JSON wire form (для MQTT integrations/status): lowercase / snake_case
   # Конвертация: integrationStateToString(), activeIntegrationToString() в link_integrations_types.cpp
@@ -857,7 +851,7 @@ payloads:
         type: uint8
         required: true
         range: "0..3 (NUM_UNITS-1)"
-        note: "Конкретный юнит, обязательно. ALL/broadcast НЕ поддерживается — для действия на нескольких юнитах клиент шлёт N отдельных команд. Detail: known_mismatches.broadcast_unit_id_unsupported."
+        note: "Конкретный юнит, обязательно (0..3). Для действия на нескольких юнитах клиент шлёт N отдельных команд."
       reserved:
         {
           type: "uint8[2]",
@@ -868,7 +862,7 @@ payloads:
         note: "Семантика зависит от command/targetState. Для Start drying/storage — целевая температура в °C × 10 (ESP умножает params.temperature × 10, iDryerControllerV2 делит / 10 при приёме). Единая конвенция с Profile.stages[].temp и Telemetry.temperatureC10."
       arg1:
         type: uint32
-        note: "Семантика зависит от command/targetState. Для Start drying — duration в минутах. Для Start storage — целевая влажность (current MCU игнорирует, см. known_mismatches.storage_humidity_dropped)."
+        note: "Семантика зависит от command/targetState. Для Start drying — duration в минутах. Для Start storage поле игнорируется: целевая влажность и приоритет берутся из меню устройства (storage_hum, storage_hum_priority)."
 
   Profile:
     description: "Многоэтапный профиль сушки (до 10 стадий)."
@@ -909,7 +903,7 @@ payloads:
       durationMinutes: { type: uint16 }
       fanDutyPct: { type: uint16 }
     notes:
-      - "См. known_mismatches.config_legacy_binary_broken — current iDryerControllerV2 firmware НЕ может корректно принять binary ConfigPush. Использовать ConfigPush JSON через chunked path вместо этого."
+      - "Канонический путь конфига — ConfigPush JSON через chunked-передачу."
 
   ConfigChunk:
     description: |
@@ -996,7 +990,7 @@ payloads:
         type: uint32
         unit: "unix epoch"
         optional: true
-        note: "Зарезервировано: поле есть в wire-структуре, но текущие производители его не заполняют (шлют 0). Потребителю опираться на remainingSeconds. Producer не реализован — known_mismatches.claimstatus_expiresAt_no_producer."
+        note: "Зарезервировано в wire-структуре. Потребителю опираться на remainingSeconds для UI."
       remainingSeconds:
         {
           type: uint32,
@@ -2025,10 +2019,8 @@ invoke_actions:
         uart:
           applicable: false
       status: implemented
-      source_ref: "src/main.cpp onCommand('invoke') → applyHeating()"
       notes:
-        - "Заменяет top-level команду 'drying'. Старая 'drying' сохранена для обратной совместимости."
-        - "durationMin конвертируется в секунды в прошивке (× 60)."
+        - "durationMin — целое число минут."
 
     - name: heat.stop
       direction: backend_to_device
@@ -2045,9 +2037,6 @@ invoke_actions:
         uart:
           applicable: false
       status: implemented
-      source_ref: "src/main.cpp onCommand('invoke') → applyStop()"
-      notes:
-        - "Заменяет top-level команду 'stop'. Старая 'stop' сохранена для обратной совместимости."
 
   # ── idryer-link (legacy Storage Link, ESP32 + iDryerControllerV2 по UART) ──────────
   idryer_link:
@@ -2303,7 +2292,7 @@ mqtt_only:
           notes:
             - "free-form event строки; severity — то, что прислал MCU."
       notes:
-        - "INTEROP-BREAK: реальный shape противоречив между публишерами (legacy) и валидатором (Portal). См. known_mismatches.events_shape_mismatch."
+        - "Канонический shape — example_minimal_for_portal ниже (severity, event, message, unitId, timestamp)."
         - "Имя поля типа события — `event` (не `type`). Значение — свободная строка: известные session/ack-события (COMMAND_ACK, SESSION_COMPLETE, ...) либо errcode прошивки. Важность — отдельное поле `severity` (INFO/WARN/ERROR/CRIT, UPPERCASE)."
       example_minimal_for_portal:
         severity: ERROR
@@ -2575,55 +2564,6 @@ mqtt_only:
         nozzleTempMin: 209
         nozzleTempMax: 231
         trayInfoIdx: "GFA00"
-
-# ─────────────────────────────────────────────────────────────────────────────
-# 5. LEGACY MQTT-ТОПИКИ (deprecated в пользу invoke)
-# ─────────────────────────────────────────────────────────────────────────────
-# Эти команды поддерживаются устройствами, но новые клиенты должны мигрировать
-# на commands/invoke. См. invoke_migration.md.
-legacy_command_topics:
-  - suffix: commands/pause
-    full_topic: "idryer/{serial}/commands/pause"
-    direction: backend_to_device
-    qos: 1
-    retained: false
-    status: legacy
-    orphan: true
-    payload:
-      example: { unitId: U1, timestamp: "2026-04-28T12:00:00Z" }
-    notes:
-      - "DEAD LEGACY CODE: current supported flows не должны публиковать этот topic."
-      - "Прошивки current-scope handler'а не имеют; поддерживаемого сценария использования нет."
-      - "Пометить к удалению из портала вместе с любыми историческими хвостами маршрутизации."
-
-  - suffix: commands/resume
-    full_topic: "idryer/{serial}/commands/resume"
-    direction: backend_to_device
-    qos: 1
-    retained: false
-    status: legacy
-    orphan: true
-    payload:
-      example: { unitId: U1, timestamp: "2026-04-28T12:00:00Z" }
-    notes:
-      - "DEAD LEGACY CODE: current supported flows не должны публиковать этот topic."
-      - "Прошивки current-scope handler'а не имеют; поддерживаемого сценария использования нет."
-      - "Пометить к удалению из портала вместе с любыми историческими хвостами маршрутизации."
-
-  - suffix: commands/update_preset
-    full_topic: "idryer/{serial}/commands/update_preset"
-    direction: backend_to_device
-    qos: 1
-    retained: false
-    status: design_or_partial
-    payload:
-      example:
-        unitId: U1
-        params: { temperature: 55, duration: 240, humidity: 15 }
-        timestamp: "2026-04-28T12:00:00Z"
-    notes:
-      - "Тип объявлен, но активной публикации в портале не найдено."
-      - "Кандидат на invoke action."
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 6. РАСХОЖДЕНИЯ И ОТКРЫТЫЕ ВОПРОСЫ
@@ -3080,7 +3020,7 @@ cloud_http_api:
   base_url:
     production: "https://portal.idryer.org/api"
     staging: "https://staging.idryer.org/api"
-    note: "Конкретный URL берётся из platformio.ini build_flag IDRYER_PORTAL_API_URL для активного окружения."
+    note: "URL выбирается окружением сборки прошивки."
   prerequisites:
     - "WiFi connected."
     - "NTP sync завершён (TLS требует валидное время — см. ntp_sync секцию)."
@@ -3131,7 +3071,7 @@ cloud_http_api:
     - "checkClaim ошибки НЕ логируются (это нормально пока устройство не привязано)."
 
   notes:
-    - "Все ответы JSON; парсятся через ArduinoJson DynamicJsonDocument."
+    - "Все ответы — JSON."
     - "TLS на production обязателен (deviceToken — JWT, нельзя по plain HTTP)."
     - "После успешного claim — этот HTTP API больше не вызывается, вся коммуникация переходит на MQTT (idryer/{serial}/...)."
     - "ClaimStatus/ClaimComplete UART kinds (0x71/0x72) синхронизируют ESP↔iDryerControllerV2 на разных стадиях этого флоу — см. messages."
@@ -3157,8 +3097,7 @@ wifi_provisioning:
 
   on_credentials_received:
     description: "Improv-callback при успешном получении SSID/password от клиента."
-    saves_to: "NVS namespace 'wifi' (поля: 'ssid', 'password', 'configured')"
-    persistence_class: "ArduinoWifiStore (idryer-core)"
+    saves_to: "Persistent storage устройства (поля: ssid, password, configured)."
     side_effects:
       - "Сохранение credentials в NVS."
       - "WiFi.begin(ssid, password) — попытка connect."
@@ -3166,7 +3105,7 @@ wifi_provisioning:
 
   loop_blocking:
     description: "Improv handleSerial() блокирует Serial поток пока WiFi не сконфигурирован."
-    side_effect: "Логирование в Serial подавляется (initArduinoHal(nullptr)) до WiFi-connect — иначе логи смешиваются с Improv-фреймами."
+    side_effect: "Логирование в Serial подавляется до WiFi-connect, чтобы не смешиваться с Improv-фреймами."
     re_enable_logging_at: "После успешного connect логирование в Serial включается обратно."
 
   activation:
@@ -3175,6 +3114,5 @@ wifi_provisioning:
     note: "Активен на ВСЕХ build env — единственный путь подачи WiFi credentials."
 
   notes:
-    - "Альтернативные provisioning-механизмы (SoftAP+HTTP, BLE, SmartConfig, WPS) в коде НЕ реализованы."
     - "Improv-протокол поверх Serial использует binary-фреймы — клиент должен поддерживать Improv (Chrome/Edge через improv-wifi.com или соответствующее мобильное приложение)."
-    - "Reset credentials — стирание NVS namespace 'wifi' (через UART-команду или factory-reset, см. uart_only)."
+    - "Reset credentials — через UART-команду или factory-reset (см. uart_only)."
