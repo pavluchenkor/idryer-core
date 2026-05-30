@@ -2093,157 +2093,50 @@ invoke_actions:
         - "Список доступных id определяется menu_v2.yaml на RP2040 (см. секцию rp2040 ниже)."
         - "Если поле 'id' не int — handler пишет WARN и выходит."
 
-  # ── RP2040 (MCU; принимает invoke по UART через ConfigPush, не MQTT) ───
-  # Реализация — в iDryerControllerV2 (menu_v2.yaml декларирует on_invoke,
-  # dispatch по UART в g_menu[id].u.action.invoke()).
+  # ── RP2040 (MCU; принимает invoke по UART через ConfigPush) ─────────────
+  #
+  # Контракт фиксирует только транспорт и правила диспатча. Конкретный
+  # набор пунктов меню (имена on_invoke, числовые id, диапазоны, persist)
+  # — в menu_v2.yaml на стороне RP2040-продукта и раздаётся потребителям
+  # в рантайме через config_full (см. messages.config_full, commands/get_config).
+  #
   rp2040:
-    # Транспортная обёртка: на RP2040 invoke приходит из ESP32 через UART
-    # ConfigPush (kind=0x30) в виде JSON {"cmd":"invoke","id":<menu_id>}.
-    # Список ниже — имена C-функций (on_invoke) из menu_v2.yaml. Поле "id" —
-    # индекс MenuItem, вычисляется генератором; привязки id↔имя — в
-    # сгенерированном menu_v2.cpp.
-
-    - name: start_drying
-      purpose: "Запустить ручной режим сушки на текущем активном юните (значения dry_temp / dry_time из меню)."
+    - name: "<by_id>"
+      direction: esp_to_rp2040
+      purpose: "Вызов action-пункта меню RP2040 по числовому id; ESP32 проксирует JSON через UART ConfigPush."
+      args:
+        id:
+          type: uint16
+          required: true
+          notes: |
+            Индекс MenuItem в g_menu (RP2040), для которого type=MN_ACTION.
+            Привязки id↔имя on_invoke генерируются в menu_v2.cpp из menu_v2.yaml.
+            Актуальный набор id потребитель получает из config_full
+            (commands/get_config или invoke device.getConfig).
       bindings:
+        mqtt:
+          applicable: false
+          note: "RP2040 на MQTT не подписан; портал шлёт invoke на ESP32, тот проксирует в RP2040."
         uart:
           kind: ConfigPush
           kind_id: 0x30
-          payload: 'JSON {"cmd":"invoke","id":<menu_id>}'
+          payload: 'JSON {"cmd":"invoke","id":<id>}'
           direction_uart: esp_to_rp2040
           ack: true
+      dispatch:
+        validation:
+          - "id < MENU__COUNT"
+          - "g_menu[id].type == MN_ACTION"
+        ack_order: |
+          ConfigAck(None) отправляется ДО вызова item.u.action.invoke() —
+          иначе долгие действия (калибровка, PID autotune) превышают
+          command-reply timeout 700ms и приводят к ретрансмиссиям и
+          многократному выполнению.
+        on_invalid: "ConfigAck(InvalidPayload); действие не выполняется."
+      source_of_truth:
+        menu_items: "menu_v2.yaml на стороне RP2040-продукта"
+        runtime_discovery: "config_full payload в ответ на commands/get_config"
       status: implemented
-
-    - name: start_storage
-      purpose: "Запустить режим хранения (storage) — поддержание низкой температуры с инверсной логикой."
-      status: implemented
-
-    - name: start_profile
-      purpose: "Запустить выбранный профиль (через выбор в подменю profile)."
-      status: implemented
-
-    - name: start_drying_pla
-      purpose: "Пресет: PLA."
-      status: implemented
-
-    - name: start_drying_pla_cf
-      purpose: "Пресет: PLA-CF."
-      status: implemented
-
-    - name: start_drying_pla_gf
-      purpose: "Пресет: PLA-GF."
-      status: implemented
-
-    - name: start_drying_petg
-      purpose: "Пресет: PETG."
-      status: implemented
-
-    - name: start_drying_petg_cf
-      purpose: "Пресет: PETG-CF."
-      status: implemented
-
-    - name: start_drying_petg_gf
-      purpose: "Пресет: PETG-GF."
-      status: implemented
-
-    - name: start_drying_abs
-      purpose: "Пресет: ABS."
-      status: implemented
-
-    - name: start_drying_abs_cf
-      purpose: "Пресет: ABS-CF."
-      status: implemented
-
-    - name: start_drying_abs_gf
-      purpose: "Пресет: ABS-GF."
-      status: implemented
-
-    - name: start_drying_pa
-      purpose: "Пресет: PA (Nylon)."
-      status: implemented
-
-    - name: start_drying_pa_cf
-      purpose: "Пресет: PA-CF."
-      status: implemented
-
-    - name: start_drying_pa_gf
-      purpose: "Пресет: PA-GF."
-      status: implemented
-
-    - name: start_drying_pc
-      purpose: "Пресет: PC."
-      status: implemented
-
-    - name: start_drying_pc_cf
-      purpose: "Пресет: PC-CF."
-      status: implemented
-
-    - name: start_drying_my1
-      purpose: "Пользовательский пресет My1."
-      status: implemented
-
-    - name: start_drying_my2
-      purpose: "Пользовательский пресет My2."
-      status: implemented
-
-    - name: start_drying_my3
-      purpose: "Пользовательский пресет My3."
-      status: implemented
-
-    - name: calib_zero1
-      purpose: "Калибровка нуля тензодатчика юнита 1."
-      status: implemented
-
-    - name: calib_kg_1
-      purpose: "Калибровка веса (1 кг) юнита 1."
-      status: implemented
-
-    - name: calib_zero2
-      purpose: "Калибровка нуля тензодатчика юнита 2."
-      status: implemented
-
-    - name: calib_kg_2
-      purpose: "Калибровка веса (1 кг) юнита 2."
-      status: implemented
-
-    - name: calib_zero3
-      purpose: "Калибровка нуля тензодатчика юнита 3."
-      status: implemented
-
-    - name: calib_kg_3
-      purpose: "Калибровка веса (1 кг) юнита 3."
-      status: implemented
-
-    - name: calib_zero4
-      purpose: "Калибровка нуля тензодатчика юнита 4."
-      status: implemented
-
-    - name: calib_kg_4
-      purpose: "Калибровка веса (1 кг) юнита 4."
-      status: implemented
-
-    - name: pid_autotune_heater
-      purpose: "PID autotune нагревателя (heater)."
-      status: implemented
-
-    - name: pid_autotune_chamber
-      purpose: "PID autotune камеры (chamber)."
-      status: implemented
-
-    - name: start_claim
-      purpose: "Запросить старт claim-флоу с MCU (ClaimStart 0x70 уйдёт в ESP32)."
-      status: disabled
-      notes:
-        - "Закомментировано в прошивке iDryerControllerV2 — UART claim callbacks отключены."
-
-    - name: "<rp2040_uart_dispatch_notes>"
-      direction: esp_to_rp2040
-      purpose: "Транспортная заметка: RP2040 не парсит поле 'action' — только числовое 'id'."
-      status: notes_only
-      notes:
-        - 'uart_manager.cpp читает doc["id"] (uint16_t), валидирует id < MENU__COUNT и item.type == MN_ACTION, шлёт ConfigAck(None) и вызывает item.u.action.invoke().'
-        - "Если id невалиден или item не MN_ACTION — ConfigAck(InvalidPayload), действие не выполняется."
-        - "ACK отправляется ДО вызова invoke() — иначе долгие действия (калибровка) превышают command-reply timeout (700ms) и приводят к ретрансмиссии и многократному выполнению."
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 3. UART-only сообщения (нет MQTT-формы)
