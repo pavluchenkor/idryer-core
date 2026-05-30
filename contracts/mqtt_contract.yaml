@@ -235,11 +235,10 @@ rules:
       added_by: "SDK generic publish-wrapper добавляет timestamp если отсутствует."
 
     device_incoming_parsing:
-      where: "На верхнем уровне приёма MQTT-команды, ДО роутинга."
-      effect: "settimeofday() при наличии валидного timestamp в любой portal-команде."
+      effect: "Устройство синхронизирует системные часы по timestamp из portal-команды."
       excludes:
-        - "Local-WS команды (минуют MQTT-приём) — клиент сам знает своё время, не должен менять системное."
-        - "UART команды от iDryerControllerV2 — iDryerControllerV2 синхронизируется через ESP, не наоборот."
+        - "Local-WS команды (минуют MQTT-приём) — клиент сам знает своё время."
+        - "UART команды от iDryerControllerV2 — iDryerControllerV2 синхронизируется через ESP."
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Статус миграции на menu_protocol_v1: iHeater Link и Storage Link — мигрированы
@@ -361,11 +360,6 @@ canonical_roles:
     type: action
     widget: button
     labels: { ru: "Остановить нагрев", en: "Stop heating" }
-
-  # Note: 27 пунктов меню «температура материала» (mat_pla, mat_petg,
-  # mat_abs ... mat_psu) пока остаются приватными menu items без
-  # canonical role. Если понадобится UI на портале — отдельный widget
-  # типа MaterialsTable, а не 27 индивидуальных ролей.
 
   # ── Storage Link ─────────────────────────────────────────────────────────
   storage.led_count:
@@ -1848,11 +1842,6 @@ invoke_actions:
           notes:
             - "Обрабатывается локально в ESP32 (IdryerRuntime), UART не задействован."
       status: implemented
-      notes:
-        - "Портал в продакшене этот action не использует — шлёт commands/get_config напрямую. Действие фактически dead-code, но в SDK сохранено."
-
-    # led.pulse переехал в invoke_actions.storage_link (см. ниже).
-    # SDK сам этот action не обрабатывает — реализация и контракт у продукта.
 
   # ── storage_link (ESP32-only, LED strip + опц. SHT31) ──────────────────
   storage_link:
@@ -2102,10 +2091,9 @@ invoke_actions:
           - "id < MENU__COUNT"
           - "g_menu[id].type == MN_ACTION"
         ack_order: |
-          ConfigAck(None) отправляется ДО вызова item.u.action.invoke() —
-          иначе долгие действия (калибровка, PID autotune) превышают
-          command-reply timeout 700ms и приводят к ретрансмиссиям и
-          многократному выполнению.
+          ConfigAck отправляется ДО вызова action.invoke(). ACK не дожидается
+          завершения действия; повторный send той же команды вызовет повторный
+          invoke. Клиент строит таймауты исходя из rules.uart_cmd_timeout_ms.
         on_invalid: "ConfigAck(InvalidPayload); действие не выполняется."
       source_of_truth:
         menu_items: "menu_v2.yaml на стороне iDryerControllerV2-продукта"
@@ -2171,7 +2159,6 @@ uart_only:
     purpose: "Структурированные диагностические/лог-сообщения от MCU. Перепаковывается в MQTT events."
     notes:
       - "Wire-форма — fixed-size binary struct (поля severity/source/event/message — фиксированные char-буферы)."
-      - "Старая yaml-формулировка 'raw bytes' вводила в заблуждение — transport принимает любые байты, но producer всегда шлёт packed struct."
 
   - kind: ClaimStart
     kind_id: 0x70
