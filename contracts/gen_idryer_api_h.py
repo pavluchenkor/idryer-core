@@ -279,7 +279,8 @@ def render_config_struct(doc: dict) -> list[str]:
         "    // Run contracts/regen.sh after adding a new capability to the vocabulary.",
     ]
     for cap_name, cap in vocab.items():
-        flag = cap.get("config_flag", f"has{cap_name.capitalize()}")
+        flag = cap.get("config_flag",
+                       "has" + "".join(p.capitalize() for p in cap_name.split("_")))
         desc = cap.get("description", "")
         out.append(f"    bool        {(flag + ';'):<21} ///< {desc}")
     out += [

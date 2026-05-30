@@ -143,10 +143,10 @@ struct Config {
     // ── Peripheral capabilities (from capability_vocabulary in mqtt_contract.yaml) ──
     // Set the flags that match your hardware in main.cpp.
     // Run contracts/regen.sh after adding a new capability to the vocabulary.
-    bool        hasHeaterPower;       ///< Управляемый нагреватель (targetTempC, durationS)
-    bool        hasFanStatus;         ///< Вентилятор (on/off)
+    bool        hasHeater;            ///< Управляемый нагреватель (targetTempC, durationS)
+    bool        hasFan;               ///< Вентилятор (on/off)
     bool        hasLed;               ///< Адресная LED-лента
-    bool        hasScales;            ///< Весовой датчик (граммы филамента)
+    bool        hasWeight;            ///< Весовой датчик (граммы филамента)
     bool        hasRfid;              ///< RFID-ридер метки катушки
     bool        hasAirTemp;           ///< Датчик температуры воздуха (SHT/DHT)
     bool        hasAirHumidity;       ///< Датчик влажности воздуха

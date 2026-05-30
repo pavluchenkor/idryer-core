@@ -25,9 +25,9 @@ static const idryer::Config CFG = {
     .deviceType        = idryer::DeviceType::Dryer,
     .unitsCount        = 1,
     // Peripheral capabilities:
-    .hasHeaterPower         = true,   // Управляемый нагреватель (targetTempC, durationS)
-    .hasFanStatus           = true,   // Вентилятор (on/off)
-    .hasScales              = true,   // Весовой датчик (граммы филамента)
+    .hasHeater              = true,   // Управляемый нагреватель (targetTempC, durationS)
+    .hasFan                 = true,   // Вентилятор (on/off)
+    .hasWeight              = true,   // Весовой датчик (граммы филамента)
     .hasRfid                = true,   // RFID-ридер метки катушки
     .hasLed                 = false,  // (not in this profile)
     .hasAirTemp             = false,  // (not in this profile)

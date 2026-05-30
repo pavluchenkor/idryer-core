@@ -25,10 +25,10 @@ static const idryer::Config CFG = {
     .deviceType        = idryer::DeviceType::IHeaterLink,
     .unitsCount        = 1,
     // Peripheral capabilities:
-    .hasHeaterPower         = true,   // Управляемый нагреватель (targetTempC, durationS)
-    .hasFanStatus           = true,   // Вентилятор (on/off)
+    .hasHeater              = true,   // Управляемый нагреватель (targetTempC, durationS)
+    .hasFan                 = true,   // Вентилятор (on/off)
     .hasLed                 = false,  // (not in this profile)
-    .hasScales              = false,  // (not in this profile)
+    .hasWeight              = false,  // (not in this profile)
     .hasRfid                = false,  // (not in this profile)
     .hasAirTemp             = false,  // (not in this profile)
     .hasAirHumidity         = false,  // (not in this profile)

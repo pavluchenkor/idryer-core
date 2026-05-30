@@ -15,7 +15,7 @@
       "type": "object",
       "additionalProperties": {
         "type": "object",
-        "required": ["json_key", "config_flag", "description"],
+        "required": ["json_key", "description"],
         "additionalProperties": true,
         "properties": {
           "json_key":       { "type": "string" },

@@ -44,7 +44,6 @@ scope: |
 capability_vocabulary:
   heater:
     json_key: "heater"
-    config_flag: "hasHeaterPower"
     telemetry_field: "heaterPower01"
     telemetry_type: "float"
     description: "Управляемый нагреватель (targetTempC, durationS)"
@@ -52,44 +51,37 @@ capability_vocabulary:
 
   fan:
     json_key: "fan"
-    config_flag: "hasFanStatus"
     telemetry_field: "fanOn"
     telemetry_type: "bool"
     description: "Вентилятор (on/off)"
 
   led:
     json_key: "led"
-    config_flag: "hasLed"
     description: "Адресная LED-лента"
     invoke_actions: ["led.pulse"]
 
   weight:
     json_key: "weight"
-    config_flag: "hasScales"
     description: "Весовой датчик (граммы филамента)"
 
   rfid:
     json_key: "rfid"
-    config_flag: "hasRfid"
     description: "RFID-ридер метки катушки"
 
   air_temp:
     json_key: "air_temp"
-    config_flag: "hasAirTemp"
     telemetry_field: "airTempC"
     telemetry_type: "float"
     description: "Датчик температуры воздуха (SHT/DHT)"
 
   air_humidity:
     json_key: "air_humidity"
-    config_flag: "hasAirHumidity"
     telemetry_field: "airHumidityPct"
     telemetry_type: "float"
     description: "Датчик влажности воздуха"
 
   heater_temp:
     json_key: "heater_temp"
-    config_flag: "hasHeaterTemp"
     telemetry_field: "heaterTempC"
     telemetry_type: "float"
     description: "Датчик температуры корпуса нагревателя"

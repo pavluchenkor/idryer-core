@@ -103,8 +103,8 @@ public:
             u["unitId"] = i;        // integer per legacy
 
             JsonObject caps = u.createNestedObject("capabilities");
-            caps["heater"]           = cfg_.hasHeaterPower;
-            caps["fan"]              = cfg_.hasFanStatus;
+            caps["heater"]           = cfg_.hasHeater;
+            caps["fan"]              = cfg_.hasFan;
             caps["servo"]            = false;     // not in Config
             caps["RhAirSensor"]      = cfg_.hasAirHumidity;
             caps["TempAirSensor"]    = cfg_.hasAirTemp;
@@ -332,9 +332,9 @@ bool Link::begin() {
         idryer::ha::HaCapabilities caps;
         caps.airTemp     = impl_->cfg.hasAirTemp;
         caps.airHumidity = impl_->cfg.hasAirHumidity;
-        caps.heaterPower = impl_->cfg.hasHeaterPower;
-        caps.fan         = impl_->cfg.hasFanStatus;
-        caps.weight      = impl_->cfg.hasScales;
+        caps.heaterPower = impl_->cfg.hasHeater;
+        caps.fan         = impl_->cfg.hasFan;
+        caps.weight      = impl_->cfg.hasWeight;
         impl_->intManager.setHaCapabilities(caps);
     }
     // Map facade DeviceType → SDK UartDeviceType.
@@ -592,8 +592,8 @@ void Link::publishTelemetryNow() {
             float v = telemetry.heaterTempC[i];
             if (!isnan(v)) u["heaterTemp"] = v;
         }
-        if (cfg.hasHeaterPower) u["heaterPower"] = (int)roundf(telemetry.heaterPower01[i] * 100.0f);
-        if (cfg.hasFanStatus)   u["fanStatus"]   = telemetry.fanOn[i];
+        if (cfg.hasHeater) u["heaterPower"] = (int)roundf(telemetry.heaterPower01[i] * 100.0f);
+        if (cfg.hasFan)    u["fanStatus"]   = telemetry.fanOn[i];
     }
 
     doc["rssi"]   = WiFi.RSSI();

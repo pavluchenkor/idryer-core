@@ -28,9 +28,9 @@ static const idryer::Config CFG = {
     .hasLed                 = true,   // Адресная LED-лента
     .hasAirTemp             = true,   // Датчик температуры воздуха (SHT/DHT)
     .hasAirHumidity         = true,   // Датчик влажности воздуха
-    .hasHeaterPower         = false,  // (not in this profile)
-    .hasFanStatus           = false,  // (not in this profile)
-    .hasScales              = false,  // (not in this profile)
+    .hasHeater              = false,  // (not in this profile)
+    .hasFan                 = false,  // (not in this profile)
+    .hasWeight              = false,  // (not in this profile)
     .hasRfid                = false,  // (not in this profile)
     .hasHeaterTemp          = false,  // (not in this profile)
     // Basic air sensors (set true if your hardware has them):
