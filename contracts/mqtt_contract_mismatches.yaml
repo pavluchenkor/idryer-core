@@ -41,37 +41,27 @@ known_mismatches:
     summary: "rfid_event и rfid_read_data делят один MQTT-топик idryer/{serial}/rfid; разделяются по shape."
     impact: "Портал имеет два handler-а (rfid.handler.ts и rfid-data.handler.ts) с разной логикой."
   - id: invoke_payload_shape
-    severity: high
-    summary: "Portal DTO принимает обе формы (id ИЛИ action). UART-прокси (idryer-link → iDryerControllerV2) принимает ТОЛЬКО {id}. Форма {action} без id молча отбрасывается на bridge'е."
-    portal_dto:
-      logic: "если есть id (number) ИЛИ action (string) — validation passes"
-    handlers_per_path:
-      uart_proxy_idryer_link:
-        accepts: "{id} only"
-        rejects: "{action} без id → логируется WARN, return"
-        reason: "iDryerControllerV2 диспатчит по индексу пункта меню (menu_data.cpp), action как строка туда не доходит"
-      iheater_link:
-        accepts: "{action: 'heat.start'|'heat.stop', args: {tempC, durationMin}}"
-        rejects: "{action} без известного имени → fallback в MenuBridge::applyInvokeCommand, требует {id}"
-      core_sdk_runtime_callback:
-        accepts: "что зарегистрирует продукт. Встроено: action='device.getConfig' → IProfile::getConfig"
-    examples:
-      works:
-        payload: { cmd: "invoke", id: 5 }
-        flow: "Portal → bridge (id=5) → ConfigPush JSON → iDryerControllerV2 ищет menu[5].on_invoke → колбэк выполнен"
-      silently_dropped:
-        payload: { cmd: "invoke", action: "start_drying" }
-        flow: "Portal: HTTP 200 OK → MQTT publish → bridge: data['id'].is<int>()==false → лог WARN, return → iDryerControllerV2: НИЧЕГО НЕ ПОЛУЧИЛ → пользователь: UI показывает 'отправлено', действие НЕ выполнено"
-    decision_required: |
-      1) Bridge учится резолвить action в id через menu mapping (требует копии меню или dynamic lookup в bridge);
-      2) ИЛИ Portal требует id (action остаётся только для логов и UI);
-      3) ИЛИ Portal сам резолвит action→id перед публикацией MQTT (frontend знает структуру меню из get_config).
-    impact: "INTEROP-RISK: тихий no-op без ошибки. Любой будущий клиент (mobile, third-party SDK) который шлёт {action} без id столкнётся с этим silent drop'ом."
-    status: design_or_partial
-    interop_break: true
-  - id: command_get_config_vs_invoke
-    summary: "commands/get_config и invoke device.getConfig дублируют друг друга."
-    impact: "Оба поддерживаются. Долгосрочная цель — оставить только invoke."
+    summary: "Две формы invoke решают разные задачи на разных слоях: {id} — UART/wire form, {action,args} — портальный DTO и прямые команды."
+    status: design_note
+    interop_break: false
+    forms:
+      wire_form_uart:
+        payload: { cmd: "invoke", id: <menu_index> }
+        used_by: "Portal → idryer-link bridge → iDryerControllerV2 (ConfigPush JSON через UART)"
+        dispatch: "iDryerControllerV2 ищет g_menu[id].u.action.invoke (uart_manager.cpp:1022-1050)"
+      direct_action_form:
+        payload: { cmd: "invoke", action: "<name>", args: { ... } }
+        used_by: "iHeater-link (heat.start / heat.stop / led.pulse — обработчики в command_routing.cpp); core SDK runtime callbacks (device.getConfig и др.)"
+        dispatch: "Прямой колбэк по имени action в прошивке"
+      portal_dto:
+        accepts_both: true
+        purpose: "DTO принимает обе формы как UI-удобство; разрешение action → id для UART-пути выполняется в портале/SDK по menu snapshot до публикации в MQTT"
+    rationale: |
+      Разрешение action → id на стороне UART потребовало бы строковой таблицы action-имён
+      в firmware iDryerControllerV2 (flash + RAM на каждый пункт меню) ради функции, которую
+      портал уже решает через menu snapshot. UART-форма остаётся бинарно-индексной,
+      action-форма живёт там, где имя действия — это идентификатор колбэка (iHeater-link,
+      core SDK runtime).
   # ── Interop-баги между Portal/legacy bridge/iDryerControllerV2 (требуют решения по коду) ──
   - id: write_rfid_payload_mismatch
     severity: critical
@@ -138,67 +128,6 @@ known_mismatches:
     todo:
       - "Реализовать на стороне idryer-link / iDryerControllerV2 приём нового payload"
       - "Реализовать публикацию rfid/write_result"
-
-  - id: events_shape_mismatch
-    severity: medium
-    summary: "Частичный mismatch: MCU log events работают; UART transport errors дропаются Portal'ом из-за отсутствия unitId."
-    works_today:
-      - "MCU LogPayload events (SESSION_COMPLETE, STAGE_CHANGED, OVERHEAT и т.п.) — все 4 поля есть, портал принимает"
-    broken_today:
-      - "UART CRC errors, frame errors, ACK timeouts — нет unitId, отбрасывается на валидации портала"
-    decision_made: "Variant B — Portal makes unitId optional for transport-level errors"
-    decision_date: "2026-05-01"
-    canonical_payload:
-      severity:
-        {
-          type: string,
-          required: true,
-          enum: ["CRIT", "ERROR", "WARN", "INFO"],
-          note: "Portal должен нормализовать к uppercase",
-        }
-      event:
-        {
-          type: string,
-          required: true,
-          note: "тип события (PROTOCOL_ERROR_REMOTE, SESSION_COMPLETE, ...)",
-        }
-      message: { type: string, required: true }
-      unitId:
-        {
-          type: string,
-          optional: true,
-          format: "U1..U4 OR omitted",
-          note: "опционально — для transport-level errors отсутствует, для unit-events обязательно",
-        }
-      source:
-        {
-          type: string,
-          optional: true,
-          default: "SYSTEM",
-          note: "'UART' / 'MCU' / 'WIFI' / etc",
-        }
-      timestamp: { type: string, format: ISO8601, required: true }
-    implementation_notes:
-      - "Изменения только в Portal: снять unitId из обязательных полей валидатора, нормализовать severity к uppercase."
-      - "Прошивку трогать не нужно — handleLog продолжает работать как сейчас, handleUartError начнёт доходить."
-      - "WS-broadcast и БД-сохранение поддержать unitId=null для system-level событий."
-    status: design_or_partial
-    interop_break: false
-    interop_partial: true
-    todo:
-      - "Portal: events.handler.ts валидация — unitId optional, severity .toUpperCase()"
-      - "Portal: WS event payload и БД-схема — поддержать null unitId"
-
-  - id: portal_session_routing_storage_profile_bug
-    severity: critical
-    summary: "Portal в startSession шлёт только {temperature, duration}; диспетчер для STORAGE требует humidity, для PROFILE — profile, оба условия не выполняются → команда падает в commands/drying."
-    impact: "Сессии STORAGE и PROFILE никогда не публикуются на свои каноничные топики; всегда падают в commands/drying. iHeater-link в drying-ветке нет логики STORAGE → команда выполняется как сушка."
-    decision_required: |
-      1) Portal: расширить startSession передавать humidity для STORAGE и profile для PROFILE;
-      2) Portal: убрать precondition'ы в sendStartCommand (или inverse: пропускать null поля корректно);
-      3) Альтернатива: всегда падать в drying не баг, а намеренный fallback — тогда yaml перенести commands/storage и commands/profile в legacy.
-    status: design_or_partial
-    interop_break: true
 
   - id: portal_publishes_unsupported_commands
     severity: critical
@@ -277,16 +206,4 @@ known_mismatches:
     todo:
       - "yaml: payloads.Rfid.fields.readerId — убрать '0xFF resolution' note, оставить только 'physical reader index'."
       - "yaml: payloads.RfidData.fields.readerId — добавить note про '0xFF=auto-resolve by unitId' для incoming write-fragments."
-
-  - id: config_legacy_binary_broken
-    severity: high
-    summary: "yaml payloads.Config описывает legacy binary UartConfigPayload (8 bytes), но iDryerControllerV2 handleUartConfig не парсит его как struct — копирует байты в chunkPayload.data и runs deserializeJson на бинарных байтах."
-    impact: "Legacy binary ConfigPush никогда не сработает на current iDryerControllerV2 firmware."
-    decision_required: |
-      1) Снять path с binary ConfigPush (статус 'legacy/broken') в yaml;
-      2) ИЛИ: исправить handleUartConfig чтобы реально парсил binary struct.
-    status: design_or_partial
-    interop_break: true
-    todo:
-      - "yaml: payloads.Config — пометить как legacy_broken; не использовать как канон."
 
