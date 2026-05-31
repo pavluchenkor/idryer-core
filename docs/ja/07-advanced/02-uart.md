@@ -52,7 +52,7 @@ bridge.loop();
 
 送信メソッドは2つのグループに分割されます：
 
-- ESP32 → RP2040：`sendHelloAck`、`sendCommand`、`sendProfileCommand`、`sendConfigPush`、`sendHeartbeat`、`sendClaimStatus`、`sendClaimComplete`、`sendWsStatus`、`sendTelemetryAck`、`sendCommandAck`、`sendConfigAck`。
+- ESP32 → RP2040：`sendHelloAck`、`sendCommand`、`sendProfileCommand`、`sendHeartbeat`、`sendClaimStatus`、`sendClaimComplete`、`sendWsStatus`、`sendTelemetryAck`、`sendCommandAck`、`sendConfigAck`。
 - RP2040 → ESP32（またはテスト用）：`sendHello`、`sendTelemetry`、`sendStatus`、`sendWeights`、`sendRfid`。
 
 ACK/リトライ：`UART_FLAG_ACK_REQ` フラグを持つフレームは700 msのタイムアウト付きで最大3回リトライされます。ACKが受け取られない場合、`send*` は `false` を返します。

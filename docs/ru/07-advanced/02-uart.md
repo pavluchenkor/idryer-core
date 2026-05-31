@@ -52,7 +52,7 @@ bridge.loop();
 
 Методы отправки делятся на две группы:
 
-- ESP32 → RP2040: `sendHelloAck`, `sendCommand`, `sendProfileCommand`, `sendConfigPush`, `sendHeartbeat`, `sendClaimStatus`, `sendClaimComplete`, `sendWsStatus`, `sendTelemetryAck`, `sendCommandAck`, `sendConfigAck`.
+- ESP32 → RP2040: `sendHelloAck`, `sendCommand`, `sendProfileCommand`, `sendHeartbeat`, `sendClaimStatus`, `sendClaimComplete`, `sendWsStatus`, `sendTelemetryAck`, `sendCommandAck`, `sendConfigAck`.
 - RP2040 → ESP32 (или для тестов): `sendHello`, `sendTelemetry`, `sendStatus`, `sendWeights`, `sendRfid`.
 
 ACK/retry: кадры с флагом `UART_FLAG_ACK_REQ` повторяются до 3 раз с таймаутом 700 мс. Если ACK не получен — `send*` возвращает `false`.

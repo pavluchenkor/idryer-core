@@ -542,7 +542,6 @@ enums:
     Stop: 0x02
     Find: 0x03
     GetConfig: 0x05
-    SetConfig: 0x06
     ReadRfid: 0x07
     WriteRfid: 0x08
     ResetFault: 0x10
@@ -667,7 +666,7 @@ enums:
 #     `°C × 10` int. ESP-bridge умножает на 10 при отправке UART,
 #     MCU делит на 10 при приёме. Поля: Profile.stages[].temp,
 #     Command.arg0 (для Start drying/storage), Telemetry.temperatureC10,
-#     Telemetry.targetTempC10, Config.targetTemperatureC10.
+#     Telemetry.targetTempC10.
 #   - ×10 = точность 0.1 °C целыми числами.
 # ─────────────────────────────────────────────────────────────────────────────
 payloads:
@@ -900,18 +899,6 @@ payloads:
               unit: "seconds",
               note: "wire-level семантика — секунды",
             }
-
-  Config:
-    cpp_name: UartConfigPayload
-    description: "Целевые параметры одного юнита (legacy ConfigPush; не фрагментированный). LEGACY/BROKEN — не использовать."
-    status: legacy_broken
-    fields:
-      targetTemperatureC10: { type: int16, scaling: { factor: 0.1, unit: "°C" } }
-      targetHumidityPct: { type: uint16, unit: "%RH" }
-      durationMinutes: { type: uint16 }
-      fanDutyPct: { type: uint16 }
-    notes:
-      - "Канонический путь конфига — ConfigPush JSON через chunked-передачу."
 
   ConfigChunk:
     description: |
@@ -2211,16 +2198,6 @@ uart_only:
     cmd_code: WifiStatus
     cmd_code_id: 0x11
     purpose: "MCU запрашивает у ESP32 IP-адрес для отображения на экране."
-
-  - kind: Command
-    kind_id: 0x20
-    payload: Command
-    direction: esp_to_rp2040
-    cmd_code: SetConfig
-    cmd_code_id: 0x06
-    purpose: "Применить целевые параметры одного юнита (UartConfigPayload)."
-    notes:
-      - "Используется внутри ESP32; не маппится напрямую на MQTT-топик."
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 4. MQTT-only сообщения (нет UART-формы)

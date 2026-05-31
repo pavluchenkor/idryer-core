@@ -39,7 +39,6 @@ public:
     using TelemetryHandler       = std::function<void(const UartTelemetryPayload&, const UartFrameHeader&)>;
     using CommandHandler         = std::function<void(const UartCmdPayload&,       const UartFrameHeader&)>;
     using ProfileHandler         = std::function<void(const UartProfilePayload&,   const UartFrameHeader&)>;
-    using ConfigHandler          = std::function<void(const UartConfigPayload&,    const UartFrameHeader&)>;
     using ConfigChunkHandler     = std::function<void(const UartConfigChunkPayload&, uint8_t dataLen, const UartFrameHeader&)>;
     using CommandAckHandler      = std::function<void(const UartAckPayload&,       const UartFrameHeader&)>;
     using ConfigAckHandler       = std::function<void(const UartAckPayload&,       const UartFrameHeader&)>;
@@ -80,7 +79,6 @@ public:
     bool sendHelloAck(const UartHelloAckPayload& p);
     bool sendCommand(const UartCmdPayload& p, bool ackRequired = true);
     bool sendProfileCommand(const UartProfilePayload& p, bool ackRequired = true);
-    bool sendConfigPush(const UartConfigPayload& p, bool ackRequired = true);
     bool sendConfigPushChunk(const UartConfigChunkPayload& p, uint8_t payloadLen, uint8_t flags);
     bool sendHeartbeat(const UartHeartbeatPayload& p);
     bool sendClaimStatus(const UartClaimStatusPayload& p);
@@ -122,7 +120,6 @@ public:
     void setTelemetryHandler(const TelemetryHandler& h)          { telemetryHandler_ = h; }
     void setCommandHandler(const CommandHandler& h)              { commandHandler_ = h; }
     void setProfileHandler(const ProfileHandler& h)              { profileHandler_ = h; }
-    void setConfigHandler(const ConfigHandler& h)                { configHandler_ = h; }
     void setConfigChunkHandler(const ConfigChunkHandler& h)      { configChunkHandler_ = h; }
     void setCommandAckHandler(const CommandAckHandler& h)        { commandAckHandler_ = h; }
     void setConfigAckHandler(const ConfigAckHandler& h)          { configAckHandler_ = h; }
@@ -182,7 +179,6 @@ private:
     TelemetryHandler       telemetryHandler_;
     CommandHandler         commandHandler_;
     ProfileHandler         profileHandler_;
-    ConfigHandler          configHandler_;
     ConfigChunkHandler     configChunkHandler_;
     CommandAckHandler      commandAckHandler_;
     ConfigAckHandler       configAckHandler_;

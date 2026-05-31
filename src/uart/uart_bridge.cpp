@@ -82,11 +82,6 @@ bool UartBridge::sendProfileCommand(const UartProfilePayload& p, bool ackRequire
                     ackRequired ? UART_FLAG_ACK_REQ : 0);
 }
 
-bool UartBridge::sendConfigPush(const UartConfigPayload& p, bool ackRequired) {
-    return transmit(UartMsgKind::ConfigPush, reinterpret_cast<const uint8_t*>(&p), sizeof(p),
-                    ackRequired ? UART_FLAG_ACK_REQ : 0);
-}
-
 bool UartBridge::sendConfigPushChunk(const UartConfigChunkPayload& p, uint8_t payloadLen, uint8_t flags) {
     return transmit(UartMsgKind::ConfigPush, reinterpret_cast<const uint8_t*>(&p), payloadLen, flags);
 }
@@ -360,28 +355,17 @@ void UartBridge::handleFrame(const UartFrame& frame) {
     }
 
     case UartMsgKind::ConfigPush: {
-        if (frame.header.flags & (UART_FLAG_FRAGMENT | UART_FLAG_LAST_FRAGMENT)) {
-            if (frame.header.payloadLength < UART_CONFIG_CHUNK_HEADER_SIZE) {
-                emitError(UartErrCode::InvalidPayload, frame.header.sequence,
-                          frame.header.payloadLength, false); return;
-            }
-            if (configChunkHandler_) {
-                UartConfigChunkPayload p{};
-                memcpy(&p, frame.payload, frame.header.payloadLength);
-                uint8_t dataLen = frame.header.payloadLength - UART_CONFIG_CHUNK_HEADER_SIZE;
-                configChunkHandler_(p, dataLen, frame.header);
-            }
-            if (frame.header.flags & UART_FLAG_ACK_REQ) sendConfigAck(frame.header.sequence);
-        } else {
-            if (!validateLength(UartMsgKind::ConfigPush, frame.header.payloadLength)) {
-                emitError(UartErrCode::InvalidPayload, frame.header.sequence,
-                          frame.header.payloadLength, false); return;
-            }
-            if (configHandler_) {
-                UartConfigPayload p{}; memcpy(&p, frame.payload, sizeof(p));
-                configHandler_(p, frame.header);
-            }
+        if (frame.header.payloadLength < UART_CONFIG_CHUNK_HEADER_SIZE) {
+            emitError(UartErrCode::InvalidPayload, frame.header.sequence,
+                      frame.header.payloadLength, false); return;
         }
+        if (configChunkHandler_) {
+            UartConfigChunkPayload p{};
+            memcpy(&p, frame.payload, frame.header.payloadLength);
+            uint8_t dataLen = frame.header.payloadLength - UART_CONFIG_CHUNK_HEADER_SIZE;
+            configChunkHandler_(p, dataLen, frame.header);
+        }
+        if (frame.header.flags & UART_FLAG_ACK_REQ) sendConfigAck(frame.header.sequence);
         break;
     }
 
@@ -601,7 +585,6 @@ bool UartBridge::validateLength(UartMsgKind kind, uint8_t length) const {
     case UartMsgKind::RfidWriteData:  return length == sizeof(UartRfidDataPayload);
     case UartMsgKind::Command:        return length == sizeof(UartCmdPayload) ||
                                              length == sizeof(UartProfilePayload);
-    case UartMsgKind::ConfigPush:     return length == sizeof(UartConfigPayload);
     case UartMsgKind::Heartbeat:      return length == sizeof(UartHeartbeatPayload);
     case UartMsgKind::TelemetryAck:
     case UartMsgKind::CommandAck:

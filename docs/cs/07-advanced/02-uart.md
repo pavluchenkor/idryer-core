@@ -52,7 +52,7 @@ bridge.loop();
 
 Metody odesílání jsou rozděleny do dvou skupin:
 
-- ESP32 → RP2040: `sendHelloAck`, `sendCommand`, `sendProfileCommand`, `sendConfigPush`, `sendHeartbeat`, `sendClaimStatus`, `sendClaimComplete`, `sendWsStatus`, `sendTelemetryAck`, `sendCommandAck`, `sendConfigAck`.
+- ESP32 → RP2040: `sendHelloAck`, `sendCommand`, `sendProfileCommand`, `sendHeartbeat`, `sendClaimStatus`, `sendClaimComplete`, `sendWsStatus`, `sendTelemetryAck`, `sendCommandAck`, `sendConfigAck`.
 - RP2040 → ESP32 (nebo pro testy): `sendHello`, `sendTelemetry`, `sendStatus`, `sendWeights`, `sendRfid`.
 
 ACK/retry: rámce s příznakem `UART_FLAG_ACK_REQ` se opakují až 3krát s vypršením časového limitu 700 ms. Pokud je přijat ACK — `send*` vrátí `false`.
