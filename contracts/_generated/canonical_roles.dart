@@ -258,6 +258,15 @@ const Map<String, CanonicalRoleDef> canonicalRoles = {
       'en': 'Language',
     },
   ),
+  'system.ignore_external_cmd': CanonicalRoleDef(
+    type: 'bool',
+    widget: 'toggle',
+    unit: '',
+    labels: {
+      'ru': 'Игнор. внеш. команды',
+      'en': 'Ignor ext cmd',
+    },
+  ),
 };
 
 /// Вернуть локализованную подпись пункта меню.

@@ -388,6 +388,7 @@ export const CanonicalRoles = {
   "common.clear_errors": { type: "action", widget: "button", unit: "", labels: { "ru": "Сбросить ошибки", "en": "Clear errors" } },
   "system.active_unit": { type: "uint", widget: "hidden", unit: "", labels: { "ru": "Активный юнит", "en": "Active unit" } },
   "system.language": { type: "uint", widget: "select", unit: "", labels: { "ru": "Язык", "en": "Language" } },
+  "system.ignore_external_cmd": { type: "bool", widget: "toggle", unit: "", labels: { "ru": "Игнор. внеш. команды", "en": "Ignor ext cmd" } },
 } as const;
 
 export type CanonicalRole = keyof typeof CanonicalRoles;

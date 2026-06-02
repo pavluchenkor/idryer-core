@@ -397,6 +397,11 @@ canonical_roles:
     widget: select
     labels: { ru: "Язык", en: "Language" }
 
+  system.ignore_external_cmd:
+    type: bool
+    widget: toggle
+    labels: { ru: "Игнор. внеш. команды", en: "Ignor ext cmd" }
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Карта диапазонов UART kind_id (для удобства аудитора)
 # ─────────────────────────────────────────────────────────────────────────────
