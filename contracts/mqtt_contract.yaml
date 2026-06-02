@@ -401,6 +401,12 @@ canonical_roles:
     type: bool
     widget: toggle
     labels: { ru: "Игнор. внеш. команды", en: "Ignor ext cmd" }
+    # SECURITY: переключение этого роля через портал/мобильное приложение
+    # ДОЛЖНО проходить email-PIN подтверждение (5-мин TTL). Прямое нажатие
+    # toggle в UI без подтверждения — недопустимо. Бэк принимает только
+    # POST /devices/:id/security-toggle/{request,confirm}, не обычный set.
+    # MQTT-канал `set bind=ign_ext_cmd` остаётся открытым (SDK gate exempts)
+    # для локального интерфейса устройства; на проде MQTT-токен device-scoped.
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Карта диапазонов UART kind_id (для удобства аудитора)

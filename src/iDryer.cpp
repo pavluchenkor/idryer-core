@@ -705,19 +705,22 @@ void Link::dispatchCommand(const char* command, JsonObjectConst data) {
     if (!command || !command[0]) return;
 
     // ─── Gate: ignoreExternalCmd ─────────────────────────────────────────
-    // Если устройство в режиме игнора внешних команд — отклоняем и публикуем
-    // event COMMAND_REJECTED с reason+commandId. Локальный экран/меню сюда
-    // не приходят, они меняют состояние напрямую.
+    // Защищает от внешних команд-ДЕЙСТВИЙ (запуск нагрева, включение ленты,
+    // запись RFID и т.п.). Не блокирует read/config: пользователь должен
+    // иметь возможность читать состояние и менять параметры даже когда
+    // действия запрещены.
     //
-    // Исключение: `set` с bind="ign_ext_cmd" всегда проходит — иначе устройства
-    // без локального меню (iHeater-link, Storage) после включения тогла станут
-    // неуправляемы навсегда (никак не выключить удалённо).
+    // Whitelist (всегда проходят):
+    //   set, get_config, ping, link_integration
+    // Всё остальное (invoke, drying/storage/profile/stop, bambu_apply,
+    // write_rfid, неизвестные) — блокируется и публикуется COMMAND_REJECTED.
     if (impl_->ignoreExternalCmd) {
-        const bool isToggleExempt =
-            (strcmp(command, "set") == 0) &&
-            data && data["bind"].is<const char*>() &&
-            (strcmp(data["bind"].as<const char*>(), "ign_ext_cmd") == 0);
-        if (!isToggleExempt) {
+        const bool isExempt =
+            (strcmp(command, "set") == 0) ||
+            (strcmp(command, "get_config") == 0) ||
+            (strcmp(command, "ping") == 0) ||
+            (strcmp(command, "link_integration") == 0);
+        if (!isExempt) {
             StaticJsonDocument<256> doc;
             doc["severity"] = eventSeverityString(EventKind::Warning);
             doc["event"]    = "COMMAND_REJECTED";
@@ -731,7 +734,7 @@ void Link::dispatchCommand(const char* command, JsonObjectConst data) {
             HAL_LOG_WARN("LINK", "rejected '%s' (ignore_external_cmd=true)", command);
             return;
         }
-        HAL_LOG_INFO("LINK", "passing 'set ign_ext_cmd' through gate (toggle exempt)");
+        HAL_LOG_INFO("LINK", "passing '%s' through gate (read/config)", command);
     }
 
     // ─── Built-in side-effects (always run) ──────────────────────────────
