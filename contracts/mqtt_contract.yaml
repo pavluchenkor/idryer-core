@@ -610,10 +610,12 @@ enums:
   # Важность несёт отдельное поле severity (INFO/WARN/ERROR/CRIT), не само событие.
   PortalEventType:
     - COMMAND_ACK
+    - COMMAND_REJECTED # устройство отклонило входящую команду (например, ignoreExternalCmd=true)
     - SESSION_COMPLETE
     - SESSION_INTERRUPTED
     - STAGE_CHANGED
     - PROFILE_COMPLETED
+    - ERRC_STATE_CHANGE # переход режима (Mode=DRYING start / IDLE и т.п.) — DRYER публикует на каждое изменение
     - MAINTENANCE_REQUIRED
 
   # Link integrations (HA / Bambu / Moonraker)
@@ -1212,11 +1214,13 @@ messages:
             "units[i].stageElapsed": "только PROFILE"
             "units[i].stageRemaining": "только PROFILE"
             "units[i].stagePhase": "RAMP | HOLD (только PROFILE)"
+            "units[i].ignoreExternalCmd": "bool, optional. true → устройство отклоняет внешние команды (REST/WS/RFID); портал блокирует кнопки управления и показывает плашку. Source of truth — NVS/EEPROM устройства, переключается через меню."
           notes:
             - "Портал ожидает units[] обязательно."
             - "Dryer и iHeater Link шлют status в одном shape."
             - "Текущие прошивки эмитят: unitId, mode, sessionNum, target.temperature, target.duration, elapsedTime. progressPercent добавляет интеграционный hook (Bambu/Moonraker)."
             - "target.humidity и profile-блок (currentStage, totalStages, stageElapsed, stageRemaining, totalRemaining, profileTotalElapsed, stagePhase) зарезервированы для PROFILE-режима и текущими прошивками пока НЕ эмитятся: проброс этапов из UART Status в MQTT ещё не реализован. Все они optional — потребитель обязан корректно работать при их отсутствии."
+            - "ignoreExternalCmd — флаг локального меню устройства. Default false. Когда true: SDK Link::dispatchCommand и DRYER handleUartCommand отклоняют команду и публикуют event COMMAND_REJECTED с reason=ignore_external_cmd."
       uart:
         kind: Status
         kind_id: 0x13
@@ -2209,13 +2213,16 @@ mqtt_only:
     qos: 0
     retained: false
     interval: "on event"
-    status: design_or_partial
+    status: implemented
     payload:
       portal_validates_required:
         - severity
         - event
         - message
         - unitId
+      portal_optional_fields:
+        reason: "string, machine-readable код причины (например, ignore_external_cmd, offline, capability_missing)"
+        commandId: "string, UUID команды из device_commands — связывает event с конкретным dispatch (используется для COMMAND_ACK / COMMAND_REJECTED)"
       legacy_firmware_publishes:
         uart_protocol_error:
           severity: '"error" (lowercase)'
@@ -2231,7 +2238,7 @@ mqtt_only:
         - "Канонический shape — example_minimal_for_portal ниже (severity, event, message, unitId, timestamp)."
         - "Имя поля типа события — `event` (не `type`). Значение — свободная строка: известные session/ack-события (COMMAND_ACK, SESSION_COMPLETE, ...) либо errcode прошивки. Важность — отдельное поле `severity` (INFO/WARN/ERROR/CRIT, UPPERCASE)."
       example_minimal_for_portal:
-        severity: ERROR
+        severity: INFO
         event: SESSION_COMPLETE
         message: "drying finished"
         unitId: U1
