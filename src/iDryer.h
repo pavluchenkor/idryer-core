@@ -116,6 +116,15 @@ public:
     /// Triggers a fresh info publish so the backend sees the correct count.
     void setUnitsCount(uint8_t n);
 
+    /// Device-wide "ignore external commands" toggle. Source of truth — NVS
+    /// продукта; продукт вызывает setter при загрузке и при изменении из
+    /// локального меню. Когда `true` — SDK отклоняет любые входящие команды
+    /// из MQTT/Local-WS, публикует event `COMMAND_REJECTED` с
+    /// `reason=ignore_external_cmd`, и status включает `ignoreExternalCmd: true`.
+    /// Setter триггерит немедленный re-publish status.
+    void setIgnoreExternalCmd(bool flag);
+    bool isIgnoreExternalCmd() const;
+
     // ─── Events — fire-and-forget, sent immediately ──────────────────
     /// Publishes to `idryer/{serial}/events`. Payload shape per contract:
     /// `{ severity, event, message, unitId, timestamp }`.

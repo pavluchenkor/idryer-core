@@ -237,6 +237,12 @@ struct Link::Impl {
     uint32_t sessionNum[MAX_UNITS]   = {0, 0, 0, 0};
     UnitMode lastModeForSn[MAX_UNITS]= { UnitMode::Idle, UnitMode::Idle,
                                          UnitMode::Idle, UnitMode::Idle };
+
+    // Device-wide remote-control gate. true → SDK отклоняет входящие команды
+    // из MQTT/Local-WS и публикует event COMMAND_REJECTED с reason=ignore_external_cmd.
+    // Source of truth — NVS/EEPROM продукта; продукт вызывает setIgnoreExternalCmd()
+    // при загрузке и при изменении из локального меню.
+    bool ignoreExternalCmd = false;
 };
 
 // ──────────────────────────────────────────────────────────────────────
@@ -646,6 +652,7 @@ void Link::publishStatusNow() {
 
     doc["uptime"] = millis() / 1000u;
     doc["rssi"]   = WiFi.RSSI();   // bonus: free signal info on every status
+    doc["ignoreExternalCmd"] = impl_->ignoreExternalCmd;
 
     if (impl_->onStatusPublish) {
         impl_->onStatusPublish(doc.as<JsonObject>());
@@ -696,6 +703,25 @@ bool Link::onCommand(const char* name, CommandCallback cb) {
 
 void Link::dispatchCommand(const char* command, JsonObjectConst data) {
     if (!command || !command[0]) return;
+
+    // ─── Gate: ignoreExternalCmd ─────────────────────────────────────────
+    // Если устройство в режиме игнора внешних команд — отклоняем и публикуем
+    // event COMMAND_REJECTED с reason+commandId. Локальный экран/меню сюда
+    // не приходят, они меняют состояние напрямую.
+    if (impl_->ignoreExternalCmd) {
+        StaticJsonDocument<256> doc;
+        doc["severity"] = eventSeverityString(EventKind::Warning);
+        doc["event"]    = "COMMAND_REJECTED";
+        doc["message"]  = command;                       // имя отклонённой команды (human-readable)
+        doc["unitId"]   = "DEVICE";                      // device-wide
+        doc["reason"]   = "ignore_external_cmd";         // machine-readable
+        if (data && data["commandId"].is<const char*>()) {
+            doc["commandId"] = data["commandId"].as<const char*>();
+        }
+        impl_->pub.publishEvent(doc);
+        HAL_LOG_WARN("LINK", "rejected '%s' (ignore_external_cmd=true)", command);
+        return;
+    }
 
     // ─── Built-in side-effects (always run) ──────────────────────────────
     // Эти команды обрабатывает либа сама. Продукт может ДОПОЛНИТЕЛЬНО
@@ -823,6 +849,18 @@ void Link::setUnitsCount(uint8_t n) {
     // числа юнитов; вызывается из onHello(). Config.unitsCount в firmware должен
     // совпадать с реальным числом физических слотов, а не быть потолком MAX.
     impl_->cfg.unitsCount = n;
+}
+
+void Link::setIgnoreExternalCmd(bool flag) {
+    if (impl_->ignoreExternalCmd == flag) return;
+    impl_->ignoreExternalCmd = flag;
+    // Сразу пубим status, чтобы портал быстро увидел изменение
+    // (а не ждал следующего periodic-снимка).
+    publishStatusNow();
+}
+
+bool Link::isIgnoreExternalCmd() const {
+    return impl_->ignoreExternalCmd;
 }
 
 void Link::publishInfoNow() {
