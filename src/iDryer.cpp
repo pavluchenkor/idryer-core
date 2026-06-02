@@ -708,19 +708,30 @@ void Link::dispatchCommand(const char* command, JsonObjectConst data) {
     // Если устройство в режиме игнора внешних команд — отклоняем и публикуем
     // event COMMAND_REJECTED с reason+commandId. Локальный экран/меню сюда
     // не приходят, они меняют состояние напрямую.
+    //
+    // Исключение: `set` с bind="ign_ext_cmd" всегда проходит — иначе устройства
+    // без локального меню (iHeater-link, Storage) после включения тогла станут
+    // неуправляемы навсегда (никак не выключить удалённо).
     if (impl_->ignoreExternalCmd) {
-        StaticJsonDocument<256> doc;
-        doc["severity"] = eventSeverityString(EventKind::Warning);
-        doc["event"]    = "COMMAND_REJECTED";
-        doc["message"]  = command;                       // имя отклонённой команды (human-readable)
-        doc["unitId"]   = "DEVICE";                      // device-wide
-        doc["reason"]   = "ignore_external_cmd";         // machine-readable
-        if (data && data["commandId"].is<const char*>()) {
-            doc["commandId"] = data["commandId"].as<const char*>();
+        const bool isToggleExempt =
+            (strcmp(command, "set") == 0) &&
+            data && data["bind"].is<const char*>() &&
+            (strcmp(data["bind"].as<const char*>(), "ign_ext_cmd") == 0);
+        if (!isToggleExempt) {
+            StaticJsonDocument<256> doc;
+            doc["severity"] = eventSeverityString(EventKind::Warning);
+            doc["event"]    = "COMMAND_REJECTED";
+            doc["message"]  = command;                       // имя отклонённой команды (human-readable)
+            doc["unitId"]   = "DEVICE";                      // device-wide
+            doc["reason"]   = "ignore_external_cmd";         // machine-readable
+            if (data && data["commandId"].is<const char*>()) {
+                doc["commandId"] = data["commandId"].as<const char*>();
+            }
+            impl_->pub.publishEvent(doc);
+            HAL_LOG_WARN("LINK", "rejected '%s' (ignore_external_cmd=true)", command);
+            return;
         }
-        impl_->pub.publishEvent(doc);
-        HAL_LOG_WARN("LINK", "rejected '%s' (ignore_external_cmd=true)", command);
-        return;
+        HAL_LOG_INFO("LINK", "passing 'set ign_ext_cmd' through gate (toggle exempt)");
     }
 
     // ─── Built-in side-effects (always run) ──────────────────────────────
