@@ -1199,6 +1199,7 @@ messages:
           json_shape:
             "uptime": "data.uptime"
             "rssi": "WiFi.RSSI() (dBm) — диагностический, optional"
+            "ignoreExternalCmd": "bool, optional, device-wide. true → устройство отклоняет внешние команды (REST/WS/RFID); портал блокирует кнопки управления и показывает плашку. Source of truth — NVS/EEPROM устройства, переключается через локальное меню."
             "units[i].unitId": "U1..U4"
             "units[i].mode": "IDLE | DRYING | STORAGE | PROFILE | FAULT | UNKNOWN"
             "units[i].sessionNum": "uint > 0 для активных режимов (DRYING/STORAGE/PROFILE); 0/omit для IDLE/FAULT. ОБЯЗАТЕЛЬНО для активных — backend дропает status без sessionNum (silent failure)."
@@ -1214,7 +1215,6 @@ messages:
             "units[i].stageElapsed": "только PROFILE"
             "units[i].stageRemaining": "только PROFILE"
             "units[i].stagePhase": "RAMP | HOLD (только PROFILE)"
-            "units[i].ignoreExternalCmd": "bool, optional. true → устройство отклоняет внешние команды (REST/WS/RFID); портал блокирует кнопки управления и показывает плашку. Source of truth — NVS/EEPROM устройства, переключается через меню."
           notes:
             - "Портал ожидает units[] обязательно."
             - "Dryer и iHeater Link шлют status в одном shape."
