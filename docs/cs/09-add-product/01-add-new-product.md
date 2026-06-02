@@ -1,4 +1,11 @@
-# Jak přidat nový produkt
+---
+title: "Jak přidat nový produkt založený na idryer-core"
+description: "Kontrolní seznam pro nové zařízení iDryer: profil, příkazy, telemetrie, MQTT, portál a hranice mezi knihovnou a produktovým kódem."
+---
+
+# Jak přidat nový produkt založený na idryer-core
+
+Tento návod použijte při tvorbě nového produktu nad `idryer-core`: sušičky filamentu, topného bloku, osvětlení, senzoru nebo jiného modulu. Ukazuje, co má zůstat v knihovně a co patří do konkrétního produktového kódu.
 
 Praktický kontrolní seznam pro vytvoření nového zařízení nad `idryer-core`.
 

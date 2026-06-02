@@ -129,18 +129,28 @@ known_mismatches:
       - "Реализовать на стороне idryer-link / iDryerControllerV2 приём нового payload"
       - "Реализовать публикацию rfid/write_result"
 
-  - id: portal_publishes_unsupported_commands
-    severity: critical
-    summary: "Portal публикует commands/storage, /profile, /find, /clear_errors, /pause, /resume, но ни один current-scope продукт (iHeater Link, Storage Link) не имеет consumer-веток для них."
-    consumers_status:
-      iheater_link: "обрабатываются find/clear_errors/get_config/set/invoke/link_integration. drying/storage/stop удалены после миграции на menu_protocol_v1 (запуск/остановка идут через invoke heat.start/heat.stop). find и clear_errors — no-op (нужны для колокольчика DeviceHeader и ClearErrorsButton). profile/read_rfid/write_rfid/pause/resume не зарегистрированы — Unknown command."
-    impact: "Portal возвращает {status:'sent'} оператору, но никаких действий на устройстве нет. Тихий interop-баг."
-    decision_required: |
-      1) Portal: убрать публикацию commands/pause, commands/resume, и для current-scope products также storage/profile/find/clear_errors;
-      2) ИЛИ: реализовать consumer-ветки в текущих продуктах;
-      3) ИЛИ: задокументировать как product-specific (только для legacy idryer-link, не для current scope).
-    status: design_or_partial
-    interop_break: true
+  - id: portal_not_capability_aware
+    summary: "Portal шлёт одни и те же команды всем устройствам. iHeater (нагреватель) и Storage Link (коробка хранения) получают команды от полной сушилки V3, для которых у них нет ни функционала, ни hardware."
+    why_it_is_wrong: |
+      Устройства разные. На iHeater нет сессий сушки, профилей, RFID, паузы;
+      на Storage нет нагревателя. Команда commands/profile нагревателю
+      бессмысленна; commands/drying коробке хранения — тем более.
+      Контракт описывает кому что применимо: mqtt_contract.yaml,
+      секция product_topic_support (~line 109).
+    what_portal_should_send_to_iheater:
+      - "commands/get_config — запросить меню"
+      - "commands/set — изменить значение в меню"
+      - "commands/invoke — запустить/остановить нагрев (action heat.start/heat.stop) или вызвать пункт меню по id"
+    fix: |
+      Portal читает product из device info (iheater_link / storage_link /
+      dryer_v3) и фильтрует команды по product_topic_support перед публикацией.
+      Запуск/остановка для iHeater и Storage Link — через commands/invoke с
+      action, не через legacy commands/drying|storage|stop.
+    open_question: "commands/pause и commands/resume отсутствуют в product_topic_support вообще — нужно решить: добавить для dryer_v3 (если применимо) или удалить публикацию из портала."
+
+  - id: iheater_find_action_backlog
+    status: backlog
+    summary: "commands/find на iHeater сейчас пустой (нет индикатора). Можно реализовать через LED-паттерн (invoke led.pulse) — потом добавить iheater_link в product_topic_support: commands/find."
 
   - id: status_config_delta_not_implemented_in_current
     severity: high

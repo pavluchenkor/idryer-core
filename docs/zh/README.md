@@ -1,4 +1,11 @@
-# idryer-core — 庫文檔
+---
+title: "面向 iDryer 设备和自制模块的 idryer-core"
+description: "idryer-core 文档：连接 ESP32 设备、MQTT、Wi-Fi、云端状态机，以及耗材干燥箱或 3D 打印机模块的命令。"
+---
+
+# 面向 iDryer 设备和自制模块的 idryer-core
+
+当自制耗材干燥箱、加热腔、照明或其他 3D 打印机模块需要成为可管理的 iDryer 设备时，可以使用 `idryer-core`。库负责 Wi-Fi、MQTT、命令、遥测和门户通信，产品代码只描述具体设备行为。
 
 `idryer-core` — C++ library (Arduino/PlatformIO) for ESP32-based iDryer devices. Manages WiFi, MQTT, the cloud state machine, and command routing. The product implements only device-specific behaviour.
 

@@ -1,4 +1,11 @@
-# How to add a new product
+---
+title: "How to add a new product based on idryer-core"
+description: "Checklist for adding a new iDryer device: profile, commands, telemetry, MQTT, portal support, and the boundary between library and product code."
+---
+
+# How to add a new product based on idryer-core
+
+Use this guide when you are building a new product on top of `idryer-core`: a filament dryer, heating block, lighting module, sensor, or another device. It shows what should stay in the library and what belongs in the concrete product code.
 
 A practical checklist for building a new device on top of `idryer-core`.
 

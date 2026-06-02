@@ -1,4 +1,11 @@
-# Wie man ein neues Produkt hinzufügt
+---
+title: "Neues Produkt auf Basis von idryer-core hinzufügen"
+description: "Checkliste für ein neues iDryer-Gerät: Profil, Befehle, Telemetrie, MQTT, Portal und Grenze zwischen Bibliothek und Produktcode."
+---
+
+# Neues Produkt auf Basis von idryer-core hinzufügen
+
+Diese Anleitung ist für neue Produkte auf Basis von `idryer-core`: Filamenttrockner, Heizblock, Beleuchtung, Sensor oder anderes Modul. Sie zeigt, was in der Bibliothek bleibt und was in den konkreten Produktcode gehört.
 
 Eine praktische Checkliste zum Erstellen eines neuen Geräts auf der Basis von `idryer-core`.
 

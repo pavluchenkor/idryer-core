@@ -1,4 +1,11 @@
-# 5分で始める
+---
+title: "idryer-coreデバイスを5分で起動する"
+description: "開発者向けクイックスタート: idryer-coreで最小構成のESP32デバイスを作り、Wi-FiとMQTTに接続し、コマンドを確認します。"
+---
+
+# idryer-coreデバイスを5分で起動する
+
+このページは、ESP32デバイスが `idryer-core` で起動し、ネットワークに接続してデータ交換できることを素早く確認するためのものです。乾燥機、加熱チャンバー、照明、その他モジュールを作る前の最初の技術テストとして使います。
 
 このページの後、ESP32はフラッシュされ、WiFiに接続し、[portal.idryer.org](https://portal.idryer.org/) にオンラインステータスで表示されます。要件：ESP32-C3（DevKit、Super Mini、または互換）、USBケーブル、VS CodeのPlatformIO。
 

@@ -1,4 +1,11 @@
-# idryer-core — library documentation
+---
+title: "idryer-core for iDryer devices and DIY modules"
+description: "idryer-core documentation: connect an ESP32 device, MQTT, Wi-Fi, cloud state machine, and commands for a filament dryer or 3D printer module."
+---
+
+# idryer-core for iDryer devices and DIY modules
+
+`idryer-core` is useful when a DIY filament dryer, heated chamber, lighting system, or another 3D printer module should become a managed iDryer device. The library handles Wi-Fi, MQTT, commands, telemetry, and portal communication, while product code describes the behavior of the specific device.
 
 `idryer-core` — C++ library (Arduino/PlatformIO) for ESP32-based iDryer devices. Manages WiFi, MQTT, the cloud state machine, and command routing. The product implements only device-specific behaviour.
 

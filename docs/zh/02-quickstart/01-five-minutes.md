@@ -1,4 +1,11 @@
-# 5分鐘快速開始
+---
+title: "5 分钟启动 idryer-core 设备"
+description: "开发者快速开始：用 idryer-core 构建最小 ESP32 设备，连接 Wi-Fi 和 MQTT，并验证命令。"
+---
+
+# 5 分钟启动 idryer-core 设备
+
+本页帮助你快速确认 ESP32 设备可以使用 `idryer-core` 启动、连接网络并交换数据。可作为开发干燥箱、加热腔、照明或其他模块前的第一次技术测试。
 
 完成此頁面後，您的ESP32將被刷入，將連接到WiFi，並在[portal.idryer.org](https://portal.idryer.org/)上顯示為線上狀態。需求：ESP32-C3（DevKit、Super Mini 或相容）、USB線纜、VS Code中的PlatformIO。
 

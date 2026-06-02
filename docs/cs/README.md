@@ -1,4 +1,11 @@
-# idryer-core — dokumentace knihovny
+---
+title: "idryer-core pro zařízení iDryer a DIY moduly"
+description: "Dokumentace idryer-core: připojení zařízení ESP32, MQTT, Wi-Fi, cloudový stavový automat a příkazy pro sušičku filamentu nebo modul 3D tiskárny."
+---
+
+# idryer-core pro zařízení iDryer a DIY moduly
+
+`idryer-core` se hodí, když se domácí sušička filamentu, vyhřívaná komora, osvětlení nebo jiný modul 3D tiskárny má stát spravovaným zařízením iDryer. Knihovna řeší Wi-Fi, MQTT, příkazy, telemetrii a komunikaci s portálem.
 
 `idryer-core` — C++ knihovna (Arduino/PlatformIO) pro zařízení iDryer na bázi ESP32. Spravuje WiFi, MQTT, stavový automata v cloudu a směrování příkazů. Produkt implementuje pouze chování specifické pro zařízení.
 
