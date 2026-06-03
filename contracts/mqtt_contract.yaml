@@ -173,6 +173,14 @@ source_of_truth:
 # Общие правила
 # ─────────────────────────────────────────────────────────────────────────────
 rules:
+  # UI POLICY (НАВСЕГДА): никакой optimistic UI в портале / мобиле / любых
+  # консьюмерах. UI отображает изменение состояния устройства ТОЛЬКО после
+  # подтверждения через `status` MQTT (или WS-broadcast от backend status.handler).
+  # Не «нажали → показали → откатим». Только «нажали → ждём подтверждение → показываем».
+  # Если кажется медленным — подписывайся на status:update event (HeaterCard
+  # / StorageCard паттерн), не вводи optimistic state. Watchdog DeviceCommandBus
+  # таймаут ~5s — после него toast об ошибке без изменения UI.
+  ui_state_policy: confirmed_by_device_only
   topic_prefix: "idryer/{serial}/"
   command_subscription: "idryer/{serial}/commands/#"
   serial_format:
