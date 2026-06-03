@@ -134,6 +134,18 @@ product_topic_support:
   commands/read_rfid:     [dryer_v3]
   commands/write_rfid:    [dryer_v3]
 
+  # OTA через MQTT (Phase 6, см. ___OTA_MQTT_DESIGN.md). DRYER (dryer_v3)
+  # поддерживает оба target esp|rp2040: target=esp обновляет idryer-link,
+  # target=rp2040 обновляет iDryerControllerV2 через UART-мост.
+  commands/firmware_update_announce:        [iheater_link, storage_link, dryer_v3]
+  commands/firmware_update_chunk:           [iheater_link, storage_link, dryer_v3]
+  commands/firmware_update_confirm:         [iheater_link, storage_link, dryer_v3]
+  commands/firmware_check_update_response:  [iheater_link, storage_link, dryer_v3]
+  events/firmware_update_ack:               [iheater_link, storage_link, dryer_v3]
+  events/firmware_update_progress:          [iheater_link, storage_link, dryer_v3]
+  events/firmware_update_complete:          [iheater_link, storage_link, dryer_v3]
+  events/firmware_check_update:             [iheater_link, storage_link, dryer_v3]
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Активные mode-значения per product. backend status.handler читает отсюда
 # вместо хардкода `if (mode === 'DRYING' || 'STORAGE' || 'PROFILE')`.
@@ -2556,6 +2568,158 @@ mqtt_only:
         nozzleTempMin: 209
         nozzleTempMax: 231
         trayInfoIdx: "GFA00"
+
+  # ───────────────────────────────────────────────────────────────────────────
+  # OTA через MQTT — Phase 6 (___OTA_MQTT_DESIGN.md).
+  # Поток: announce → ack → chunks (sequential) → progress (gating) →
+  #        complete → confirm (cancel_rollback) → info с новой firmwareVersion.
+  # Auto-update: device → check_update → backend → check_update_response.
+  # ───────────────────────────────────────────────────────────────────────────
+
+  - suffix: commands/firmware_update_announce
+    full_topic: "idryer/{serial}/commands/firmware_update_announce"
+    direction: backend_to_device
+    qos: 1
+    retained: false
+    status: design_or_partial
+    payload:
+      fields:
+        commandId:     { type: string, format: uuid, required: true }
+        target:        { type: enum, values: [esp, rp2040], required: true, note: "iheater/storage всегда esp; dryer_v3 — esp или rp2040" }
+        version:       { type: string, format: semver, required: true, example: "1.0.3" }
+        size:          { type: integer, required: true, note: "размер бинаря в байтах" }
+        sha256:        { type: string, format: hex64, required: true }
+        chunkCount:    { type: integer, required: true }
+        chunkSize:     { type: integer, required: true, note: "по умолчанию 4096 (4 КБ)" }
+        minBootSafeMs: { type: integer, optional: true, note: "не начинать update если в активной работе < N ms" }
+        timestamp:     { type: string, format: ISO8601 }
+    notes:
+      - "При target=rp2040 ESP-мост ретранслирует chunks через UartBridge новым кадром FirmwareChunk; SHA256 финально проверяет RP2040."
+
+  - suffix: commands/firmware_update_chunk/{commandId}/{chunkIdx}
+    full_topic: "idryer/{serial}/commands/firmware_update_chunk/{commandId}/{chunkIdx}"
+    direction: backend_to_device
+    qos: 1
+    retained: false
+    status: design_or_partial
+    payload:
+      format: raw_binary
+      max_payload_bytes: 4096
+      note: "СЫРОЙ БИНАРЬ (не JSON, не base64). commandId и chunkIdx извлекаются из топика."
+    notes:
+      - "Sequential pumping: backend ждёт events/firmware_update_progress перед отправкой следующего chunk."
+      - "Устройство подписывается через wildcard commands/firmware_update_chunk/+/+ или общий commands/#."
+      - "Требуется PubSubClient::setBufferSize(8192) на устройстве — дефолтный буфер 256 байт дропнет 4 КБ chunk."
+      - "Backend: MqttClientService.publish() должен поддерживать Buffer payload без JSON.stringify."
+
+  - suffix: commands/firmware_update_confirm
+    full_topic: "idryer/{serial}/commands/firmware_update_confirm"
+    direction: backend_to_device
+    qos: 1
+    retained: false
+    status: design_or_partial
+    payload:
+      fields:
+        commandId: { type: string, format: uuid, required: true, note: "тот же commandId из announce/complete" }
+        timestamp: { type: string, format: ISO8601 }
+    notes:
+      - "Шлётся backend'ом ПОСЛЕ получения первого info с новой firmwareVersion."
+      - "Устройство по этой команде вызывает esp_ota_mark_app_valid_cancel_rollback() — фиксирует партицию как VALID."
+      - "Если confirm не пришёл за TTL — bootloader при следующем reboot откатит на предыдущую партицию."
+
+  - suffix: commands/firmware_check_update_response
+    full_topic: "idryer/{serial}/commands/firmware_check_update_response"
+    direction: backend_to_device
+    qos: 1
+    retained: false
+    status: design_or_partial
+    payload:
+      fields:
+        hasUpdate:       { type: boolean, required: true }
+        latestVersion:   { type: string, optional: true }
+        requiresLicense: { type: boolean, optional: true, note: "true если update есть, но устройство не entitled (см. Phase 8 Licensing)" }
+        willPushSoon:    { type: boolean, optional: true, note: "true если backend начнёт announce в MAX_PARALLEL_OTA-окне" }
+    notes:
+      - "Ответ на events/firmware_check_update (pull-механика auto-update раз в ~24h)."
+
+  - suffix: events/firmware_update_ack
+    full_topic: "idryer/{serial}/events/firmware_update_ack"
+    direction: device_to_backend
+    qos: 1
+    retained: false
+    status: design_or_partial
+    payload:
+      fields:
+        commandId: { type: string, format: uuid, required: true, note: "echo из announce" }
+        status:
+          type: enum
+          values:
+            - accepted
+            - rejected_no_space          # flash или heap
+            - rejected_same_version
+            - rejected_downgrade
+            - rejected_busy              # active session
+            - rejected_unsupported       # format/uart_protocol_mismatch
+        reason:         { type: string, optional: true }
+        freeFlashBytes: { type: integer, optional: true, note: "при no_space" }
+        freeHeapBytes:  { type: integer, optional: true, note: "при no_space" }
+        timestamp:      { type: string, format: ISO8601 }
+
+  - suffix: events/firmware_update_progress
+    full_topic: "idryer/{serial}/events/firmware_update_progress"
+    direction: device_to_backend
+    qos: 1
+    retained: false
+    status: design_or_partial
+    payload:
+      fields:
+        commandId:     { type: string, format: uuid, required: true }
+        received:      { type: integer, required: true, note: "число полученных chunks" }
+        total:         { type: integer, required: true }
+        bytes:         { type: integer, required: true }
+        throughputBps: { type: integer, optional: true }
+        timestamp:     { type: string, format: ISO8601 }
+    notes:
+      - "QoS 1 КРИТИЧНО: используется backend'ом как gating-сигнал для sequential pumping. QoS 0 сломает pumping."
+      - "Шлётся на КАЖДЫЙ полученный chunk (не периодически)."
+
+  - suffix: events/firmware_update_complete
+    full_topic: "idryer/{serial}/events/firmware_update_complete"
+    direction: device_to_backend
+    qos: 1
+    retained: false
+    status: design_or_partial
+    payload:
+      fields:
+        commandId: { type: string, format: uuid, required: true }
+        status:
+          type: enum
+          values:
+            - verified              # SHA OK, готов ребут
+            - sha_mismatch
+            - flash_failed
+            - timeout
+            - rollback_to_previous  # после ребута, при следующем connect
+        newVersion:     { type: string, optional: true, note: "version из announce, для verified" }
+        errorReason:    { type: string, optional: true }
+        chunksReceived: { type: integer, optional: true, note: "при timeout/incomplete" }
+        chunksMissing:  { type: array, items: integer, optional: true, note: "индексы недополученных chunks для retry" }
+        timestamp:      { type: string, format: ISO8601 }
+
+  - suffix: events/firmware_check_update
+    full_topic: "idryer/{serial}/events/firmware_check_update"
+    direction: device_to_backend
+    qos: 1
+    retained: false
+    status: design_or_partial
+    interval: "device-initiated, ~24h"
+    payload:
+      fields:
+        currentVersion: { type: string, format: semver, required: true }
+        controllerType: { type: enum, values: [ESP32, RP2040], required: true, note: "DRYER шлёт два события — по одному на каждый чип" }
+        productId:      { type: string, required: true }
+        licenseSerial:  { type: string, optional: true }
+        timestamp:      { type: string, format: ISO8601 }
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 6. РАСХОЖДЕНИЯ И ОТКРЫТЫЕ ВОПРОСЫ
