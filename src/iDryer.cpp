@@ -629,10 +629,15 @@ void Link::publishStatusNow() {
 
         // sessionNum: backend requires > 0 for DRYING/STORAGE/PROFILE.
         // Increment on transition from non-active to active.
-        const bool wasActive = (impl_->lastModeForSn[i] == UnitMode::Drying ||
-                                impl_->lastModeForSn[i] == UnitMode::Storage);
-        const bool isActive  = (status.mode[i] == UnitMode::Drying ||
-                                status.mode[i] == UnitMode::Storage);
+        // «Активный» режим = всё, что не Idle/Fault/Unknown. Phase 5: добавили
+        // Heating, LightAnimation, Profile. Generic-проверка вместо whitelist,
+        // чтобы новые mode'ы автоматически попадали в session-tracking без
+        // правки SDK.
+        auto isActiveMode = [](UnitMode m) {
+            return m != UnitMode::Idle && m != UnitMode::Fault && m != UnitMode::Unknown;
+        };
+        const bool wasActive = isActiveMode(impl_->lastModeForSn[i]);
+        const bool isActive  = isActiveMode(status.mode[i]);
         if (isActive && !wasActive) impl_->sessionNum[i]++;
         impl_->lastModeForSn[i] = status.mode[i];
 
