@@ -48,6 +48,17 @@
         "items": { "type": "string" }
       }
     },
+    "unit_modes_per_product": {
+      "type": "object",
+      "description": "product_id → классификация mode-значений (active/idle/fault). Backend читает отсюда вместо хардкода 'DRYING/STORAGE/PROFILE'.",
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      }
+    },
     "source_of_truth": { "$ref": "#/$defs/SourceOfTruth" },
     "rules": { "$ref": "#/$defs/Rules" },
     "uart_kind_ranges": { "$ref": "#/$defs/UartKindRanges" },

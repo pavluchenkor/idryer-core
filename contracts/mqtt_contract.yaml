@@ -135,6 +135,26 @@ product_topic_support:
   commands/write_rfid:    [dryer_v3]
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Активные mode-значения per product. backend status.handler читает отсюда
+# вместо хардкода `if (mode === 'DRYING' || 'STORAGE' || 'PROFILE')`.
+# Добавление нового устройства = добавить запись здесь + публиковать новые
+# значения в status.units[].mode, без правок в бэке.
+# ─────────────────────────────────────────────────────────────────────────────
+unit_modes_per_product:
+  dryer_v3:
+    active: [DRYING, STORAGE, PROFILE]
+    idle:   [IDLE]
+    fault:  [FAULT]
+  iheater_link:
+    active: [HEATING]
+    idle:   [IDLE]
+    fault:  [FAULT]
+  storage_link:
+    active: [LIGHT_ANIMATION]
+    idle:   [IDLE]
+    fault:  [FAULT]
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Источники правды
 # ─────────────────────────────────────────────────────────────────────────────
 source_of_truth:
@@ -543,6 +563,8 @@ enums:
     Storage: 2
     Profile: 3
     Fault: 4
+    Heating: 5        # iHeater-link: активный нагрев камеры (heat_temp/heat_duration)
+    LightAnimation: 6 # Storage Link: активный override LED-ленты (led.pulse animation)
 
   UartStagePhase:
     Ramp: 0
@@ -610,9 +632,11 @@ enums:
   # Канон 2026-05-01: portal приведён к firmware-семантике (ERROR удалён, UNKNOWN добавлен).
   PortalUnitStatus:
     - IDLE # юнит ждёт команд
-    - DRYING # активная сушка
-    - STORAGE # режим хранения
-    - PROFILE # многоэтапный профиль
+    - DRYING # активная сушка (DRYER)
+    - STORAGE # режим хранения (DRYER)
+    - PROFILE # многоэтапный профиль (DRYER)
+    - HEATING # активный нагрев (iHeater-link)
+    - LIGHT_ANIMATION # активный LED-override (Storage Link)
     - FAULT # ошибка/неисправность (закрывает сессию с reason='error')
     - UNKNOWN # fallback для незнакомого UartDryerMode (сессия остаётся открытой)
 

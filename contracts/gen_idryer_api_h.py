@@ -30,12 +30,14 @@ import yaml
 
 # yaml UartDryerMode → facade UnitMode (1-в-1 + Unknown как fallback).
 UNIT_MODE_FROM_DRYER_MODE = [
-    ("Idle",    "unit not running"),
-    ("Drying",  "active drying session"),
-    ("Storage", "storage mode (gentle low-power keep-dry)"),
-    ("Profile", "running multi-step profile"),
-    ("Fault",   "unrecoverable hardware error"),
-    ("Unknown", "fallback for unrecognized UART mode (does not close session)"),
+    ("Idle",           "unit not running"),
+    ("Drying",         "active drying session (DRYER)"),
+    ("Storage",        "storage mode — gentle low-power keep-dry (DRYER)"),
+    ("Profile",        "running multi-step profile (DRYER)"),
+    ("Heating",        "active chamber heating (iHeater-link)"),
+    ("LightAnimation", "active LED override animation (Storage Link)"),
+    ("Fault",          "unrecoverable hardware error"),
+    ("Unknown",        "fallback for unrecognized UART mode (does not close session)"),
 ]
 
 # RequestKind = подмножество commands направления backend_to_device, которые

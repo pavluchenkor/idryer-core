@@ -1,6 +1,6 @@
 // ============================================================================
 // SCAFFOLD: iheater_link
-// Generated 2026-06-02 by contracts/gen_scaffold.py from mqtt_contract.yaml
+// Generated 2026-06-03 by contracts/gen_scaffold.py from mqtt_contract.yaml
 //
 // HOW TO START:
 //   1. Copy this directory to your PlatformIO project root.

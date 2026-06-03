@@ -544,12 +544,14 @@ uint8_t parseUnitId(const char* s) {
 // UnitMode → contract string. Mirrors yaml.enums.UartDryerMode + PortalUnitStatus.UNKNOWN.
 const char* unitModeString(UnitMode m) {
     switch (m) {
-        case UnitMode::Idle:    return "IDLE";
-        case UnitMode::Drying:  return "DRYING";
-        case UnitMode::Storage: return "STORAGE";
-        case UnitMode::Profile: return "PROFILE";
-        case UnitMode::Fault:   return "FAULT";
-        case UnitMode::Unknown: return "UNKNOWN";
+        case UnitMode::Idle:           return "IDLE";
+        case UnitMode::Drying:         return "DRYING";
+        case UnitMode::Storage:        return "STORAGE";
+        case UnitMode::Profile:        return "PROFILE";
+        case UnitMode::Heating:        return "HEATING";
+        case UnitMode::LightAnimation: return "LIGHT_ANIMATION";
+        case UnitMode::Fault:          return "FAULT";
+        case UnitMode::Unknown:        return "UNKNOWN";
     }
     return "UNKNOWN";
 }
