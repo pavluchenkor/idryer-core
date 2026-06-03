@@ -62,7 +62,7 @@ if $FIRMWARE_ONLY; then
     exit 0
 fi
 
-PORTAL_CONTRACTS="$(dirname "$0")/../../../../iDryerPortal/frontend-v2/src/contracts"
+PORTAL_CONTRACTS="../../../../iDryerPortal/frontend-v2/src/contracts"
 if [ -d "$PORTAL_CONTRACTS" ]; then
     cp _generated/mqtt-api.types.ts "$PORTAL_CONTRACTS/mqtt-api.types.ts"
     echo "→ Copied mqtt-api.types.ts → frontend-v2/src/contracts/"
@@ -70,7 +70,16 @@ else
     echo "⚠  Portal not found at expected path — skipping frontend copy"
 fi
 
-PORTAL_I18N="$(dirname "$0")/../../../../iDryerPortal/frontend-v2/src/i18n"
+PORTAL_BACKEND_CONTRACTS="../../../../iDryerPortal/backend/src/contracts"
+if [ -d "$(dirname "$PORTAL_BACKEND_CONTRACTS")" ]; then
+    mkdir -p "$PORTAL_BACKEND_CONTRACTS"
+    cp _generated/mqtt-api.types.ts "$PORTAL_BACKEND_CONTRACTS/mqtt-api.types.ts"
+    echo "→ Copied mqtt-api.types.ts → backend/src/contracts/"
+else
+    echo "⚠  Backend not found at expected path — skipping backend copy"
+fi
+
+PORTAL_I18N="../../../../iDryerPortal/frontend-v2/src/i18n"
 if [ -d "$PORTAL_I18N" ]; then
     for f in _generated/roles.*.json; do
         [ -f "$f" ] || continue
@@ -85,7 +94,7 @@ fi
 # «виджет = карточка устройства на дашборде» (product-specific React-компонент
 # в портале, не часть контракта). См. mqtt_contract.yaml → widgets.
 
-MOBILE_CONTRACTS="$(dirname "$0")/../../../../flutter-prj/idryer_app/lib/contracts"
+MOBILE_CONTRACTS="../../../../flutter-prj/idryer_app/lib/contracts"
 if [ -d "$(dirname "$MOBILE_CONTRACTS")" ]; then
     mkdir -p "$MOBILE_CONTRACTS"
     cp _generated/canonical_roles.dart "$MOBILE_CONTRACTS/canonical_roles.dart"
