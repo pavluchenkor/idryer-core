@@ -88,6 +88,7 @@ enum class UartErrCode : uint8_t {
     Busy           = 0x04,
     Timeout        = 0x05,
     SequenceMismatch = 0x06,
+    ExternalCmdIgnored = 0x07,
 };
 
 enum class UartClaimStatus : uint8_t {
@@ -332,8 +333,9 @@ struct UartStatusPayload {
     uint8_t    count;
     UartStatusEntry units[4];
     uint32_t    uptime;  ///< wire-layout: uptime идёт ПОСЛЕ units[], не до
+    uint8_t    ignoreExternalCmd;  ///< 0/1 — device-wide флаг блокировки внешних команд
 } __attribute__((packed));
-static_assert(sizeof(UartStatusPayload) == 133, "UartStatusPayload must be 133 bytes (yaml-computed)");
+static_assert(sizeof(UartStatusPayload) == 134, "UartStatusPayload must be 134 bytes (yaml-computed)");
 
 /// Показания весов (до 4 датчиков).
 struct UartWeightsPayload {

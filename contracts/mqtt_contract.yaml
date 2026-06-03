@@ -567,6 +567,7 @@ enums:
     Busy: 0x04
     Timeout: 0x05
     SequenceMismatch: 0x06
+    ExternalCmdIgnored: 0x07 # MCU отклонил команду: ignore_external_cmd=true в локальном меню
 
   UartClaimStatus:
     Idle: 0x00
@@ -785,6 +786,11 @@ payloads:
           type: uint32,
           unit: "seconds",
           note: "wire-layout: uptime идёт ПОСЛЕ units[], не до. См. uart_protocol.h:UartStatusPayload.",
+        }
+      ignoreExternalCmd:
+        {
+          type: uint8,
+          note: "0/1 — device-wide флаг блокировки внешних команд. Source: menu.ign_ext_cmd на RP2040; ESP зеркалит в SDK через Link::setIgnoreExternalCmd → попадает в MQTT status.",
         }
 
   Weights:

@@ -64,6 +64,7 @@ export enum UartErrCode {
   Busy = 4,
   Timeout = 5,
   SequenceMismatch = 6,
+  ExternalCmdIgnored = 7,
 }
 
 export enum UartClaimStatus {
@@ -206,6 +207,7 @@ export interface Status {
   count: number;
   units: UartStatusEntry[];
   uptime: number;  /** wire-layout: uptime идёт ПОСЛЕ units[], не до. См. uart_protocol.h:UartStatusPay */
+  ignoreExternalCmd: number;  /** 0/1 — device-wide флаг блокировки внешних команд. Source: menu.ign_ext_cmd на RP */
 }
 
 /** Показания весов (до 4 датчиков). */
