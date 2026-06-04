@@ -718,15 +718,24 @@ void Link::dispatchCommand(const char* command, JsonObjectConst data) {
     // действия запрещены.
     //
     // Whitelist (всегда проходят):
-    //   set, get_config, ping, link_integration
+    //   set, get_config, ping, link_integration,
+    //   firmware_update_announce, firmware_check_update_response
     // Всё остальное (invoke, drying/storage/profile/stop, bambu_apply,
     // write_rfid, неизвестные) — блокируется и публикуется COMMAND_REJECTED.
+    //
+    // firmware_update_* — критическая security-инфраструктура (Phase 6).
+    // Auto-update не должен блокироваться пользовательским гейтом, иначе
+    // security-patches не доедут до устройств с ign_ext_cmd=true. Защита
+    // OTA — это право push'а в admin/firmware/push (роль SUPERUSER в
+    // backend), не флаг в меню устройства.
     if (impl_->ignoreExternalCmd) {
         const bool isExempt =
             (strcmp(command, "set") == 0) ||
             (strcmp(command, "get_config") == 0) ||
             (strcmp(command, "ping") == 0) ||
-            (strcmp(command, "link_integration") == 0);
+            (strcmp(command, "link_integration") == 0) ||
+            (strcmp(command, "firmware_update_announce") == 0) ||
+            (strcmp(command, "firmware_check_update_response") == 0);
         if (!isExempt) {
             StaticJsonDocument<256> doc;
             doc["severity"] = eventSeverityString(EventKind::Warning);
