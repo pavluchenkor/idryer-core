@@ -172,6 +172,84 @@ def validate_roles(flat, contract_path=None):
     sys.exit(1)
 
 
+def calc_menu_serialized_max(flat, lang_order, num_units):
+    """Расчёт верхней границы размера сериализованного JSON меню в байтах
+    (UTF-8). Используется как MENU_SERIALIZED_MAX_SIZE для pre-allocated
+    буфера в MenuPublisher (idryer-core/src/menu_commands.h).
+
+    Формат JSON задан в menu_buildFullJson:
+        {"v":N,"menu":[{"id":I,"t":"sub","n":"…","p":P, …}, …]}
+
+    Считаем worst-case для каждого пункта (берём максимум title/unit по
+    языкам, чтобы цифра не зависела от рантайма-lang). Для float-полей
+    закладываем 12 символов (включая знак, точку, до 7 разрядов).
+    """
+    # Обёртка верхнего уровня: {"v":12345,"menu":[…]}
+    total = len('{"v":99999,"menu":[]}')  # ~21
+
+    NUM_FLOAT_MAX = 12  # "-99999.99" с запасом
+    items_total = 0
+    for fn in flat:
+        r = fn["raw"]
+        scope = fn.get("scope", "per_controller")
+        item_type = r.get("type", "submenu")
+
+        # Базовые поля: { "id":N, "t":"xxx", "p":P,
+        item_size = len('{"id":99999,"t":"sub","p":-9999,')
+
+        # "n":"<title>" — берём максимум байт UTF-8 среди языков
+        max_title = 0
+        title_raw = r.get("title")
+        if isinstance(title_raw, dict):
+            for lang in lang_order:
+                tval = title_raw.get(lang) or title_raw.get("en") or ""
+                max_title = max(max_title, len(str(tval).encode("utf-8")))
+        elif isinstance(title_raw, str):
+            max_title = len(title_raw.encode("utf-8"))
+        item_size += len('"n":"",') + max_title
+
+        # "u":"<unit>" — опц.
+        max_unit = 0
+        unit_raw = r.get("unit")
+        if isinstance(unit_raw, dict):
+            for lang in lang_order:
+                uval = unit_raw.get(lang) or unit_raw.get("en") or ""
+                max_unit = max(max_unit, len(str(uval).encode("utf-8")))
+        elif isinstance(unit_raw, str):
+            max_unit = len(unit_raw.encode("utf-8"))
+        if max_unit > 0:
+            item_size += len('"u":"",') + max_unit
+
+        # "r":"<role>" — опц.
+        role = r.get("role")
+        if role:
+            item_size += len('"r":"",') + len(str(role).encode("utf-8"))
+
+        # min/max/step для value
+        if item_type == "value":
+            item_size += len('"min":,"max":,"step":,') + 3 * NUM_FLOAT_MAX
+
+        # val для value/toggle
+        if item_type in ("value", "toggle"):
+            if scope == "global":
+                # "val":N или "val":true/false
+                item_size += len('"val":,') + NUM_FLOAT_MAX
+            else:
+                # "val":[N,N,…] для num_units элементов
+                item_size += len('"val":[],') + (NUM_FLOAT_MAX + 1) * num_units
+
+        # Закрывающая `},` объекта (одна запятая между items)
+        item_size += len('},')
+        items_total += item_size
+
+    total += items_total
+
+    # Запас 15% на ошибки расчёта: ArduinoJson может сериализовать float с
+    # exponential notation (e.g. "1.234e-05") или большим числом знаков для
+    # неровных значений. + 256 байт абсолютного минимума.
+    return int(total * 1.15) + 256
+
+
 def node_title_unit_arrays(raw, lang_order):
     if isinstance(raw.get("title"), dict):
         titles = [c_string(raw["title"].get(l, raw["title"].get("en",""))) for l in lang_order]
@@ -914,7 +992,7 @@ def emit_menu_presets_h(path, flat):
     with open(path, "w", encoding="utf-8") as f:
         f.write("\n".join(lines))
 
-def emit_menu_meta_h(path, flat, lang_order):
+def emit_menu_meta_h(path, flat, lang_order, num_units):
     lines = []
     lines.append("// Auto-generated for ESP32 LINK. Do not edit.")
     lines.append("// Contains menu metadata only (no pointers to data or callbacks).")
@@ -925,6 +1003,11 @@ def emit_menu_meta_h(path, flat, lang_order):
     lines.append("")
     lines.append(f"#define MENU_META_COUNT {len(flat)}")
     lines.append(f"#define MENU_LANG_COUNT {len(lang_order)}")
+    # Точный расчётный максимум сериализованного JSON меню (UTF-8 байт).
+    # Используется как размер pre-allocated буфера в MenuPublisher
+    # (idryer-core/src/menu_commands.h). См. calc_menu_serialized_max().
+    serialized_max = calc_menu_serialized_max(flat, lang_order, num_units)
+    lines.append(f"#define MENU_SERIALIZED_MAX_SIZE {serialized_max}")
     lines.append("")
 
     lines.append("typedef enum {")
@@ -1170,7 +1253,7 @@ def main():
 
     emit_menu_presets_h(os.path.join(outdir, "menu_presets_autogen.h"), flat)
 
-    emit_menu_meta_h(os.path.join(outdir, "menu_meta.h"), flat, lang_order)
+    emit_menu_meta_h(os.path.join(outdir, "menu_meta.h"), flat, lang_order, args.num_units)
     emit_menu_cache_h(os.path.join(outdir, "menu_cache.h"), flat, args.num_units)
     emit_menu_cache_cpp(os.path.join(outdir, "menu_cache.cpp"))
 

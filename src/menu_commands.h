@@ -271,12 +271,21 @@ inline void menu_setChangeCallback(MenuChangeCallback cb) {
 // ============================================================================
 
 /// Объединяет g_menu_meta (структура, названия) + g_menu_cache (значения) в
-/// JSON для MQTT. Рекомендуемый буфер 16KB+. @return длина JSON или 0 при ошибке.
+/// JSON для MQTT. Рекомендуемый буфер MENU_SERIALIZED_MAX_SIZE (сгенерирован
+/// для текущего меню в menu_meta.h). @return длина JSON или 0 при ошибке.
+///
+/// DEPRECATED: используйте idryer::MenuPublisher (см. menu_publisher.h) —
+/// он переиспользует pre-allocated heap-буфер и JsonDocument, не делает
+/// malloc/free на каждый вызов. Эта функция оставлена для обратной
+/// совместимости и аллоцирует DynamicJsonDocument локально (фрагментирует
+/// heap при частом вызове).
 inline size_t menu_buildFullJson(char* buf, size_t bufSize) {
     if (!buf || bufSize < 256) return 0;
 
-    static StaticJsonDocument<MENU_JSON_DOC_CAP> doc;
-    doc.clear();
+    // DynamicJsonDocument в куче (locally allocated). Освобождается при выходе
+    // из функции. Раньше был static StaticJsonDocument<MENU_JSON_DOC_CAP> в .bss
+    // — он съедал постоянно ~22КБ на DRYER и блокировал TLS-handshake mbedtls.
+    DynamicJsonDocument doc(MENU_JSON_DOC_CAP);
 
     // units/lang теперь обычные пункты меню (предпоследний/последний)
     doc["v"] = g_menu_cache.revision;
