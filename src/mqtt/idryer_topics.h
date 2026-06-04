@@ -32,6 +32,12 @@ extern "C" {
 // Integrations
 #define IDRYER_TOPIC_INTEGRATIONS_STATUS "integrations/status"
 
+// Phase 6 OTA event suffixes (publisher-side; commands/* приходят через wildcard)
+#define IDRYER_TOPIC_FW_UPDATE_ACK       "events/firmware_update_ack"
+#define IDRYER_TOPIC_FW_UPDATE_PROGRESS  "events/firmware_update_progress"
+#define IDRYER_TOPIC_FW_UPDATE_COMPLETE  "events/firmware_update_complete"
+#define IDRYER_TOPIC_FW_CHECK_UPDATE     "events/firmware_check_update"
+
 // QoS for subscribe — enforced by PubSubClient.
 // NOTE: publish always uses QoS 0 (PubSubClient limitation; no publish QoS API).
 #define IDRYER_QOS_COMMANDS             1

@@ -130,6 +130,23 @@ public:
     /// Payload: {commandId, status: "ok"|"failed", error?}.
     bool publishRfidWriteResult(JsonDocument& json);
 
+    // ─── Phase 6 OTA event publishers ──────────────────────────────────
+    /// @brief Publishes to @c idryer/{serial}/events/firmware_update_ack.
+    /// Используется OtaReceiver в ответ на commands/firmware_update_announce.
+    bool publishFirmwareUpdateAck(JsonDocument& json);
+
+    /// @brief Publishes to @c idryer/{serial}/events/firmware_update_progress.
+    /// OtaReceiver шлёт на каждый принятый chunk — gating-сигнал для backend.
+    bool publishFirmwareUpdateProgress(JsonDocument& json);
+
+    /// @brief Publishes to @c idryer/{serial}/events/firmware_update_complete.
+    /// Финальный статус OTA до ребута (verified/sha_mismatch/flash_failed/...).
+    bool publishFirmwareUpdateComplete(JsonDocument& json);
+
+    /// @brief Publishes to @c idryer/{serial}/events/firmware_check_update.
+    /// Pull-flow: устройство спрашивает backend о наличии новой версии (~24h).
+    bool publishFirmwareCheckUpdate(JsonDocument& json);
+
     /**
      * @brief Publishes a raw JSON string to @c idryer/{serial}/config.
      *

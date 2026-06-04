@@ -49,6 +49,20 @@ void MqttClient::setOtaChunkCallback(OtaChunkCallback::FnPtr fn, void* ctx) {
     otaChunkCallback_.set(fn, ctx);
 }
 
+// ─── Phase 6 OTA event publishers ────────────────────────────────────────
+bool MqttClient::publishFirmwareUpdateAck(JsonDocument& json) {
+    return publishJson(IDRYER_TOPIC_FW_UPDATE_ACK, json, /*retained=*/false);
+}
+bool MqttClient::publishFirmwareUpdateProgress(JsonDocument& json) {
+    return publishJson(IDRYER_TOPIC_FW_UPDATE_PROGRESS, json, /*retained=*/false);
+}
+bool MqttClient::publishFirmwareUpdateComplete(JsonDocument& json) {
+    return publishJson(IDRYER_TOPIC_FW_UPDATE_COMPLETE, json, /*retained=*/false);
+}
+bool MqttClient::publishFirmwareCheckUpdate(JsonDocument& json) {
+    return publishJson(IDRYER_TOPIC_FW_CHECK_UPDATE, json, /*retained=*/false);
+}
+
 void MqttClient::disconnect() {
     if (mqttClient_.connected()) mqttClient_.disconnect();
     initialized_ = false;
