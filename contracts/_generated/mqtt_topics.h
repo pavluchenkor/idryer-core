@@ -40,7 +40,6 @@ constexpr const char* CMD_LINK_INTEGRATION             = "commands/link_integrat
 constexpr const char* CMD_BAMBU_APPLY                  = "commands/bambu_apply";
 constexpr const char* CMD_FIRMWARE_UPDATE_ANNOUNCE     = "commands/firmware_update_announce";
 constexpr const char* CMD_FIRMWARE_UPDATE_CHUNK__COMMANDID___CHUNKIDX_ = "commands/firmware_update_chunk/{commandId}/{chunkIdx}";
-constexpr const char* CMD_FIRMWARE_UPDATE_CONFIRM      = "commands/firmware_update_confirm";
 constexpr const char* CMD_FIRMWARE_CHECK_UPDATE_RESPONSE = "commands/firmware_check_update_response";
 
 // другие
@@ -89,7 +88,6 @@ constexpr uint8_t QOS_LINK_INTEGRATION             = 1;
 constexpr uint8_t QOS_BAMBU_APPLY                  = 1;
 constexpr uint8_t QOS_FIRMWARE_UPDATE_ANNOUNCE     = 1;
 constexpr uint8_t QOS_FIRMWARE_UPDATE_CHUNK__COMMANDID___CHUNKIDX_ = 1;
-constexpr uint8_t QOS_FIRMWARE_UPDATE_CONFIRM      = 1;
 constexpr uint8_t QOS_FIRMWARE_CHECK_UPDATE_RESPONSE = 1;
 constexpr uint8_t QOS_EVENTS_FIRMWARE_UPDATE_ACK   = 1;
 constexpr uint8_t QOS_EVENTS_FIRMWARE_UPDATE_PROGRESS = 1;
@@ -124,7 +122,6 @@ constexpr bool    RETAINED_LINK_INTEGRATION        = false;
 constexpr bool    RETAINED_BAMBU_APPLY             = false;
 constexpr bool    RETAINED_FIRMWARE_UPDATE_ANNOUNCE = false;
 constexpr bool    RETAINED_FIRMWARE_UPDATE_CHUNK__COMMANDID___CHUNKIDX_ = false;
-constexpr bool    RETAINED_FIRMWARE_UPDATE_CONFIRM = false;
 constexpr bool    RETAINED_FIRMWARE_CHECK_UPDATE_RESPONSE = false;
 constexpr bool    RETAINED_EVENTS_FIRMWARE_UPDATE_ACK = false;
 constexpr bool    RETAINED_EVENTS_FIRMWARE_UPDATE_PROGRESS = false;

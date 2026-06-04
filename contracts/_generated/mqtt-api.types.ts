@@ -359,7 +359,6 @@ export const Topics = {
   COMMANDS_BAMBU_APPLY: (serial: string) => `idryer/${serial}/commands/bambu_apply`,
   COMMANDS_FIRMWARE_UPDATE_ANNOUNCE: (serial: string) => `idryer/${serial}/commands/firmware_update_announce`,
   COMMANDS_FIRMWARE_UPDATE_CHUNK__COMMANDID___CHUNKIDX_: (serial: string) => `idryer/${serial}/commands/firmware_update_chunk/{commandId}/{chunkIdx}`,
-  COMMANDS_FIRMWARE_UPDATE_CONFIRM: (serial: string) => `idryer/${serial}/commands/firmware_update_confirm`,
   COMMANDS_FIRMWARE_CHECK_UPDATE_RESPONSE: (serial: string) => `idryer/${serial}/commands/firmware_check_update_response`,
   EVENTS_FIRMWARE_UPDATE_ACK: (serial: string) => `idryer/${serial}/events/firmware_update_ack`,
   EVENTS_FIRMWARE_UPDATE_PROGRESS: (serial: string) => `idryer/${serial}/events/firmware_update_progress`,

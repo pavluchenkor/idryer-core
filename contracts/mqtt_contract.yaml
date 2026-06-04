@@ -139,7 +139,8 @@ product_topic_support:
   # target=rp2040 обновляет iDryerControllerV2 через UART-мост.
   commands/firmware_update_announce:        [iheater_link, storage_link, dryer_v3]
   commands/firmware_update_chunk:           [iheater_link, storage_link, dryer_v3]
-  commands/firmware_update_confirm:         [iheater_link, storage_link, dryer_v3]
+  # commands/firmware_update_confirm удалён 2026-06-04 — confirm-flow отменён,
+  # см. mqtt_only секцию ниже и ___OTA_MQTT_DESIGN.md.
   commands/firmware_check_update_response:  [iheater_link, storage_link, dryer_v3]
   events/firmware_update_ack:               [iheater_link, storage_link, dryer_v3]
   events/firmware_update_progress:          [iheater_link, storage_link, dryer_v3]
@@ -2612,20 +2613,18 @@ mqtt_only:
       - "Требуется PubSubClient::setBufferSize(8192) на устройстве — дефолтный буфер 256 байт дропнет 4 КБ chunk."
       - "Backend: MqttClientService.publish() должен поддерживать Buffer payload без JSON.stringify."
 
-  - suffix: commands/firmware_update_confirm
-    full_topic: "idryer/{serial}/commands/firmware_update_confirm"
-    direction: backend_to_device
-    qos: 1
-    retained: false
-    status: design_or_partial
-    payload:
-      fields:
-        commandId: { type: string, format: uuid, required: true, note: "тот же commandId из announce/complete" }
-        timestamp: { type: string, format: ISO8601 }
-    notes:
-      - "Шлётся backend'ом ПОСЛЕ получения первого info с новой firmwareVersion."
-      - "Устройство по этой команде вызывает esp_ota_mark_app_valid_cancel_rollback() — фиксирует партицию как VALID."
-      - "Если confirm не пришёл за TTL — bootloader при следующем reboot откатит на предыдущую партицию."
+  # ❌ commands/firmware_update_confirm — ОТМЕНЕНО 2026-06-04.
+  # Изначально планировался 3-шаговый flow с явным подтверждением партиции
+  # через esp_ota_mark_app_valid_cancel_rollback() от backend. Признан
+  # over-engineering: bootloader-rollback ESP32 покрывает только полный crash
+  # на boot (срабатывает сам без confirm), а сценарии "стартовала но что-то
+  # пошло не так" не возникают в реальности (WiFi credentials в NVS переживают
+  # OTA, прошивка тестируется перед публикацией).
+  # Новый flow: backend определяет успех по info с новой firmwareVersion
+  # (см. ___OTA_MQTT_DESIGN.md «Финализация OTA без confirm»). Self-confirm
+  # делается в SDK сразу при MQTT-connect, без MQTT round-trip.
+  # Топик не реализуется. Если когда-нибудь понадобится backend-controlled
+  # confirm — раскомментировать описание и добавить обратно в product_topic_support.
 
   - suffix: commands/firmware_check_update_response
     full_topic: "idryer/{serial}/commands/firmware_check_update_response"
