@@ -4,6 +4,7 @@
 #include "iDryer.h"
 #include "mqtt/mqtt_client.h"
 #include "hal/hal_types.h"
+#include "work_time_tracker.h"
 
 #include <Arduino.h>
 #include <Update.h>
@@ -232,6 +233,11 @@ void OtaReceiver::handleChunk(const char* topic, const uint8_t* payload, size_t 
         HAL_LOG_INFO("OTA", "Session COMPLETE — sha verified, %u bytes, restarting...",
                      (unsigned)bytesReceived_);
         publishComplete("verified", nullptr);
+
+        // Force-persist накопительный workTimeCounter в NVS до ESP.restart() —
+        // иначе теряем до 5 мин секунд работы (PERSIST_INTERVAL_MS). Сам
+        // ESP.restart НЕ graceful, дальше шансов нет.
+        WorkTimeTracker::instance().flush();
 
         // Дать PubSubClient момент протолкнуть publish в TCP перед restart.
         // На ESP32 PubSubClient sync publish — после возврата из publish

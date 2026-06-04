@@ -10,6 +10,7 @@
 #include "iDryer.h"
 
 #include "mqtt/mqtt_client.h"   // MQTT_CONFIG_CHUNK_SIZE
+#include "work_time_tracker.h"  // накопительный workTimeCounter
 #include <Arduino.h>
 #include <WiFi.h>
 #include <ArduinoJson.h>
@@ -76,7 +77,7 @@ public:
         StaticJsonDocument<1024> doc;
         doc["hardwareVersion"] = cfg_.hardwareVersion ? cfg_.hardwareVersion : "";
         doc["firmwareVersion"] = cfg_.firmwareVersion ? cfg_.firmwareVersion : "";
-        doc["workTimeCounter"] = millis() / 1000u;
+        doc["workTimeCounter"] = idryer::WorkTimeTracker::instance().total();
         doc["unitsCount"]      = cfg_.unitsCount;
         // For two-chip devices, use the mcuSerial from CloudStateMachine (set via
         // UART Hello). For one-ID devices (no cloud_ or no mcuSerial set),
@@ -243,6 +244,7 @@ struct Link::Impl {
     // Source of truth — NVS/EEPROM продукта; продукт вызывает setIgnoreExternalCmd()
     // при загрузке и при изменении из локального меню.
     bool ignoreExternalCmd = false;
+
 };
 
 // ──────────────────────────────────────────────────────────────────────
@@ -273,6 +275,11 @@ Link::~Link() { impl_ = nullptr; }
 
 bool Link::begin() {
     Serial.begin(115200);
+
+    // Accumulated work-time counter — читаем из NVS до того как продукт
+    // что-либо запустит. Любой ребут (включая OTA) теперь сохраняет общее
+    // время работы устройства. См. work_time_tracker.h.
+    idryer::WorkTimeTracker::instance().begin();
 
 #ifdef IDRYER_DEV_REPL
     // Dev mode: HAL logs go to Serial right away; product owns Serial input.
@@ -394,6 +401,10 @@ bool Link::begin() {
 }
 
 void Link::loop() {
+    // Throttled NVS-persist для накопительного workTimeCounter — каждые 5 мин.
+    // No-op в большинстве итераций (внутренний interval check).
+    idryer::WorkTimeTracker::instance().loop();
+
 #ifndef IDRYER_DEV_REPL
     // До WiFi: только Improv. runtime.loop() → cloud.loop() →
     // WiFi.scanNetworks (~5с) переполняет USB CDC FIFO и ломает Improv-RPC.
