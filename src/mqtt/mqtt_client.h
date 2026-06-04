@@ -42,6 +42,14 @@ public:
     /// @brief Callback invoked when a @c commands/* message arrives.
     using CommandCallback = Callback<void(const char*, JsonObjectConst)>;
 
+    /// @brief Callback для бинарных OTA-chunks. Срабатывает на топиках вида
+    /// @c commands/firmware_update_chunk/{commandId}/{chunkIdx}, payload идёт
+    /// как сырой бинарь (см. ___OTA_MQTT_DESIGN.md, format: raw_binary).
+    /// Не парсится как JSON и не копируется в локальный s_payload_buf — raw
+    /// pointer передаётся в callback напрямую (живёт только время вызова).
+    /// Сигнатура: (topic, payload, length).
+    using OtaChunkCallback = Callback<void(const char*, const uint8_t*, size_t)>;
+
     /**
      * @brief Initializes the MQTT client with device credentials.
      *
@@ -58,6 +66,15 @@ public:
      * Called by @c IdryerRuntime — you don't need to set this yourself.
      */
     void setCommandCallback(CommandCallback::FnPtr fn, void* ctx = nullptr);
+
+    /**
+     * @brief Регистрирует callback для бинарных OTA-chunks
+     * (@c commands/firmware_update_chunk/{commandId}/{chunkIdx}).
+     *
+     * Вызывается OtaReceiver. Если не зарегистрирован — chunks молча
+     * игнорируются (никакого OTA-flow в прошивке).
+     */
+    void setOtaChunkCallback(OtaChunkCallback::FnPtr fn, void* ctx = nullptr);
 
     /**
      * @brief Connects to the broker and subscribes to @c commands/#.
@@ -144,6 +161,7 @@ private:
 #endif
     PubSubClient mqttClient_;
     CommandCallback commandCallback_;
+    OtaChunkCallback otaChunkCallback_;
 
     char serialNumber_[32];
     char token_[512];

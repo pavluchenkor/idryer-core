@@ -45,6 +45,10 @@ void MqttClient::setCommandCallback(CommandCallback::FnPtr fn, void* ctx) {
     commandCallback_.set(fn, ctx);
 }
 
+void MqttClient::setOtaChunkCallback(OtaChunkCallback::FnPtr fn, void* ctx) {
+    otaChunkCallback_.set(fn, ctx);
+}
+
 void MqttClient::disconnect() {
     if (mqttClient_.connected()) mqttClient_.disconnect();
     initialized_ = false;
@@ -223,6 +227,23 @@ bool MqttClient::publishConfigDelta(const char* json, size_t length) {
 
 void MqttClient::mqttCallback(char* topic, byte* payload, unsigned int length) {
     if (!instance_) return;
+
+    // OTA-chunks (commands/firmware_update_chunk/{commandId}/{chunkIdx}) — это
+    // сырой бинарь до 4 КБ (см. ___OTA_MQTT_DESIGN.md, format: raw_binary).
+    // НЕ копируем в s_payload_buf (он 1 КБ — chunks бы дропались) и НЕ парсим
+    // как JSON. Передаём raw pointer OtaReceiver, он уже знает что с этим
+    // делать (Update.write + mbedtls_sha256_update). Pointer живёт только
+    // время этого вызова — OtaReceiver обязан скопировать или записать сразу.
+    if (strstr(topic, "/commands/firmware_update_chunk/")) {
+        if (instance_->otaChunkCallback_) {
+            instance_->otaChunkCallback_(
+                topic,
+                reinterpret_cast<const uint8_t*>(payload),
+                static_cast<size_t>(length));
+        }
+        return;
+    }
+
     // profile-команда с 10 стадиями занимает ~540 байт.
     static char s_payload_buf[1024];
     if (length >= sizeof(s_payload_buf)) {
