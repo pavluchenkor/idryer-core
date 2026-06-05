@@ -153,6 +153,10 @@ bool UartBridge::sendWsStatusRequest() {
     return transmit(UartMsgKind::WsStatusRequest, nullptr, 0, 0);
 }
 
+bool UartBridge::sendOtaAnnounceForMcu(const UartOtaAnnounceForMcuPayload& p) {
+    return transmit(UartMsgKind::OtaAnnounceForMcu, reinterpret_cast<const uint8_t*>(&p), sizeof(p), 0);
+}
+
 bool UartBridge::sendOtaChunkForMcu(const uint8_t* payload, uint8_t payloadLen, uint8_t flags) {
     return transmit(UartMsgKind::OtaChunkForMcu, payload, payloadLen, flags);
 }
@@ -471,7 +475,19 @@ void UartBridge::handleFrame(const UartFrame& frame) {
         if (wsStatusRequestHandler_) wsStatusRequestHandler_(frame.header);
         break;
 
-    // DRYER paired OTA (kinds 0x80-0x83)
+    // DRYER paired OTA (kinds 0x80-0x84)
+    case UartMsgKind::OtaAnnounceForMcu: {
+        if (!validateLength(UartMsgKind::OtaAnnounceForMcu, frame.header.payloadLength)) {
+            emitError(UartErrCode::InvalidPayload, frame.header.sequence,
+                      frame.header.payloadLength, false); return;
+        }
+        if (otaAnnounceForMcuHandler_) {
+            UartOtaAnnounceForMcuPayload p{}; memcpy(&p, frame.payload, sizeof(p));
+            otaAnnounceForMcuHandler_(p, frame.header);
+        }
+        break;
+    }
+
     case UartMsgKind::OtaChunkForMcu:
         // Фрагментированный payload, длина переменная (≤ UART_MAX_PAYLOAD).
         // validateLength для этого kind разрешает любую длину 0..200; сборку
@@ -661,6 +677,7 @@ bool UartBridge::validateLength(UartMsgKind kind, uint8_t length) const {
     case UartMsgKind::WsStatus:       return length == sizeof(UartWsStatusPayload);
     case UartMsgKind::WsResetClients:
     case UartMsgKind::WsStatusRequest: return length == 0;
+    case UartMsgKind::OtaAnnounceForMcu: return length == sizeof(UartOtaAnnounceForMcuPayload);
     case UartMsgKind::OtaChunkForMcu:  return length <= UART_MAX_PAYLOAD;  // fragmented
     case UartMsgKind::OtaChunkAck:     return length == sizeof(UartOtaChunkAckPayload);
     case UartMsgKind::OtaCommitNow:    return length == sizeof(UartOtaCommitNowPayload);

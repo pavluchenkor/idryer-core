@@ -176,6 +176,26 @@ void OtaReceiver::handleAnnounce(JsonObjectConst data) {
         HAL_LOG_INFO("OTA", "Proxy session started (RP2040): cmd=%s v=%s size=%u chunks=%ux%uB",
                      commandId_, toVersion_, (unsigned)expectedSize_,
                      (unsigned)expectedChunks_, (unsigned)expectedChunkSize_);
+
+        // Доставить RP параметры сессии: expectedSha + totalSize + commandIdHash.
+        // Без этого RP не сможет финально проверить SHA после последнего chunk'а.
+        UartOtaAnnounceForMcuPayload ann{};
+        ann.commandId   = commandIdHash_;
+        ann.totalChunks = expectedChunks_;
+        ann.chunkSize   = expectedChunkSize_;
+        ann.totalSize   = expectedSize_;
+        memcpy(ann.expectedSha, expectedSha_, sizeof(ann.expectedSha));
+        // targetMajor парсим из toVersion_ ("major.minor.patch"): только major.
+        ann.targetMajor = (uint8_t)strtoul(toVersion_, nullptr, 10);
+        if (uart_) {
+            if (!uart_->sendOtaAnnounceForMcu(ann)) {
+                HAL_LOG_ERROR("OTA", "Failed to send OtaAnnounceForMcu to RP");
+                publishAck("rejected_unsupported", "uart announce send failed", 0, freeHeap);
+                resetSession();
+                return;
+            }
+        }
+
         publishAck("accepted", nullptr, 0, freeHeap);
         return;
     }

@@ -202,6 +202,7 @@ enum class UartMsgKind : uint8_t {
     OtaChunkAck        = 0x81,
     OtaCommitNow       = 0x82,
     OtaStatus          = 0x83,
+    OtaAnnounceForMcu  = 0x84,
 };
 
 // ── Payload structs (packed binary layout) ────────────────────────
@@ -470,10 +471,27 @@ struct UartWsStatusPayload {
 } __attribute__((packed));
 static_assert(sizeof(UartWsStatusPayload) == 6, "UartWsStatusPayload must be 6 bytes (yaml-computed)");
 
+/// Анонс сессии OTA для RP2040 от ESP. Шлётся ОДИН раз сразу после получения
+/// ESP-стороной MQTT firmware_update_announce с target=rp2040, до первого
+/// OtaChunkForMcu. Несёт expectedSha256 и параметры сессии — без этого
+/// RP не может выполнить финальную SHA-верификацию (PicoOTA loader контент
+/// не проверяет, см. ___OTA_MQTT_DESIGN.md).
+struct UartOtaAnnounceForMcuPayload {
+    uint32_t    commandId;  ///< FNV1a32(MQTT commandId UUID) — для корреляции с последующими OtaChunkForMcu
+    uint16_t    totalChunks;  ///< общее число chunk'ов в этой OTA-сессии
+    uint16_t    chunkSize;  ///< размер chunk'а в байтах (последний может быть короче)
+    uint32_t    totalSize;  ///< полный размер прошивки в байтах
+    uint8_t    expectedSha[32];  ///< SHA256 от полной прошивки — RP сверяет после последнего chunk'а
+    uint8_t    targetMajor;  ///< ожидаемый major новой прошивки RP (для логирования / sanity)
+    uint8_t    _pad;  ///< padding до 4+2+2+4+32+1+1 = 46 байт
+} __attribute__((packed));
+static_assert(sizeof(UartOtaAnnounceForMcuPayload) == 46, "UartOtaAnnounceForMcuPayload must be 46 bytes (yaml-computed)");
+
 /// Один chunk прошивки RP2040, проксированный ESP из MQTT firmware_update_chunk.
 /// Размер chunk'а из MQTT (обычно 4096) превышает UART_MAX_PAYLOAD=200, поэтому
 /// кадр фрагментируется через UART_FLAG_FRAGMENT / UART_FLAG_LAST_FRAGMENT.
-/// Wire-форма после сборки фрагментов: 8-байт заголовок + до 4096 байт data.
+/// Wire-форма после сборки фрагментов: 12-байт заголовок + до 4096 байт data.
+/// expectedSha и totalSize см. OtaAnnounceForMcu (приходит до первого chunk'а).
 struct UartOtaChunkForMcuPayload {
     uint32_t    commandId;  ///< ID OTA-сессии из MQTT announce — для корреляции
     uint16_t    chunkIdx;  ///< 0-based, должен идти sequentially

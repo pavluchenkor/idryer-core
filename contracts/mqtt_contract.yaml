@@ -463,7 +463,7 @@ uart_kind_ranges:
   "0x60": "Log (диагностика)"
   "0x70-0x72": "Claiming (ClaimStart / ClaimStatus / ClaimComplete)"
   "0x73-0x76": "WebSocket Local Access (WsEnable / WsStatus / WsResetClients / WsStatusRequest)"
-  "0x80-0x83": "DRYER paired OTA (OtaChunkForMcu / OtaChunkAck / OtaCommitNow / OtaStatus)"
+  "0x80-0x84": "DRYER paired OTA (OtaAnnounceForMcu / OtaChunkForMcu / OtaChunkAck / OtaCommitNow / OtaStatus)"
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Виджеты — карточки устройств на дашборде портала
@@ -1096,12 +1096,30 @@ payloads:
   # межчиповые. Подробное описание flow: ___OTA_MQTT_DESIGN.md раздел
   # «DRYER paired OTA».
 
+  OtaAnnounceForMcu:
+    description: |
+      Анонс сессии OTA для RP2040 от ESP. Шлётся ОДИН раз сразу после получения
+      ESP-стороной MQTT firmware_update_announce с target=rp2040, до первого
+      OtaChunkForMcu. Несёт expectedSha256 и параметры сессии — без этого
+      RP не может выполнить финальную SHA-верификацию (PicoOTA loader контент
+      не проверяет, см. ___OTA_MQTT_DESIGN.md).
+    cpp_name: UartOtaAnnounceForMcuPayload
+    fields:
+      commandId:    { type: uint32, note: "FNV1a32(MQTT commandId UUID) — для корреляции с последующими OtaChunkForMcu" }
+      totalChunks:  { type: uint16, note: "общее число chunk'ов в этой OTA-сессии" }
+      chunkSize:    { type: uint16, note: "размер chunk'а в байтах (последний может быть короче)" }
+      totalSize:    { type: uint32, note: "полный размер прошивки в байтах" }
+      expectedSha:  { type: "uint8[32]", note: "SHA256 от полной прошивки — RP сверяет после последнего chunk'а" }
+      targetMajor:  { type: uint8,  note: "ожидаемый major новой прошивки RP (для логирования / sanity)" }
+      _pad:         { type: uint8,  note: "padding до 4+2+2+4+32+1+1 = 46 байт" }
+
   OtaChunkForMcu:
     description: |
       Один chunk прошивки RP2040, проксированный ESP из MQTT firmware_update_chunk.
       Размер chunk'а из MQTT (обычно 4096) превышает UART_MAX_PAYLOAD=200, поэтому
       кадр фрагментируется через UART_FLAG_FRAGMENT / UART_FLAG_LAST_FRAGMENT.
-      Wire-форма после сборки фрагментов: 8-байт заголовок + до 4096 байт data.
+      Wire-форма после сборки фрагментов: 12-байт заголовок + до 4096 байт data.
+      expectedSha и totalSize см. OtaAnnounceForMcu (приходит до первого chunk'а).
     cpp_name: UartOtaChunkForMcuPayload
     fields:
       commandId:    { type: uint32, note: "ID OTA-сессии из MQTT announce — для корреляции" }
@@ -2321,7 +2339,15 @@ uart_only:
 
   # ── DRYER paired OTA (Phase 6.8, added 2026-06-05) ────────────────────
   # Кадры межчиповой прокси-OTA. Полное описание flow и обоснование —
-  # ___OTA_MQTT_DESIGN.md «DRYER paired OTA». Range 0x80-0x83.
+  # ___OTA_MQTT_DESIGN.md «DRYER paired OTA». Range 0x80-0x84.
+
+  - kind: OtaAnnounceForMcu
+    kind_id: 0x84
+    payload: OtaAnnounceForMcu
+    direction: esp_to_rp2040
+    fragmented: false
+    ack: false
+    purpose: "Анонс OTA-сессии для RP: commandIdHash, sha256, totalSize, chunkSize, totalChunks."
 
   - kind: OtaChunkForMcu
     kind_id: 0x80
