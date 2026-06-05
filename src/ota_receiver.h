@@ -29,6 +29,11 @@
 
 #pragma once
 
+// ESP-only: использует Arduino Update lib + mbedtls на ESP32. На RP2040 этот
+// класс не нужен — RP получает прошивку через UART proxy (DRYER paired OTA),
+// см. ___OTA_MQTT_DESIGN.md.
+#if defined(ESP32) || defined(ESP_PLATFORM)
+
 #include <ArduinoJson.h>
 #include <stdint.h>
 #include <stddef.h>
@@ -121,3 +126,5 @@ private:
 };
 
 } // namespace idryer
+
+#endif // ESP32 / ESP_PLATFORM

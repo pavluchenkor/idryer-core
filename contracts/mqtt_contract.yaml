@@ -463,6 +463,7 @@ uart_kind_ranges:
   "0x60": "Log (диагностика)"
   "0x70-0x72": "Claiming (ClaimStart / ClaimStatus / ClaimComplete)"
   "0x73-0x76": "WebSocket Local Access (WsEnable / WsStatus / WsResetClients / WsStatusRequest)"
+  "0x80-0x83": "DRYER paired OTA (OtaChunkForMcu / OtaChunkAck / OtaCommitNow / OtaStatus)"
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Виджеты — карточки устройств на дашборде портала
@@ -1088,6 +1089,59 @@ payloads:
           type: uint8,
           note: "trailing padding для выравнивания структуры до 6 байт; должен быть 0",
         }
+
+  # ── DRYER paired OTA (Phase 6.8, added 2026-06-05) ────────────────────
+  #
+  # Кадры для прокси-OTA RP2040 через ESP. Не имеют MQTT-эквивалента —
+  # межчиповые. Подробное описание flow: ___OTA_MQTT_DESIGN.md раздел
+  # «DRYER paired OTA».
+
+  OtaChunkForMcu:
+    description: |
+      Один chunk прошивки RP2040, проксированный ESP из MQTT firmware_update_chunk.
+      Размер chunk'а из MQTT (обычно 4096) превышает UART_MAX_PAYLOAD=200, поэтому
+      кадр фрагментируется через UART_FLAG_FRAGMENT / UART_FLAG_LAST_FRAGMENT.
+      Wire-форма после сборки фрагментов: 8-байт заголовок + до 4096 байт data.
+    cpp_name: UartOtaChunkForMcuPayload
+    fields:
+      commandId:    { type: uint32, note: "ID OTA-сессии из MQTT announce — для корреляции" }
+      chunkIdx:     { type: uint16, note: "0-based, должен идти sequentially" }
+      totalChunks:  { type: uint16, note: "копия из MQTT announce для контроля целостности" }
+      dataLength:   { type: uint16, note: "фактический размер data[] этого chunk'а (последний может быть короче)" }
+      _pad:         { type: uint16, note: "padding до 4 + 2 + 2 + 2 + 2 = 12 байт заголовка" }
+      # data[]: variable-length, до 4096 байт, не описывается в fields — это tail.
+      # Wire-форма: заголовок | data[dataLength]
+
+  OtaChunkAck:
+    description: "Ответ RP на принятый chunk: ok / sha-fail / flash-fail."
+    cpp_name: UartOtaChunkAckPayload
+    fields:
+      commandId:  { type: uint32 }
+      chunkIdx:   { type: uint16 }
+      status:     { type: uint8,  note: "0=ok, 1=sha_mismatch, 2=flash_failed, 3=out_of_order" }
+      _pad:       { type: uint8,  note: "padding до 8 байт" }
+
+  OtaCommitNow:
+    description: |
+      Команда от RP на ESP «начинаем синхронный commit». RP инициирует когда
+      обе стороны скачаны и устройство в idle (см. план реализации Этап 5).
+      После получения ESP делает Update.end() + ESP.restart(), RP делает
+      PicoOTA.commit() + rp2040.reboot().
+    cpp_name: UartOtaCommitNowPayload
+    fields:
+      targetMajor:  { type: uint8,  note: "ожидаемый major после reboot — для верификации в post-handshake" }
+      _pad:         { type: uint8,  note: "padding до 2 байт (минимум для not-empty payload)" }
+
+  OtaStatus:
+    description: |
+      Периодический статус OTA-готовности ESP-стороны для RP. RP по нему
+      понимает что ESP скачала свою прошивку и готова к синхронному commit.
+      Альтернатива расширения UartStatusPayload (которое было бы wire-break).
+    cpp_name: UartOtaStatusPayload
+    fields:
+      espReady:        { type: uint8,  note: "0/1 — ESP свою прошивку скачала и валидировала" }
+      espTargetMajor:  { type: uint8,  note: "major скачанной у ESP прошивки, или 0 если nothing pending" }
+      _pad:            { type: uint16, note: "padding до 4 байт" }
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 1. СКВОЗНЫЕ СООБЩЕНИЯ (идут и по UART, и по MQTT)
@@ -2264,6 +2318,45 @@ uart_only:
     cmd_code: WifiStatus
     cmd_code_id: 0x11
     purpose: "MCU запрашивает у ESP32 IP-адрес для отображения на экране."
+
+  # ── DRYER paired OTA (Phase 6.8, added 2026-06-05) ────────────────────
+  # Кадры межчиповой прокси-OTA. Полное описание flow и обоснование —
+  # ___OTA_MQTT_DESIGN.md «DRYER paired OTA». Range 0x80-0x83.
+
+  - kind: OtaChunkForMcu
+    kind_id: 0x80
+    payload: OtaChunkForMcu
+    direction: esp_to_rp2040
+    fragmented: true
+    ack: true
+    ack_kind: OtaChunkAck
+    ack_kind_id: 0x81
+    purpose: "Chunk прошивки RP2040, проксированный ESP из MQTT firmware_update_chunk."
+
+  - kind: OtaChunkAck
+    kind_id: 0x81
+    payload: OtaChunkAck
+    direction: rp2040_to_esp
+    fragmented: false
+    ack: false
+    purpose: "Подтверждение RP на принятый chunk (ok / sha_fail / flash_fail / out_of_order)."
+
+  - kind: OtaCommitNow
+    kind_id: 0x82
+    payload: OtaCommitNow
+    direction: rp2040_to_esp
+    fragmented: false
+    ack: false
+    purpose: "RP инициирует синхронный reboot обеих сторон (см. Этап 5 плана реализации)."
+
+  - kind: OtaStatus
+    kind_id: 0x83
+    payload: OtaStatus
+    direction: esp_to_rp2040
+    fragmented: false
+    ack: false
+    interval_ms: 2000
+    purpose: "Периодический OTA-статус ESP для RP (esp_ready + target major)."
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 4. MQTT-only сообщения (нет UART-формы)

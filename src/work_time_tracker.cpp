@@ -1,4 +1,9 @@
 // WorkTimeTracker implementation — см. work_time_tracker.h для контракта.
+//
+// ESP-only: использует Preferences (NVS). На RP2040 (RP-сторона DRYER) этот
+// модуль не нужен — WTC там живёт в EEPROM через menu-binding.
+
+#if defined(ESP32) || defined(ESP_PLATFORM)
 
 #include "work_time_tracker.h"
 #include "hal/hal_types.h"
@@ -66,3 +71,5 @@ void WorkTimeTracker::persist(uint32_t totalSec) {
 }
 
 } // namespace idryer
+
+#endif // ESP32 / ESP_PLATFORM

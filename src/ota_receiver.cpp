@@ -1,4 +1,8 @@
 // OtaReceiver implementation — см. ota_receiver.h для контракта.
+//
+// ESP-only — см. guard в ota_receiver.h.
+
+#if defined(ESP32) || defined(ESP_PLATFORM)
 
 #include "ota_receiver.h"
 #include "iDryer.h"
@@ -414,3 +418,5 @@ bool OtaReceiver::parseChunkIdx(const char* topic, uint16_t& outIdx) {
 }
 
 } // namespace idryer
+
+#endif // ESP32 / ESP_PLATFORM
