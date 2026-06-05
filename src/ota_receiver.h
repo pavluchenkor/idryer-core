@@ -69,6 +69,12 @@ public:
     /// @param currentVersion semver текущей прошивки.
     void publishCheckUpdate(const char* currentVersion);
 
+    /// Paired OTA Этап 4: ESP публикует firmware_check_update от имени RP
+    /// (controllerType=RP2040). Вызывается из обработчика OtaCheckRequest
+    /// при self-healing на RP. @param mcuVersion — major:minor:patch
+    /// упакованные 16:8:8 (как UartHelloPayload.firmwareVersion).
+    void publishCheckUpdateForMcu(uint32_t mcuVersion);
+
     /// Self-confirm boot partition: после успешного MQTT-connect устройство
     /// доказывает что новая прошивка работает (без этого bootloader откатит
     /// при следующем ребуте). Stateless — повторные вызовы no-op после

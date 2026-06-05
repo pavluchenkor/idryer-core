@@ -65,6 +65,7 @@ public:
     using OtaChunkAckHandler       = std::function<void(const UartOtaChunkAckPayload&,  const UartFrameHeader&)>;
     using OtaCommitNowHandler      = std::function<void(const UartOtaCommitNowPayload&, const UartFrameHeader&)>;
     using OtaStatusHandler         = std::function<void(const UartOtaStatusPayload&,    const UartFrameHeader&)>;
+    using OtaCheckRequestHandler   = std::function<void(const UartOtaCheckRequestPayload&, const UartFrameHeader&)>;
 
     /**
      * @brief Initializes the bridge on the given serial port.
@@ -126,6 +127,7 @@ public:
     // DRYER paired OTA: RP → ESP направление.
     bool sendOtaChunkAck(const UartOtaChunkAckPayload& p);
     bool sendOtaCommitNow(const UartOtaCommitNowPayload& p);
+    bool sendOtaCheckRequest(const UartOtaCheckRequestPayload& p);
     /// @}
 
     /**
@@ -165,6 +167,7 @@ public:
     void setOtaChunkAckHandler(const OtaChunkAckHandler& h)       { otaChunkAckHandler_ = h; }
     void setOtaCommitNowHandler(const OtaCommitNowHandler& h)     { otaCommitNowHandler_ = h; }
     void setOtaStatusHandler(const OtaStatusHandler& h)           { otaStatusHandler_ = h; }
+    void setOtaCheckRequestHandler(const OtaCheckRequestHandler& h) { otaCheckRequestHandler_ = h; }
     /// @}
 
 private:
@@ -230,6 +233,7 @@ private:
     OtaChunkAckHandler       otaChunkAckHandler_;
     OtaCommitNowHandler      otaCommitNowHandler_;
     OtaStatusHandler         otaStatusHandler_;
+    OtaCheckRequestHandler   otaCheckRequestHandler_;
 };
 
 } // namespace idryer

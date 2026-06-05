@@ -203,6 +203,7 @@ enum class UartMsgKind : uint8_t {
     OtaCommitNow       = 0x82,
     OtaStatus          = 0x83,
     OtaAnnounceForMcu  = 0x84,
+    OtaCheckRequest    = 0x85,
 };
 
 // ── Payload structs (packed binary layout) ────────────────────────
@@ -529,6 +530,16 @@ struct UartOtaStatusPayload {
     uint16_t    _pad;  ///< padding до 4 байт
 } __attribute__((packed));
 static_assert(sizeof(UartOtaStatusPayload) == 4, "UartOtaStatusPayload must be 4 bytes (yaml-computed)");
+
+/// Self-healing запрос от RP к ESP: «опубликуй MQTT events/firmware_check_update
+/// от моего имени, controllerType=RP2040, чтобы backend увидел версию RP и
+/// запушил мне обновление». Используется в handleUartHello (paired OTA
+/// Этап 4): при mismatch major RP сначала пытается само-обновиться, и если
+/// готовой прошивки в LittleFS нет — шлёт OtaCheckRequest и ждёт OtaAnnounceForMcu.
+struct UartOtaCheckRequestPayload {
+    uint32_t    currentVersion;  ///< текущая версия RP, major:minor:patch упакованы 16:8:8 (как UartHelloPayload
+} __attribute__((packed));
+static_assert(sizeof(UartOtaCheckRequestPayload) == 4, "UartOtaCheckRequestPayload must be 4 bytes (yaml-computed)");
 
 #pragma pack(pop)
 

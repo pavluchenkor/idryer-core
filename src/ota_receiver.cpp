@@ -77,6 +77,11 @@ bool OtaReceiver::begin(iDryer::Link* link, const char* productId,
             [](const UartOtaChunkAckPayload& p, const UartFrameHeader&) {
                 OtaReceiver::instance().handleOtaChunkAck(p.chunkIdx, p.status, p.commandId);
             });
+        // Этап 4: RP→ESP self-healing запрос на публикацию check_update для RP.
+        uart_->setOtaCheckRequestHandler(
+            [](const UartOtaCheckRequestPayload& p, const UartFrameHeader&) {
+                OtaReceiver::instance().publishCheckUpdateForMcu(p.currentVersion);
+            });
     }
 
     HAL_LOG_INFO("OTA", "Receiver registered (productId=%s, uart=%s, onCommand: announce=%d resp=%d)",
@@ -369,6 +374,29 @@ void OtaReceiver::publishCheckUpdate(const char* currentVersion) {
     MqttClient::getIsoTimestamp(ts);
     doc["timestamp"] = ts;
     mqtt_->publishFirmwareCheckUpdate(doc);
+}
+
+void OtaReceiver::publishCheckUpdateForMcu(uint32_t mcuVersion) {
+    if (!mqtt_ || !productId_) return;
+    // major:minor:patch упакованы 16:8:8 (см. UartHelloPayload.firmwareVersion).
+    uint8_t major = (mcuVersion >> 16) & 0xFF;
+    uint8_t minor = (mcuVersion >> 8) & 0xFF;
+    uint8_t patch = mcuVersion & 0xFF;
+    char verStr[16];
+    snprintf(verStr, sizeof(verStr), "%u.%u.%u", major, minor, patch);
+
+    StaticJsonDocument<256> doc;
+    doc["currentVersion"] = verStr;
+    doc["controllerType"] = "RP2040";
+    doc["productId"]      = productId_;
+    // board для RP2040 ESP не знает (две сборки pico_0x44/0x45 не различимы из
+    // UART Hello). Backend разрешит выбор по productId+controllerType+version;
+    // при необходимости board будет добавлен отдельным запросом.
+    char ts[32];
+    MqttClient::getIsoTimestamp(ts);
+    doc["timestamp"] = ts;
+    mqtt_->publishFirmwareCheckUpdate(doc);
+    HAL_LOG_INFO("OTA", "Published check_update for MCU v=%s (RP2040)", verStr);
 }
 
 // ─── Publish helpers ────────────────────────────────────────────────────

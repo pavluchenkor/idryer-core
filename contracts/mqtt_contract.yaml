@@ -463,7 +463,7 @@ uart_kind_ranges:
   "0x60": "Log (диагностика)"
   "0x70-0x72": "Claiming (ClaimStart / ClaimStatus / ClaimComplete)"
   "0x73-0x76": "WebSocket Local Access (WsEnable / WsStatus / WsResetClients / WsStatusRequest)"
-  "0x80-0x84": "DRYER paired OTA (OtaAnnounceForMcu / OtaChunkForMcu / OtaChunkAck / OtaCommitNow / OtaStatus)"
+  "0x80-0x85": "DRYER paired OTA (OtaAnnounceForMcu / OtaChunkForMcu / OtaChunkAck / OtaCommitNow / OtaStatus / OtaCheckRequest)"
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Виджеты — карточки устройств на дашборде портала
@@ -1160,6 +1160,17 @@ payloads:
       espReady:        { type: uint8,  note: "0/1 — ESP свою прошивку скачала и валидировала" }
       espTargetMajor:  { type: uint8,  note: "major скачанной у ESP прошивки, или 0 если nothing pending" }
       _pad:            { type: uint16, note: "padding до 4 байт" }
+
+  OtaCheckRequest:
+    description: |
+      Self-healing запрос от RP к ESP: «опубликуй MQTT events/firmware_check_update
+      от моего имени, controllerType=RP2040, чтобы backend увидел версию RP и
+      запушил мне обновление». Используется в handleUartHello (paired OTA
+      Этап 4): при mismatch major RP сначала пытается само-обновиться, и если
+      готовой прошивки в LittleFS нет — шлёт OtaCheckRequest и ждёт OtaAnnounceForMcu.
+    cpp_name: UartOtaCheckRequestPayload
+    fields:
+      currentVersion: { type: uint32, note: "текущая версия RP, major:minor:patch упакованы 16:8:8 (как UartHelloPayload.firmwareVersion)" }
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 1. СКВОЗНЫЕ СООБЩЕНИЯ (идут и по UART, и по MQTT)
@@ -2383,6 +2394,14 @@ uart_only:
     ack: false
     interval_ms: 2000
     purpose: "Периодический OTA-статус ESP для RP (esp_ready + target major)."
+
+  - kind: OtaCheckRequest
+    kind_id: 0x85
+    payload: OtaCheckRequest
+    direction: rp2040_to_esp
+    fragmented: false
+    ack: false
+    purpose: "RP просит ESP опубликовать firmware_check_update от имени RP (paired OTA Этап 4 self-healing)."
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 4. MQTT-only сообщения (нет UART-формы)

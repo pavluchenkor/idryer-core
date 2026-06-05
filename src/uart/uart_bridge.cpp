@@ -173,6 +173,10 @@ bool UartBridge::sendOtaStatus(const UartOtaStatusPayload& p) {
     return transmit(UartMsgKind::OtaStatus, reinterpret_cast<const uint8_t*>(&p), sizeof(p), 0);
 }
 
+bool UartBridge::sendOtaCheckRequest(const UartOtaCheckRequestPayload& p) {
+    return transmit(UartMsgKind::OtaCheckRequest, reinterpret_cast<const uint8_t*>(&p), sizeof(p), 0);
+}
+
 bool UartBridge::waitForAck(uint32_t timeoutMs) {
     const uint32_t start = HAL_MILLIS();
     while (pending_.active && (HAL_MILLIS() - start) < timeoutMs) {
@@ -534,6 +538,18 @@ void UartBridge::handleFrame(const UartFrame& frame) {
         break;
     }
 
+    case UartMsgKind::OtaCheckRequest: {
+        if (!validateLength(UartMsgKind::OtaCheckRequest, frame.header.payloadLength)) {
+            emitError(UartErrCode::InvalidPayload, frame.header.sequence,
+                      frame.header.payloadLength, false); return;
+        }
+        if (otaCheckRequestHandler_) {
+            UartOtaCheckRequestPayload p{}; memcpy(&p, frame.payload, sizeof(p));
+            otaCheckRequestHandler_(p, frame.header);
+        }
+        break;
+    }
+
     default:
         emitError(UartErrCode::UnknownMessage, frame.header.sequence,
                   static_cast<uint16_t>(frame.header.kind), false);
@@ -682,6 +698,7 @@ bool UartBridge::validateLength(UartMsgKind kind, uint8_t length) const {
     case UartMsgKind::OtaChunkAck:     return length == sizeof(UartOtaChunkAckPayload);
     case UartMsgKind::OtaCommitNow:    return length == sizeof(UartOtaCommitNowPayload);
     case UartMsgKind::OtaStatus:       return length == sizeof(UartOtaStatusPayload);
+    case UartMsgKind::OtaCheckRequest: return length == sizeof(UartOtaCheckRequestPayload);
     default:                          return length <= UART_MAX_PAYLOAD;
     }
 }
