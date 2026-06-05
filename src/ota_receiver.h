@@ -40,7 +40,7 @@
 #include <mbedtls/sha256.h>
 
 namespace iDryer { class Link; }
-namespace idryer { class MqttClient; }
+namespace idryer { class MqttClient; class UartBridge; }
 
 namespace idryer {
 
@@ -55,8 +55,13 @@ public:
     /// @param link        указатель на Link для onCommand + mqttClient().
     /// @param productId   строка из контракта (например "iheater_link") —
     ///                    используется в publishCheckUpdate.
+    /// @param uartBridge  опционально: для DRYER (idryer-link) — указатель на
+    ///                    уже инициализированный UartBridge, через который
+    ///                    проксируются chunks при target=rp2040. Если nullptr —
+    ///                    target=rp2040 отклоняется как unsupported.
     /// @return true если все callbacks зарегистрировались.
-    bool begin(iDryer::Link* link, const char* productId);
+    bool begin(iDryer::Link* link, const char* productId,
+               UartBridge* uartBridge = nullptr);
 
     /// Pull-flow: устройство периодически (раз в N часов) шлёт backend
     /// текущую версию и спрашивает о новой. Продукт зовёт сам из своего
@@ -108,11 +113,14 @@ private:
     iDryer::Link* link_ = nullptr;
     MqttClient* mqtt_ = nullptr;
     const char* productId_ = nullptr;
+    UartBridge* uart_ = nullptr;  // ESP-сторона DRYER: проксирование target=rp2040
 
     // Active session state. Не trivially destructible (mbedtls_sha256_context
     // нужно free'ить). resetSession() обнуляет и зовёт mbedtls_sha256_free.
     bool active_ = false;
     bool shaInited_ = false;
+    bool targetRp_ = false;       // текущая сессия для RP (UART-proxy) vs ESP (Update)
+    uint32_t commandIdHash_ = 0;  // FNV1a от commandId — для корреляции с UartOtaChunkAck
     char commandId_[40] = {};     // UUID 36 + запас
     char toVersion_[32] = {};
     uint8_t expectedSha_[32] = {};
@@ -121,6 +129,16 @@ private:
     uint16_t expectedChunkSize_ = 0;
     uint16_t chunksReceived_ = 0;
     uint32_t bytesReceived_ = 0;
+
+    // Sync polling state для UART-proxy chunk ack (target=rp2040).
+    bool ackReceived_ = false;
+    uint16_t ackChunkIdx_ = 0;
+    uint8_t ackStatus_ = 0;
+
+    // UART-proxy helpers (target=rp2040).
+    void handleOtaChunkAck(uint16_t chunkIdx, uint8_t status, uint32_t commandIdHash);
+    bool pushChunkToRp(uint16_t chunkIdx, const uint8_t* data, size_t len);
+    static uint32_t fnv1a32(const char* s);
 
     mbedtls_sha256_context shaCtx_;
 };

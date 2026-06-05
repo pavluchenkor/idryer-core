@@ -153,6 +153,22 @@ bool UartBridge::sendWsStatusRequest() {
     return transmit(UartMsgKind::WsStatusRequest, nullptr, 0, 0);
 }
 
+bool UartBridge::sendOtaChunkForMcu(const uint8_t* payload, uint8_t payloadLen, uint8_t flags) {
+    return transmit(UartMsgKind::OtaChunkForMcu, payload, payloadLen, flags);
+}
+
+bool UartBridge::sendOtaChunkAck(const UartOtaChunkAckPayload& p) {
+    return transmit(UartMsgKind::OtaChunkAck, reinterpret_cast<const uint8_t*>(&p), sizeof(p), 0);
+}
+
+bool UartBridge::sendOtaCommitNow(const UartOtaCommitNowPayload& p) {
+    return transmit(UartMsgKind::OtaCommitNow, reinterpret_cast<const uint8_t*>(&p), sizeof(p), 0);
+}
+
+bool UartBridge::sendOtaStatus(const UartOtaStatusPayload& p) {
+    return transmit(UartMsgKind::OtaStatus, reinterpret_cast<const uint8_t*>(&p), sizeof(p), 0);
+}
+
 bool UartBridge::waitForAck(uint32_t timeoutMs) {
     const uint32_t start = HAL_MILLIS();
     while (pending_.active && (HAL_MILLIS() - start) < timeoutMs) {
@@ -455,6 +471,53 @@ void UartBridge::handleFrame(const UartFrame& frame) {
         if (wsStatusRequestHandler_) wsStatusRequestHandler_(frame.header);
         break;
 
+    // DRYER paired OTA (kinds 0x80-0x83)
+    case UartMsgKind::OtaChunkForMcu:
+        // Фрагментированный payload, длина переменная (≤ UART_MAX_PAYLOAD).
+        // validateLength для этого kind разрешает любую длину 0..200; сборку
+        // фрагментов делает приёмная сторона по transferId внутри header'а.
+        if (otaChunkForMcuHandler_) {
+            otaChunkForMcuHandler_(frame.payload, frame.header.payloadLength,
+                                   frame.header.flags, frame.header);
+        }
+        break;
+
+    case UartMsgKind::OtaChunkAck: {
+        if (!validateLength(UartMsgKind::OtaChunkAck, frame.header.payloadLength)) {
+            emitError(UartErrCode::InvalidPayload, frame.header.sequence,
+                      frame.header.payloadLength, false); return;
+        }
+        if (otaChunkAckHandler_) {
+            UartOtaChunkAckPayload p{}; memcpy(&p, frame.payload, sizeof(p));
+            otaChunkAckHandler_(p, frame.header);
+        }
+        break;
+    }
+
+    case UartMsgKind::OtaCommitNow: {
+        if (!validateLength(UartMsgKind::OtaCommitNow, frame.header.payloadLength)) {
+            emitError(UartErrCode::InvalidPayload, frame.header.sequence,
+                      frame.header.payloadLength, false); return;
+        }
+        if (otaCommitNowHandler_) {
+            UartOtaCommitNowPayload p{}; memcpy(&p, frame.payload, sizeof(p));
+            otaCommitNowHandler_(p, frame.header);
+        }
+        break;
+    }
+
+    case UartMsgKind::OtaStatus: {
+        if (!validateLength(UartMsgKind::OtaStatus, frame.header.payloadLength)) {
+            emitError(UartErrCode::InvalidPayload, frame.header.sequence,
+                      frame.header.payloadLength, false); return;
+        }
+        if (otaStatusHandler_) {
+            UartOtaStatusPayload p{}; memcpy(&p, frame.payload, sizeof(p));
+            otaStatusHandler_(p, frame.header);
+        }
+        break;
+    }
+
     default:
         emitError(UartErrCode::UnknownMessage, frame.header.sequence,
                   static_cast<uint16_t>(frame.header.kind), false);
@@ -598,6 +661,10 @@ bool UartBridge::validateLength(UartMsgKind kind, uint8_t length) const {
     case UartMsgKind::WsStatus:       return length == sizeof(UartWsStatusPayload);
     case UartMsgKind::WsResetClients:
     case UartMsgKind::WsStatusRequest: return length == 0;
+    case UartMsgKind::OtaChunkForMcu:  return length <= UART_MAX_PAYLOAD;  // fragmented
+    case UartMsgKind::OtaChunkAck:     return length == sizeof(UartOtaChunkAckPayload);
+    case UartMsgKind::OtaCommitNow:    return length == sizeof(UartOtaCommitNowPayload);
+    case UartMsgKind::OtaStatus:       return length == sizeof(UartOtaStatusPayload);
     default:                          return length <= UART_MAX_PAYLOAD;
     }
 }

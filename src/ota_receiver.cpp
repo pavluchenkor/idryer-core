@@ -8,6 +8,8 @@
 #include "iDryer.h"
 #include "mqtt/mqtt_client.h"
 #include "hal/hal_types.h"
+#include "uart/uart_bridge.h"
+#include "uart/uart_protocol.h"
 #include "work_time_tracker.h"
 
 #include <Arduino.h>
@@ -38,7 +40,8 @@ OtaReceiver::~OtaReceiver() {
 
 // ─── Lifecycle ───────────────────────────────────────────────────────────
 
-bool OtaReceiver::begin(iDryer::Link* link, const char* productId) {
+bool OtaReceiver::begin(iDryer::Link* link, const char* productId,
+                        UartBridge* uartBridge) {
     if (!link || !productId) {
         HAL_LOG_ERROR("OTA", "begin: null link or productId");
         return false;
@@ -46,6 +49,7 @@ bool OtaReceiver::begin(iDryer::Link* link, const char* productId) {
     link_ = link;
     mqtt_ = link->mqttClient();
     productId_ = productId;
+    uart_ = uartBridge;
     if (!mqtt_) {
         HAL_LOG_ERROR("OTA", "begin: link->mqttClient() == null");
         return false;
@@ -67,18 +71,28 @@ bool OtaReceiver::begin(iDryer::Link* link, const char* productId) {
             static_cast<OtaReceiver*>(ctx)->handleChunk(topic, payload, len);
         }, this);
 
-    HAL_LOG_INFO("OTA", "Receiver registered (productId=%s, onCommand: announce=%d resp=%d)",
-                 productId_, (int)ok1, (int)ok2);
+    // DRYER paired OTA: подписка на OtaChunkAck от RP для sync polling в handleChunk.
+    if (uart_) {
+        uart_->setOtaChunkAckHandler(
+            [](const UartOtaChunkAckPayload& p, const UartFrameHeader&) {
+                OtaReceiver::instance().handleOtaChunkAck(p.chunkIdx, p.status, p.commandId);
+            });
+    }
+
+    HAL_LOG_INFO("OTA", "Receiver registered (productId=%s, uart=%s, onCommand: announce=%d resp=%d)",
+                 productId_, uart_ ? "yes" : "no", (int)ok1, (int)ok2);
     return ok1 && ok2;
 }
 
 void OtaReceiver::resetSession() {
-    if (active_ && Update.isRunning()) {
+    if (active_ && !targetRp_ && Update.isRunning()) {
         Update.abort();
     }
     shaFree();
     active_ = false;
     shaInited_ = false;
+    targetRp_ = false;
+    commandIdHash_ = 0;
     commandId_[0] = '\0';
     toVersion_[0] = '\0';
     memset(expectedSha_, 0, sizeof(expectedSha_));
@@ -87,6 +101,9 @@ void OtaReceiver::resetSession() {
     expectedChunkSize_ = 0;
     chunksReceived_ = 0;
     bytesReceived_ = 0;
+    ackReceived_ = false;
+    ackChunkIdx_ = 0;
+    ackStatus_ = 0;
 }
 
 // ─── Announce ────────────────────────────────────────────────────────────
@@ -111,11 +128,18 @@ void OtaReceiver::handleAnnounce(JsonObjectConst data) {
         return;
     }
 
-    // RP2040 — пока вне scope (UART-мост, отдельная задача).
-    if (strcmp(target, "esp") != 0) {
+    // target=rp2040 поддерживается ТОЛЬКО на DRYER (когда передан UartBridge
+    // через begin). Иначе — reject как unsupported (iHeater/Storage).
+    bool wantRp = (strcmp(target, "rp2040") == 0);
+    if (wantRp && !uart_) {
         safeCopy(commandId_, sizeof(commandId_), commandId);
         publishAck("rejected_unsupported",
                    "target=rp2040 not supported by this firmware", 0, 0);
+        return;
+    }
+    if (!wantRp && strcmp(target, "esp") != 0) {
+        safeCopy(commandId_, sizeof(commandId_), commandId);
+        publishAck("rejected_unsupported", "unknown target", 0, 0);
         return;
     }
 
@@ -128,6 +152,7 @@ void OtaReceiver::handleAnnounce(JsonObjectConst data) {
 
     safeCopy(commandId_, sizeof(commandId_), commandId);
     safeCopy(toVersion_, sizeof(toVersion_), version);
+    commandIdHash_ = fnv1a32(commandId_);
 
     if (!hexToBytes(sha256Hex, expectedSha_, sizeof(expectedSha_))) {
         publishAck("rejected_unsupported", "invalid sha256 hex format", 0, 0);
@@ -139,16 +164,27 @@ void OtaReceiver::handleAnnounce(JsonObjectConst data) {
     expectedChunkSize_ = chunkSize;
     chunksReceived_    = 0;
     bytesReceived_     = 0;
+    targetRp_          = wantRp;
 
-    // Heap pre-check: если free heap < expected size + запас — сразу reject.
-    // (Update сам выделит свой buffer внутри; мы лишь проверяем что хватит.)
     uint32_t freeHeap  = (uint32_t)heap_caps_get_free_size(MALLOC_CAP_DEFAULT);
-    uint32_t freeFlash = 0; // Update.begin сам проверит ota_partition size
 
+    if (targetRp_) {
+        // target=rp2040: ESP ничего не пишет себе. Update.begin/shaStart НЕ
+        // вызываются — SHA256 финально верифицирует RP. ESP лишь пробрасывает
+        // chunks через UART и пересылает ack/progress/complete в MQTT.
+        active_ = true;
+        HAL_LOG_INFO("OTA", "Proxy session started (RP2040): cmd=%s v=%s size=%u chunks=%ux%uB",
+                     commandId_, toVersion_, (unsigned)expectedSize_,
+                     (unsigned)expectedChunks_, (unsigned)expectedChunkSize_);
+        publishAck("accepted", nullptr, 0, freeHeap);
+        return;
+    }
+
+    // target=esp: классический self-flash flow.
     if (!Update.begin(size)) {
         HAL_LOG_ERROR("OTA", "Update.begin(%u) failed: %s",
                       (unsigned)size, Update.errorString());
-        publishAck("rejected_no_space", Update.errorString(), freeFlash, freeHeap);
+        publishAck("rejected_no_space", Update.errorString(), 0, freeHeap);
         return;
     }
 
@@ -189,9 +225,31 @@ void OtaReceiver::handleChunk(const char* topic, const uint8_t* payload, size_t 
         // Out-of-order — backend нарушил sequential. Закрываем сессию.
         HAL_LOG_ERROR("OTA", "chunk %u out of order (expected %u) — abort",
                       chunkIdx, chunksReceived_);
-        Update.abort();
+        if (!targetRp_) Update.abort();
         publishComplete("flash_failed", "chunk out of order");
         resetSession();
+        return;
+    }
+
+    // target=rp2040: проксируем chunk через UART, ждём OtaChunkAck от RP.
+    if (targetRp_) {
+        if (!pushChunkToRp(chunkIdx, payload, len)) {
+            HAL_LOG_ERROR("OTA", "proxy chunk %u failed (uart/ack)", chunkIdx);
+            // pushChunkToRp уже опубликовал complete(...) с конкретным reason.
+            return;
+        }
+        bytesReceived_ += len;
+        chunksReceived_ += 1;
+        publishProgress();
+        // Финальная верификация SHA — на RP. ESP лишь публикует verified когда
+        // дошли до последнего chunk'а; реальный commit/reboot инициирует RP
+        // через OtaCommitNow (Этап 5). Здесь сессия закрывается, ESP не ребутается.
+        if (chunksReceived_ == expectedChunks_) {
+            HAL_LOG_INFO("OTA", "Proxy session COMPLETE — %u bytes forwarded to RP",
+                         (unsigned)bytesReceived_);
+            publishComplete("verified", nullptr);
+            resetSession();
+        }
         return;
     }
 
@@ -405,6 +463,129 @@ void OtaReceiver::markCurrentBootValid() {
     } else {
         HAL_LOG_ERROR("OTA", "esp_ota_mark_app_valid failed: %d", (int)err);
     }
+}
+
+// ─── UART proxy (target=rp2040) ─────────────────────────────────────────
+
+void OtaReceiver::handleOtaChunkAck(uint16_t chunkIdx, uint8_t status, uint32_t commandIdHash) {
+    // Дроп ack от чужой/устаревшей сессии: разные commandIdHash возможны
+    // при перезапуске сессии или ошибке backend.
+    if (!active_ || !targetRp_ || commandIdHash != commandIdHash_) {
+        HAL_LOG_DEBUG("OTA", "drop OtaChunkAck: active=%d rp=%d hash=%08x/%08x",
+                      (int)active_, (int)targetRp_,
+                      (unsigned)commandIdHash, (unsigned)commandIdHash_);
+        return;
+    }
+    ackChunkIdx_ = chunkIdx;
+    ackStatus_   = status;
+    ackReceived_ = true;
+}
+
+bool OtaReceiver::pushChunkToRp(uint16_t chunkIdx, const uint8_t* data, size_t len) {
+    if (!uart_) {
+        publishComplete("flash_failed", "uart bridge not available");
+        resetSession();
+        return false;
+    }
+    if (len > expectedChunkSize_) {
+        publishComplete("flash_failed", "chunk size exceeds announce");
+        resetSession();
+        return false;
+    }
+
+    // Заголовок логического OtaChunkForMcu (12 байт) + data (до 4 КБ).
+    UartOtaChunkForMcuPayload header{};
+    header.commandId   = commandIdHash_;
+    header.chunkIdx    = chunkIdx;
+    header.totalChunks = expectedChunks_;
+    header.dataLength  = (uint16_t)len;
+    header._pad        = 0;
+
+    constexpr size_t HDR = sizeof(UartOtaChunkForMcuPayload);
+    static_assert(HDR == 12, "OtaChunkForMcu header expected 12 bytes");
+    constexpr size_t MAX = UART_MAX_PAYLOAD;          // 200
+    constexpr size_t FIRST_DATA = MAX - HDR;          // 188
+
+    // Первый фрагмент: header + до 188 байт data.
+    size_t firstDataLen = (len > FIRST_DATA) ? FIRST_DATA : len;
+    bool isLast = (firstDataLen == len);
+
+    uint8_t firstFrame[MAX];
+    memcpy(firstFrame, &header, HDR);
+    if (firstDataLen > 0) memcpy(firstFrame + HDR, data, firstDataLen);
+
+    uint8_t flags = UART_FLAG_FRAGMENT;
+    if (isLast) flags |= UART_FLAG_LAST_FRAGMENT;
+
+    if (!uart_->sendOtaChunkForMcu(firstFrame, (uint8_t)(HDR + firstDataLen), flags)) {
+        publishComplete("flash_failed", "uart send (first fragment)");
+        resetSession();
+        return false;
+    }
+    delay(2);
+
+    // Последующие фрагменты: только продолжение data до 200 байт.
+    size_t offset = firstDataLen;
+    while (offset < len) {
+        size_t remaining = len - offset;
+        size_t take = (remaining > MAX) ? MAX : remaining;
+        bool last = (offset + take >= len);
+        flags = UART_FLAG_FRAGMENT;
+        if (last) flags |= UART_FLAG_LAST_FRAGMENT;
+        if (!uart_->sendOtaChunkForMcu(data + offset, (uint8_t)take, flags)) {
+            publishComplete("flash_failed", "uart send (fragment)");
+            resetSession();
+            return false;
+        }
+        offset += take;
+        delay(2);
+    }
+
+    // Ждём OtaChunkAck от RP — sync polling. Тайм-аут 2 секунды на chunk
+    // (115200 baud, ~4 КБ chunk ≈ 350 мс + RP flash-page write ≈ 50 мс).
+    ackReceived_ = false;
+    constexpr uint32_t ACK_TIMEOUT_MS = 2000;
+    uint32_t start = millis();
+    while (!ackReceived_ && (millis() - start) < ACK_TIMEOUT_MS) {
+        uart_->loop();
+        delay(1);
+    }
+    if (!ackReceived_) {
+        HAL_LOG_ERROR("OTA", "proxy chunk %u: UART ack timeout", chunkIdx);
+        publishComplete("flash_failed", "uart ack timeout");
+        resetSession();
+        return false;
+    }
+    if (ackChunkIdx_ != chunkIdx) {
+        HAL_LOG_ERROR("OTA", "proxy chunk %u: ack for wrong idx %u",
+                      chunkIdx, ackChunkIdx_);
+        publishComplete("flash_failed", "uart ack idx mismatch");
+        resetSession();
+        return false;
+    }
+    if (ackStatus_ != 0) {
+        const char* reason = "rp ack: unknown error";
+        switch (ackStatus_) {
+            case 1: reason = "rp ack: sha_mismatch"; break;
+            case 2: reason = "rp ack: flash_failed"; break;
+            case 3: reason = "rp ack: out_of_order"; break;
+        }
+        HAL_LOG_ERROR("OTA", "proxy chunk %u: %s", chunkIdx, reason);
+        publishComplete(ackStatus_ == 1 ? "sha_mismatch" : "flash_failed", reason);
+        resetSession();
+        return false;
+    }
+    return true;
+}
+
+uint32_t OtaReceiver::fnv1a32(const char* s) {
+    uint32_t h = 2166136261u;
+    if (!s) return h;
+    while (*s) {
+        h ^= (uint8_t)*s++;
+        h *= 16777619u;
+    }
+    return h;
 }
 
 bool OtaReceiver::parseChunkIdx(const char* topic, uint16_t& outIdx) {
