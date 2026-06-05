@@ -87,6 +87,12 @@ public:
     /// complete/abort.
     void resetSession();
 
+    /// Paired OTA Этап 5: продукт зовёт раз в loop, чтобы периодически
+    /// (раз в 2 секунды) посылать OtaStatus в RP. Без этого RP не узнает что
+    /// ESP-сторона готова к синхронному commit. Также позволяет RP видеть
+    /// текущий espTargetMajor (или 0 если ESP не в OTA-flow).
+    void tick(uint32_t nowMs);
+
     // ─── Handlers (public — для статических трамплинов из onCommand) ────
     void handleAnnounce(JsonObjectConst data);
     void handleChunk(const char* topic, const uint8_t* payload, size_t len);
@@ -140,6 +146,19 @@ private:
     bool ackReceived_ = false;
     uint16_t ackChunkIdx_ = 0;
     uint8_t ackStatus_ = 0;
+
+    // Paired OTA Этап 5 — ESP-сторона ожидает синхронного OtaCommitNow от RP.
+    // При target=esp на DRYER (uart_ != nullptr): после verify Update.end()
+    // вызывается сразу, но ESP.restart() НЕ вызывается; вместо этого ставим
+    // espVerifiedPending_=true. RP видит это через OtaStatus и шлёт
+    // OtaCommitNow когда оба чипа в idle.
+    bool espVerifiedPending_ = false;
+    uint8_t espTargetMajor_ = 0;
+    uint32_t lastStatusSentAt_ = 0;
+    static constexpr uint32_t STATUS_INTERVAL_MS = 2000;
+
+    // OtaCommitNow handler.
+    void handleOtaCommitNow();
 
     // UART-proxy helpers (target=rp2040).
     void handleOtaChunkAck(uint16_t chunkIdx, uint8_t status, uint32_t commandIdHash);

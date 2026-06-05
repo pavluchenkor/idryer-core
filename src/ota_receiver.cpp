@@ -82,6 +82,12 @@ bool OtaReceiver::begin(iDryer::Link* link, const char* productId,
             [](const UartOtaCheckRequestPayload& p, const UartFrameHeader&) {
                 OtaReceiver::instance().publishCheckUpdateForMcu(p.currentVersion);
             });
+        // Этап 5: RP→ESP синхронный commit (после idle-gate). ESP делает
+        // delay 200ms (на flush MQTT) + ESP.restart() в общем reboot-окне.
+        uart_->setOtaCommitNowHandler(
+            [](const UartOtaCommitNowPayload&, const UartFrameHeader&) {
+                OtaReceiver::instance().handleOtaCommitNow();
+            });
     }
 
     HAL_LOG_INFO("OTA", "Receiver registered (productId=%s, uart=%s, onCommand: announce=%d resp=%d)",
@@ -109,6 +115,8 @@ void OtaReceiver::resetSession() {
     ackReceived_ = false;
     ackChunkIdx_ = 0;
     ackStatus_ = 0;
+    // espVerifiedPending_/espTargetMajor_ НЕ сбрасываем здесь — они переживают
+    // resetSession и сбрасываются только при ESP.restart (то есть никогда).
 }
 
 // ─── Announce ────────────────────────────────────────────────────────────
@@ -317,14 +325,32 @@ void OtaReceiver::handleChunk(const char* topic, const uint8_t* payload, size_t 
             return;
         }
 
+        // Force-persist накопительный workTimeCounter в NVS до возможного
+        // ESP.restart() — иначе теряем до 5 мин секунд работы. Полезно сделать
+        // здесь даже в paired-flow: ребут произойдёт по OtaCommitNow позже.
+        WorkTimeTracker::instance().flush();
+
+        // Paired OTA Этап 5: на DRYER (uart_ != nullptr) target=esp НЕ
+        // перезагружает ESP сразу — ждёт OtaCommitNow от RP для синхронного
+        // reboot. До этого периодически шлём OtaStatus с espReady=1.
+        // На iHeater/Storage (uart_ == nullptr) — классический немедленный
+        // restart как раньше.
+        if (uart_) {
+            HAL_LOG_INFO("OTA", "Session COMPLETE — sha verified, %u bytes, awaiting OtaCommitNow from RP",
+                         (unsigned)bytesReceived_);
+            publishComplete("verified", nullptr);
+            // Парсим major из toVersion_ ("M.m.p" → M) для espTargetMajor.
+            espTargetMajor_ = (uint8_t)strtoul(toVersion_, nullptr, 10);
+            espVerifiedPending_ = true;
+            // Сессию не сбрасываем — state будет жить до OtaCommitNow.
+            // active_ = false чтобы новые chunks этой сессии не принимались.
+            active_ = false;
+            return;
+        }
+
         HAL_LOG_INFO("OTA", "Session COMPLETE — sha verified, %u bytes, restarting...",
                      (unsigned)bytesReceived_);
         publishComplete("verified", nullptr);
-
-        // Force-persist накопительный workTimeCounter в NVS до ESP.restart() —
-        // иначе теряем до 5 мин секунд работы (PERSIST_INTERVAL_MS). Сам
-        // ESP.restart НЕ graceful, дальше шансов нет.
-        WorkTimeTracker::instance().flush();
 
         // Дать PubSubClient момент протолкнуть publish в TCP перед restart.
         // На ESP32 PubSubClient sync publish — после возврата из publish
@@ -624,6 +650,29 @@ bool OtaReceiver::pushChunkToRp(uint16_t chunkIdx, const uint8_t* data, size_t l
         return false;
     }
     return true;
+}
+
+// ─── Paired OTA Stage 5: периодический OtaStatus + OtaCommitNow handler ─
+
+void OtaReceiver::tick(uint32_t nowMs) {
+    if (!uart_) return;
+    if (nowMs - lastStatusSentAt_ < STATUS_INTERVAL_MS) return;
+    lastStatusSentAt_ = nowMs;
+
+    UartOtaStatusPayload p{};
+    p.espReady = espVerifiedPending_ ? 1 : 0;
+    p.espTargetMajor = espVerifiedPending_ ? espTargetMajor_ : 0;
+    p._pad = 0;
+    uart_->sendOtaStatus(p);
+}
+
+void OtaReceiver::handleOtaCommitNow() {
+    HAL_LOG_INFO("OTA", "OtaCommitNow received → restart in 200ms");
+    // Update.end уже вызван при verify; ESP-партиция помечена как boot-target.
+    // Просто даём PubSubClient flush + ребут.
+    WorkTimeTracker::instance().flush();
+    delay(200);
+    ESP.restart();
 }
 
 uint32_t OtaReceiver::fnv1a32(const char* s) {
