@@ -275,6 +275,13 @@ void OtaReceiver::publishCheckUpdate(const char* currentVersion) {
     doc["currentVersion"] = currentVersion;
     doc["controllerType"] = "ESP32";
     doc["productId"]      = productId_;
+    // board — PlatformIO env (esp32c3-super-mini / xiao-esp32s3 / ...). Без
+    // этого backend не сможет отличить прошивку для esp32c3 от прошивки для
+    // xiao-esp32s3 (одна productId+controllerType+version, разные .bin).
+    // PIO_ENV прокидывается через build_flags=-DPIO_ENV=\\"$PIOENV\\".
+#ifdef PIO_ENV
+    doc["board"] = PIO_ENV;
+#endif
     // licenseSerial — Phase 8, пока не шлём.
     char ts[32];
     MqttClient::getIsoTimestamp(ts);
