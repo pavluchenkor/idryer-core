@@ -339,18 +339,6 @@ void OtaReceiver::handleChunk(const char* topic, const uint8_t* payload, size_t 
             return;
         }
 
-        if (!Update.end(/*evenIfRemaining=*/true)) {
-            HAL_LOG_ERROR("OTA", "Update.end failed: %s", Update.errorString());
-            publishComplete("flash_failed", Update.errorString());
-            resetSession();
-            return;
-        }
-
-        // Force-persist накопительный workTimeCounter в NVS до возможного
-        // ESP.restart() — иначе теряем до 5 мин секунд работы. Полезно сделать
-        // здесь даже в paired-flow: ребут произойдёт по OtaCommitNow позже.
-        WorkTimeTracker::instance().flush();
-
         // Paired OTA: ждать синхронного OtaCommitNow от RP нужно ТОЛЬКО при
         // major-bump на DRYER. Major = версия меню (EEPROM/NVS): при смене
         // major оба чипа обязаны перезагрузиться вместе. Minor/patch (тот же
@@ -360,15 +348,41 @@ void OtaReceiver::handleChunk(const char* topic, const uint8_t* payload, size_t 
         const bool pairedMajorBump =
             uart_ && selfMajor_ != 0 && targetMajor != selfMajor_;
 
+        // Force-persist накопительный workTimeCounter в NVS — иначе при
+        // ребуте (соло сейчас или paired по OtaCommitNow) теряем до 5 минут
+        // секунд работы.
+        WorkTimeTracker::instance().flush();
+
         if (pairedMajorBump) {
-            HAL_LOG_INFO("OTA", "Session COMPLETE — major-bump %u->%u, awaiting OtaCommitNow from RP",
+            // ВАЖНО: для paired НЕ зовём Update.end(true) здесь.
+            // Update.end() триггерит esp_ota_set_boot_partition — это и есть
+            // тот флаг, по которому bootloader выберет какой раздел грузить
+            // при следующем reset. Если выставить флаг сейчас, а ESP внезапно
+            // ребутнётся (power loss / watchdog) до прихода OtaCommitNow от
+            // RP — bootloader загрузит новую прошивку, пока RP остаётся на
+            // старой → рассинхрон major-версий и непредсказуемое поведение.
+            // Поэтому boot-флаг устанавливаем синхронно с RP, в обработчике
+            // OtaCommitNow. До этого момента: данные лежат в OTA-партиции,
+            // sha проверена, но boot-target по-прежнему старый раздел.
+            HAL_LOG_INFO("OTA", "Session COMPLETE — major-bump %u->%u, "
+                                "boot flag DEFERRED, awaiting OtaCommitNow from RP",
                          selfMajor_, targetMajor);
             publishComplete("verified", nullptr);
             espTargetMajor_ = targetMajor;
             espVerifiedPending_ = true;
-            // Сессию не сбрасываем — state живёт до OtaCommitNow.
+            // Сессию не сбрасываем — Update-state (партиция, размер) живёт
+            // до OtaCommitNow, где будет довызван Update.end(true).
             // active_ = false чтобы новые chunks этой сессии не принимались.
             active_ = false;
+            return;
+        }
+
+        // Solo (iHeater/Storage или minor-bump на DRYER): устанавливаем
+        // boot-флаг сразу и перезагружаемся.
+        if (!Update.end(/*evenIfRemaining=*/true)) {
+            HAL_LOG_ERROR("OTA", "Update.end failed: %s", Update.errorString());
+            publishComplete("flash_failed", Update.errorString());
+            resetSession();
             return;
         }
 
@@ -689,9 +703,27 @@ void OtaReceiver::tick(uint32_t nowMs) {
 }
 
 void OtaReceiver::handleOtaCommitNow() {
-    HAL_LOG_INFO("OTA", "OtaCommitNow received → restart in 200ms");
-    // Update.end уже вызван при verify; ESP-партиция помечена как boot-target.
-    // Просто даём PubSubClient flush + ребут.
+    HAL_LOG_INFO("OTA", "OtaCommitNow received");
+    if (!espVerifiedPending_) {
+        // Лишний OtaCommitNow без активного pending: либо retry от RP, либо
+        // RP запутался. ESP уже не помнит какая прошивка должна стать boot —
+        // безопасно игнорируем.
+        HAL_LOG_WARN("OTA", "OtaCommitNow ignored: no espVerifiedPending");
+        return;
+    }
+    // ВОТ ТЕПЕРЬ устанавливаем boot-флаг: Update.end(true) внутри зовёт
+    // esp_ota_set_boot_partition. До этого момента данные лежали в OTA-
+    // партиции, sha проверена, но bootloader продолжал выбирать старый
+    // раздел при любом reset. Теперь — переключаемся синхронно с RP.
+    if (!Update.end(/*evenIfRemaining=*/true)) {
+        HAL_LOG_ERROR("OTA", "Update.end on commit failed: %s — NOT rebooting",
+                      Update.errorString());
+        // Не делаем restart: иначе уйдём в loop старой прошивки + retry
+        // OtaCommitNow от RP. Лучше зависнуть в этом состоянии — admin
+        // получит timeout/missing-info и поймёт что что-то не так.
+        return;
+    }
+    HAL_LOG_INFO("OTA", "Boot partition set → restart in 200ms");
     WorkTimeTracker::instance().flush();
     delay(200);
     ESP.restart();
