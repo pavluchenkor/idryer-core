@@ -41,7 +41,7 @@ OtaReceiver::~OtaReceiver() {
 // ─── Lifecycle ───────────────────────────────────────────────────────────
 
 bool OtaReceiver::begin(iDryer::Link* link, const char* productId,
-                        UartBridge* uartBridge) {
+                        UartBridge* uartBridge, uint8_t selfMajor) {
     if (!link || !productId) {
         HAL_LOG_ERROR("OTA", "begin: null link or productId");
         return false;
@@ -50,6 +50,7 @@ bool OtaReceiver::begin(iDryer::Link* link, const char* productId,
     mqtt_ = link->mqttClient();
     productId_ = productId;
     uart_ = uartBridge;
+    selfMajor_ = selfMajor;
     if (!mqtt_) {
         HAL_LOG_ERROR("OTA", "begin: link->mqttClient() == null");
         return false;
@@ -245,6 +246,26 @@ void OtaReceiver::handleChunk(const char* topic, const uint8_t* payload, size_t 
         return;
     }
 
+    // Проверка commandId из топика — защита от «остаточных» chunks предыдущей
+    // прерванной сессии. Topic = .../firmware_update_chunk/{commandId}/{chunkIdx}.
+    // Последний '/' — перед chunkIdx, предпоследний — перед commandId.
+    {
+        const char* last = strrchr(topic, '/');
+        if (last && last > topic) {
+            const char* p = last - 1;
+            while (p > topic && *p != '/') --p;
+            if (*p == '/') {
+                const char* cmdStart = p + 1;
+                size_t cmdLen = (size_t)(last - cmdStart);
+                size_t curLen = strlen(commandId_);
+                if (cmdLen != curLen || strncmp(commandId_, cmdStart, cmdLen) != 0) {
+                    HAL_LOG_DEBUG("OTA", "chunk %u: stale commandId in topic, drop", chunkIdx);
+                    return;  // НЕ abort активной сессии — это просто шум от прошлой
+                }
+            }
+        }
+    }
+
     // Sequential ordering: ждём строго chunkIdx == chunksReceived_.
     // QoS 1 не гарантирует порядок при reconnect — backend шлёт строго после
     // ack progress на предыдущий, но дубликаты возможны. Дубликаты молча
@@ -330,25 +351,28 @@ void OtaReceiver::handleChunk(const char* topic, const uint8_t* payload, size_t 
         // здесь даже в paired-flow: ребут произойдёт по OtaCommitNow позже.
         WorkTimeTracker::instance().flush();
 
-        // Paired OTA Этап 5: на DRYER (uart_ != nullptr) target=esp НЕ
-        // перезагружает ESP сразу — ждёт OtaCommitNow от RP для синхронного
-        // reboot. До этого периодически шлём OtaStatus с espReady=1.
-        // На iHeater/Storage (uart_ == nullptr) — классический немедленный
-        // restart как раньше.
-        if (uart_) {
-            HAL_LOG_INFO("OTA", "Session COMPLETE — sha verified, %u bytes, awaiting OtaCommitNow from RP",
-                         (unsigned)bytesReceived_);
+        // Paired OTA: ждать синхронного OtaCommitNow от RP нужно ТОЛЬКО при
+        // major-bump на DRYER. Major = версия меню (EEPROM/NVS): при смене
+        // major оба чипа обязаны перезагрузиться вместе. Minor/patch (тот же
+        // major) меню-совместимы → ESP перезагружается соло, как одночиповый.
+        // На iHeater/Storage (uart_ == nullptr) или selfMajor_==0 — всегда solo.
+        const uint8_t targetMajor = (uint8_t)strtoul(toVersion_, nullptr, 10);
+        const bool pairedMajorBump =
+            uart_ && selfMajor_ != 0 && targetMajor != selfMajor_;
+
+        if (pairedMajorBump) {
+            HAL_LOG_INFO("OTA", "Session COMPLETE — major-bump %u->%u, awaiting OtaCommitNow from RP",
+                         selfMajor_, targetMajor);
             publishComplete("verified", nullptr);
-            // Парсим major из toVersion_ ("M.m.p" → M) для espTargetMajor.
-            espTargetMajor_ = (uint8_t)strtoul(toVersion_, nullptr, 10);
+            espTargetMajor_ = targetMajor;
             espVerifiedPending_ = true;
-            // Сессию не сбрасываем — state будет жить до OtaCommitNow.
+            // Сессию не сбрасываем — state живёт до OtaCommitNow.
             // active_ = false чтобы новые chunks этой сессии не принимались.
             active_ = false;
             return;
         }
 
-        HAL_LOG_INFO("OTA", "Session COMPLETE — sha verified, %u bytes, restarting...",
+        HAL_LOG_INFO("OTA", "Session COMPLETE — sha verified, %u bytes, restarting (solo)...",
                      (unsigned)bytesReceived_);
         publishComplete("verified", nullptr);
 
@@ -380,27 +404,11 @@ void OtaReceiver::handleCheckUpdateResponse(JsonObjectConst data) {
     // Устройство ничего не делает — announce прилетит обычным flow.
 }
 
-// ─── Pull-flow publish ──────────────────────────────────────────────────
-
-void OtaReceiver::publishCheckUpdate(const char* currentVersion) {
-    if (!mqtt_ || !productId_ || !currentVersion) return;
-    StaticJsonDocument<256> doc;
-    doc["currentVersion"] = currentVersion;
-    doc["controllerType"] = "ESP32";
-    doc["productId"]      = productId_;
-    // board — PlatformIO env (esp32c3-super-mini / xiao-esp32s3 / ...). Без
-    // этого backend не сможет отличить прошивку для esp32c3 от прошивки для
-    // xiao-esp32s3 (одна productId+controllerType+version, разные .bin).
-    // PIO_ENV прокидывается через build_flags=-DPIO_ENV=\\"$PIOENV\\".
-#ifdef PIO_ENV
-    doc["board"] = PIO_ENV;
-#endif
-    // licenseSerial — Phase 8, пока не шлём.
-    char ts[32];
-    MqttClient::getIsoTimestamp(ts);
-    doc["timestamp"] = ts;
-    mqtt_->publishFirmwareCheckUpdate(doc);
-}
+// ─── Pull-flow publish (self-healing only) ──────────────────────────────
+// Периодический device-pull (publishCheckUpdate) удалён 2026-06-06: раскатка
+// инициируется бэкендом (push-кампания + push-on-reconnect), устройство само
+// не опрашивает. Остаётся только publishCheckUpdateForMcu — его зовёт RP
+// self-healing (Этап 4) через OtaCheckRequest.
 
 void OtaReceiver::publishCheckUpdateForMcu(uint32_t mcuVersion) {
     if (!mqtt_ || !productId_) return;
@@ -581,75 +589,89 @@ bool OtaReceiver::pushChunkToRp(uint16_t chunkIdx, const uint8_t* data, size_t l
     constexpr size_t FIRST_DATA = MAX - HDR;          // 188
 
     // Первый фрагмент: header + до 188 байт data.
-    size_t firstDataLen = (len > FIRST_DATA) ? FIRST_DATA : len;
-    bool isLast = (firstDataLen == len);
+    const size_t firstDataLen = (len > FIRST_DATA) ? FIRST_DATA : len;
+    const bool firstIsLast = (firstDataLen == len);
 
     uint8_t firstFrame[MAX];
     memcpy(firstFrame, &header, HDR);
     if (firstDataLen > 0) memcpy(firstFrame + HDR, data, firstDataLen);
 
-    uint8_t flags = UART_FLAG_FRAGMENT;
-    if (isLast) flags |= UART_FLAG_LAST_FRAGMENT;
+    // Retry-loop: один битый/потерянный UART-фрагмент (CRC-дроп, overrun) делает
+    // chunk неполным. RP отвечает status=4 (retry), либо ack не приходит (timeout)
+    // — пересылаем ТОТ ЖЕ chunk целиком. Данные у нас в (data,len), backend не
+    // вовлечён. Дубликат уже принятого chunk RP ack'ает как ok (idempotency).
+    constexpr int      MAX_RETRIES   = 5;
+    constexpr uint32_t ACK_TIMEOUT_MS = 2000;  // 115200 baud, ~4КБ chunk ≈ 350мс + RP write
 
-    if (!uart_->sendOtaChunkForMcu(firstFrame, (uint8_t)(HDR + firstDataLen), flags)) {
-        publishComplete("flash_failed", "uart send (first fragment)");
-        resetSession();
-        return false;
-    }
-    delay(2);
+    for (int attempt = 0; attempt < MAX_RETRIES; ++attempt) {
+        // Первый фрагмент.
+        uint8_t flags = UART_FLAG_FRAGMENT;
+        if (firstIsLast) flags |= UART_FLAG_LAST_FRAGMENT;
+        if (!uart_->sendOtaChunkForMcu(firstFrame, (uint8_t)(HDR + firstDataLen), flags)) {
+            publishComplete("flash_failed", "uart send (first fragment)");
+            resetSession();
+            return false;
+        }
+        delay(2);
 
-    // Последующие фрагменты: только продолжение data до 200 байт.
-    size_t offset = firstDataLen;
-    while (offset < len) {
-        size_t remaining = len - offset;
-        size_t take = (remaining > MAX) ? MAX : remaining;
-        bool last = (offset + take >= len);
-        flags = UART_FLAG_FRAGMENT;
-        if (last) flags |= UART_FLAG_LAST_FRAGMENT;
-        if (!uart_->sendOtaChunkForMcu(data + offset, (uint8_t)take, flags)) {
+        // Последующие фрагменты: продолжение data до 200 байт.
+        size_t offset = firstDataLen;
+        bool sendOk = true;
+        while (offset < len) {
+            size_t take = (len - offset > MAX) ? MAX : (len - offset);
+            bool last = (offset + take >= len);
+            flags = UART_FLAG_FRAGMENT;
+            if (last) flags |= UART_FLAG_LAST_FRAGMENT;
+            if (!uart_->sendOtaChunkForMcu(data + offset, (uint8_t)take, flags)) {
+                sendOk = false;
+                break;
+            }
+            offset += take;
+            delay(2);
+        }
+        if (!sendOk) {
             publishComplete("flash_failed", "uart send (fragment)");
             resetSession();
             return false;
         }
-        offset += take;
-        delay(2);
-    }
 
-    // Ждём OtaChunkAck от RP — sync polling. Тайм-аут 2 секунды на chunk
-    // (115200 baud, ~4 КБ chunk ≈ 350 мс + RP flash-page write ≈ 50 мс).
-    ackReceived_ = false;
-    constexpr uint32_t ACK_TIMEOUT_MS = 2000;
-    uint32_t start = millis();
-    while (!ackReceived_ && (millis() - start) < ACK_TIMEOUT_MS) {
-        uart_->loop();
-        delay(1);
-    }
-    if (!ackReceived_) {
-        HAL_LOG_ERROR("OTA", "proxy chunk %u: UART ack timeout", chunkIdx);
-        publishComplete("flash_failed", "uart ack timeout");
-        resetSession();
-        return false;
-    }
-    if (ackChunkIdx_ != chunkIdx) {
-        HAL_LOG_ERROR("OTA", "proxy chunk %u: ack for wrong idx %u",
-                      chunkIdx, ackChunkIdx_);
-        publishComplete("flash_failed", "uart ack idx mismatch");
-        resetSession();
-        return false;
-    }
-    if (ackStatus_ != 0) {
-        const char* reason = "rp ack: unknown error";
-        switch (ackStatus_) {
-            case 1: reason = "rp ack: sha_mismatch"; break;
-            case 2: reason = "rp ack: flash_failed"; break;
-            case 3: reason = "rp ack: out_of_order"; break;
+        // Ждём OtaChunkAck от RP — sync polling.
+        ackReceived_ = false;
+        uint32_t start = millis();
+        while (!ackReceived_ && (millis() - start) < ACK_TIMEOUT_MS) {
+            uart_->loop();
+            delay(1);
         }
+
+        // Timeout или ack на чужой idx (устаревший) — пересылаем chunk.
+        if (!ackReceived_ || ackChunkIdx_ != chunkIdx) {
+            HAL_LOG_WARN("OTA", "proxy chunk %u: %s (attempt %d/%d)", chunkIdx,
+                         !ackReceived_ ? "ack timeout" : "ack wrong idx",
+                         attempt + 1, MAX_RETRIES);
+            continue;
+        }
+        if (ackStatus_ == 0) return true;          // принят
+        if (ackStatus_ == 4) {                      // RP просит retry (неполный chunk)
+            HAL_LOG_WARN("OTA", "proxy chunk %u: RP retry (attempt %d/%d)",
+                         chunkIdx, attempt + 1, MAX_RETRIES);
+            continue;
+        }
+        // 1=sha / 2=flash / 3=order — фатально, повтор не поможет.
+        const char* reason = (ackStatus_ == 1) ? "rp ack: sha_mismatch"
+                           : (ackStatus_ == 2) ? "rp ack: flash_failed"
+                           : (ackStatus_ == 3) ? "rp ack: out_of_order"
+                                               : "rp ack: unknown error";
         HAL_LOG_ERROR("OTA", "proxy chunk %u: %s", chunkIdx, reason);
         publishComplete(ackStatus_ == 1 ? "sha_mismatch" : "flash_failed", reason);
         resetSession();
         return false;
     }
-    return true;
+
+    // Исчерпали попытки.
+    HAL_LOG_ERROR("OTA", "proxy chunk %u: max retries (%d) exceeded", chunkIdx, MAX_RETRIES);
+    publishComplete("flash_failed", "uart chunk max retries");
+    resetSession();
+    return false;
 }
 
 // ─── Paired OTA Stage 5: периодический OtaStatus + OtaCommitNow handler ─
