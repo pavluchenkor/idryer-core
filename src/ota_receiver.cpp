@@ -437,14 +437,31 @@ void OtaReceiver::publishCheckUpdateForMcu(uint32_t mcuVersion) {
     doc["currentVersion"] = verStr;
     doc["controllerType"] = "RP2040";
     doc["productId"]      = productId_;
-    // board для RP2040 ESP не знает (две сборки pico_0x44/0x45 не различимы из
-    // UART Hello). Backend разрешит выбор по productId+controllerType+version;
-    // при необходимости board будет добавлен отдельным запросом.
+
+    // board выпарсивается из mcuHardwareVersion (Hello.hardwareVersion).
+    // Формат строки от RP: "rp2040-vN-XX", где XX — суффикс адреса SHT31
+    // (44 или 45 — то что в портале хранится как board="0x44"/"0x45").
+    // Старые прошивки шлют "rp2040-v1" без суффикса — в этом случае поле
+    // board не отправляется, backend выбирает по productId+controllerType+
+    // version (поведение как раньше).
+    const char* hw = link_ ? link_->mcuHardwareVersion() : nullptr;
+    if (hw && hw[0]) {
+        const char* dash = strrchr(hw, '-');
+        // Проверка: суффикс из 2 цифр после последнего '-' и без последующих символов.
+        if (dash && dash[1] >= '0' && dash[1] <= '9' &&
+            dash[2] >= '0' && dash[2] <= '9' && dash[3] == '\0') {
+            char board[8];
+            snprintf(board, sizeof(board), "0x%c%c", dash[1], dash[2]);
+            doc["board"] = board;
+        }
+    }
+
     char ts[32];
     MqttClient::getIsoTimestamp(ts);
     doc["timestamp"] = ts;
     mqtt_->publishFirmwareCheckUpdate(doc);
-    HAL_LOG_INFO("OTA", "Published check_update for MCU v=%s (RP2040)", verStr);
+    HAL_LOG_INFO("OTA", "Published check_update for MCU v=%s (RP2040, hw=%s)",
+                 verStr, hw ? hw : "?");
 }
 
 // ─── Publish helpers ────────────────────────────────────────────────────

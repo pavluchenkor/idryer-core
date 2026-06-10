@@ -92,6 +92,10 @@ public:
         if (mcuFw && mcuFw[0] != '\0') {
             doc["mcuFirmwareVersion"] = mcuFw;
         }
+        const char* mcuHw = cloud_ ? cloud_->getMcuHardwareVersion() : nullptr;
+        if (mcuHw && mcuHw[0] != '\0') {
+            doc["mcuHardwareVersion"] = mcuHw;
+        }
         doc["deviceType"] = deviceTypeString(cfg_.deviceType);
         if (cfg_.model && cfg_.model[0] != '\0') {
             doc["model"] = cfg_.model;
@@ -928,8 +932,16 @@ void Link::setMcuFirmwareVersion(uint32_t fwVersion) {
     impl_->cloud.setMcuFirmwareVersion(fwVersion);
 }
 
+void Link::setMcuHardwareVersion(const char* hwVersion) {
+    impl_->cloud.setMcuHardwareVersion(hwVersion);
+}
+
 const char* Link::mcuSerial() const {
     return impl_->cloud.getMcuSerial();
+}
+
+const char* Link::mcuHardwareVersion() const {
+    return impl_->cloud.getMcuHardwareVersion();
 }
 
 const char* Link::mqttKey() const {

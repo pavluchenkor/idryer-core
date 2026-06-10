@@ -208,8 +208,18 @@ public:
     /// Decoded as MAJOR.MINOR.PATCH and included in info JSON as mcuFirmwareVersion.
     void setMcuFirmwareVersion(uint32_t fwVersion);
 
+    /// Pass the RP2040 hardware id from UART Hello.hardwareVersion (string).
+    /// Included in info JSON as mcuHardwareVersion.
+    void setMcuHardwareVersion(const char* hwVersion);
+
     /// Returns the mcuSerial received from RP2040 Hello, or nullptr if not set.
     const char* mcuSerial() const;
+
+    /// Returns the mcuHardwareVersion received from RP2040 Hello (см. setMcuHardwareVersion),
+    /// или nullptr если не задано. Формат — то что прошивка RP передала в
+    /// UartHelloPayload.hardwareVersion (например "rp2040-v1-44"). Используется
+    /// OtaReceiver для выяснения board при publishCheckUpdateForMcu.
+    const char* mcuHardwareVersion() const;
 
     /// Returns the active MQTT key (linkSerial before bind, mcuSerial after).
     const char* mqttKey() const;
