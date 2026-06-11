@@ -214,7 +214,7 @@ rules:
   mqtt_session: "clean_session=false; keepalive=60s"
   publish_qos: "Все device→backend publish — QoS 0 (MQTT-клиент прошивки не задаёт publish-QoS). Subscribe (commands/*) — QoS 1. LWT (offline) — broker-side."
   uart_baud: 115200
-  uart_protocol_version: 1
+  uart_protocol_version: 2  # v2 (2026-06-07): hardwareVersion char[8]→char[16] для читаемых HW-идентификаторов (rp2040-v1, stm32f103-v1)
   uart_max_payload_bytes: 200
   uart_max_retries: 3
   uart_cmd_timeout_ms: 700
@@ -769,7 +769,7 @@ payloads:
       firmwareVersion:
         { type: uint32, encoding: "MAJOR<<16 | MINOR<<8 | PATCH" }
       workTimeCounter: { type: uint32, unit: "seconds" }
-      hardwareVersion: { type: "char[8]" }
+      hardwareVersion: { type: "char[16]", note: "HW-идентификатор контроллера (rp2040-v1, stm32f103-v1). v2: расширено с char[8]." }
       unitsCount:
         {
           type: uint8,
@@ -1136,7 +1136,7 @@ payloads:
     fields:
       commandId:  { type: uint32 }
       chunkIdx:   { type: uint16 }
-      status:     { type: uint8,  note: "0=ok, 1=sha_mismatch, 2=flash_failed, 3=out_of_order" }
+      status:     { type: uint8,  note: "0=ok, 1=sha_mismatch, 2=flash_failed, 3=out_of_order, 4=retry (chunk пришёл неполным/битым — ESP шлёт тот же chunk заново)" }
       _pad:       { type: uint8,  note: "padding до 8 байт" }
 
   OtaCommitNow:
@@ -1211,9 +1211,14 @@ messages:
               type: string
               optional: true
               note: "Версия прошивки iDryerControllerV2 контроллера. Декодируется из UART Hello.firmwareVersion (uint32 MAJOR<<16|MINOR<<8|PATCH). Отсутствует для ОдинЧип устройств."
+            mcuHardwareVersion:
+              type: string
+              optional: true
+              note: "HW-идентификатор контроллера (RP2040/STM32). Из UART Hello.hardwareVersion. Отсутствует для ОдинЧип устройств и для legacy-прошивок Link до 2026-06-07."
             hardwareVersion:
               type: string
               required: true
+              note: "HW-идентификатор Link-платы (esp32c3-super-mini / waveshare / ...). На ДваЧип — железо ESP32-моста, НЕ контроллера (тот в mcuHardwareVersion)."
             deviceType:
               type: string
               required: true

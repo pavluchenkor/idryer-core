@@ -31,6 +31,7 @@ CloudStateMachine::CloudStateMachine(IWifiManager* wifi, ICredentialStore* store
     pendingPin_[0]         = '\0';
     mcuSerial_[0]          = '\0';
     mcuFirmwareVersion_[0] = '\0';
+    mcuHardwareVersion_[0] = '\0';
     mqttKey_[0]            = '\0';
 }
 
@@ -382,6 +383,16 @@ void CloudStateMachine::setMcuFirmwareVersion(uint32_t fwVersion) {
 
 const char* CloudStateMachine::getMcuFirmwareVersion() const {
     return (mcuFirmwareVersion_[0] != '\0') ? mcuFirmwareVersion_ : nullptr;
+}
+
+void CloudStateMachine::setMcuHardwareVersion(const char* hwVersion) {
+    if (!hwVersion) { mcuHardwareVersion_[0] = '\0'; return; }
+    strncpy(mcuHardwareVersion_, hwVersion, sizeof(mcuHardwareVersion_) - 1);
+    mcuHardwareVersion_[sizeof(mcuHardwareVersion_) - 1] = '\0';
+}
+
+const char* CloudStateMachine::getMcuHardwareVersion() const {
+    return (mcuHardwareVersion_[0] != '\0') ? mcuHardwareVersion_ : nullptr;
 }
 
 const char* CloudStateMachine::getMqttKey() const {

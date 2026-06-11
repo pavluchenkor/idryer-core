@@ -132,6 +132,13 @@ public:
     /// Returns the RP2040 firmware version string, or nullptr if not set.
     const char* getMcuFirmwareVersion() const;
 
+    /// Stores the RP2040 hardware id from UART Hello.hardwareVersion
+    /// (e.g. "rp2040-v1"). Copied as-is (already a string).
+    void setMcuHardwareVersion(const char* hwVersion);
+
+    /// Returns the RP2040 hardware id, or nullptr if not set.
+    const char* getMcuHardwareVersion() const;
+
     /// Returns the active MQTT key (linkSerial before bind, mcuSerial after).
     const char* getMqttKey() const;
 
@@ -210,6 +217,7 @@ private:
 
     char mcuSerial_[IDRYER_MAX_SERIAL_NUMBER_LEN];
     char mcuFirmwareVersion_[12]; // "255.255.255\0"
+    char mcuHardwareVersion_[16]; // Hello.hardwareVersion (char[16])
     char mqttKey_[IDRYER_MAX_SERIAL_NUMBER_LEN];
 
     char     pendingPin_[IDRYER_MAX_PIN_LEN];

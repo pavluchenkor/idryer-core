@@ -59,15 +59,14 @@ public:
     ///                    уже инициализированный UartBridge, через который
     ///                    проксируются chunks при target=rp2040. Если nullptr —
     ///                    target=rp2040 отклоняется как unsupported.
+    /// @param selfMajor   major текущей прошивки этого чипа (VERSION_MAJOR).
+    ///                    Используется для solo/paired-решения при target=esp на
+    ///                    DRYER: если target-major == selfMajor (minor/patch) —
+    ///                    ESP перезагружается соло; иначе (major-bump) ждёт
+    ///                    OtaCommitNow от RP. 0 = не задан → всегда solo.
     /// @return true если все callbacks зарегистрировались.
     bool begin(iDryer::Link* link, const char* productId,
-               UartBridge* uartBridge = nullptr);
-
-    /// Pull-flow: устройство периодически (раз в N часов) шлёт backend
-    /// текущую версию и спрашивает о новой. Продукт зовёт сам из своего
-    /// таймера / schedule. См. dispatch backend events/firmware_check_update.
-    /// @param currentVersion semver текущей прошивки.
-    void publishCheckUpdate(const char* currentVersion);
+               UartBridge* uartBridge = nullptr, uint8_t selfMajor = 0);
 
     /// Paired OTA Этап 4: ESP публикует firmware_check_update от имени RP
     /// (controllerType=RP2040). Вызывается из обработчика OtaCheckRequest
@@ -126,6 +125,7 @@ private:
     MqttClient* mqtt_ = nullptr;
     const char* productId_ = nullptr;
     UartBridge* uart_ = nullptr;  // ESP-сторона DRYER: проксирование target=rp2040
+    uint8_t selfMajor_ = 0;       // VERSION_MAJOR текущей прошивки (solo vs paired)
 
     // Active session state. Не trivially destructible (mbedtls_sha256_context
     // нужно free'ить). resetSession() обнуляет и зовёт mbedtls_sha256_free.
