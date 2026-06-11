@@ -6,7 +6,7 @@
 
 namespace idryer {
 
-constexpr uint16_t CONFIG_BUFFER_SIZE = 16384;
+constexpr uint16_t CONFIG_BUFFER_SIZE = 8192;
 
 /**
  * @brief Result codes returned by @c ConfigReceiver::processFragment().
@@ -102,6 +102,17 @@ public:
     bool        isActive()   const { return active_; }
 
     uint16_t    transferId() const { return transferId_; }
+
+    /// @brief Returns @c true if this transfer is a delta (partial update).
+    /// Routing rule per mqtt_contract.yaml messages[config_delta].uart.notes:
+    /// "На UART delta едет тем же ConfigPush kind; различение — по shape JSON
+    /// внутри." Full config carries "full":true (see config_full.shape_full),
+    /// delta carries "rev" without "full". Buffer is null-terminated after
+    /// ConfigFragResult::Complete, so strstr is safe at that point.
+    bool        isDelta() const {
+        if (receivedSize_ == 0) return false;
+        return strstr(reinterpret_cast<const char*>(buffer_), "\"full\"") == nullptr;
+    }
 
 private:
     uint8_t  buffer_[CONFIG_BUFFER_SIZE]{};

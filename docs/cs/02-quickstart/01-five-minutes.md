@@ -1,4 +1,11 @@
-# Začněte za 5 minut
+---
+title: "Spustit zařízení idryer-core za 5 minut"
+description: "Rychlý start pro vývojáře: sestavit minimální ESP32 zařízení s idryer-core, připojit Wi-Fi a MQTT a ověřit příkazy."
+---
+
+# Spustit zařízení idryer-core za 5 minut
+
+Tato stránka pomáhá rychle ověřit, že zařízení ESP32 startuje s `idryer-core`, připojí se k síti a vyměňuje data. Použijte ji jako první technický test před vývojem sušičky, vyhřívané komory, osvětlení nebo jiného modulu.
 
 Po této stránce bude váš ESP32 nahrán, připojí se k WiFi a zobrazí se na [portal.idryer.org](https://portal.idryer.org/) se stavem Online. Požadavky: ESP32-C3 (DevKit, Super Mini nebo kompatibilní), USB kabel, PlatformIO ve VS Code.
 

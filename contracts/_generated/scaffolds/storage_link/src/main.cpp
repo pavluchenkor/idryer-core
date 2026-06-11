@@ -1,6 +1,6 @@
 // ============================================================================
 // SCAFFOLD: storage_link
-// Generated 2026-05-19 by contracts/gen_scaffold.py from mqtt_contract.yaml
+// Generated 2026-06-07 by contracts/gen_scaffold.py from mqtt_contract.yaml
 //
 // HOW TO START:
 //   1. Copy this directory to your PlatformIO project root.
@@ -9,7 +9,7 @@
 //   4. Run: pio run -e storage_link-prod
 //   5. Flash, connect Improv (or use hardcoded SSID), claim on portal.idryer.org.
 //
-// Capabilities: led, weight, rfid
+// Capabilities: led, air_temp, air_humidity
 // ============================================================================
 
 #include <Arduino.h>
@@ -26,10 +26,13 @@ static const idryer::Config CFG = {
     .unitsCount        = 1,
     // Peripheral capabilities:
     .hasLed                 = true,   // Адресная LED-лента
-    .hasScales              = true,   // Весовой датчик (граммы филамента)
-    .hasRfid                = true,   // RFID-ридер метки катушки
-    .hasHeaterPower         = false,  // (not in this profile)
-    .hasFanStatus           = false,  // (not in this profile)
+    .hasAirTemp             = true,   // Датчик температуры воздуха (SHT/DHT)
+    .hasAirHumidity         = true,   // Датчик влажности воздуха
+    .hasHeater              = false,  // (not in this profile)
+    .hasFan                 = false,  // (not in this profile)
+    .hasWeight              = false,  // (not in this profile)
+    .hasRfid                = false,  // (not in this profile)
+    .hasHeaterTemp          = false,  // (not in this profile)
     // Basic air sensors (set true if your hardware has them):
     .hasAirTemp        = false,  // TODO: SHT31, DHT22, etc.
     .hasAirHumidity    = false,
@@ -90,8 +93,8 @@ public:
         doc["hardwareVersion"] = CFG.hardwareVersion;
         JsonObject caps = doc.createNestedObject("capabilities");
         caps["led"] = true;
-        caps["weight"] = true;
-        caps["rfid"] = true;
+        caps["air_temp"] = true;
+        caps["air_humidity"] = true;
         char ts[32];
         idryer::MqttClient::getIsoTimestamp(ts);
         doc["timestamp"] = ts;

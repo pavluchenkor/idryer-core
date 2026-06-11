@@ -180,7 +180,7 @@ void MoonrakerClient::onWebSocketEvent(WStype_t type, uint8_t* payload, size_t l
         // на последнем известном target пока коннект не восстановится.
         bool wasActive = status_.virtualChamberAvailable
                       || status_.chamberTarget != 0.0f
-                      || status_.chamberTemperature != 0.0f;
+                      || status_.chamberHasSensor;
         status_ = MoonrakerStatus{};
         if (wasActive) {
             if (vcCallback_) {

@@ -3,6 +3,7 @@
 #include "cloud_state_machine.h"
 #include <stdio.h>
 #include <stdlib.h>
+#include "esp_heap_caps.h"
 
 namespace idryer {
 namespace cloud {
@@ -27,7 +28,11 @@ CloudStateMachine::CloudStateMachine(IWifiManager* wifi, ICredentialStore* store
                                      const CloudConfig& config)
     : wifi_(wifi), store_(store), api_(api), mqtt_(mqtt), config_(config)
 {
-    pendingPin_[0] = '\0';
+    pendingPin_[0]         = '\0';
+    mcuSerial_[0]          = '\0';
+    mcuFirmwareVersion_[0] = '\0';
+    mcuHardwareVersion_[0] = '\0';
+    mqttKey_[0]            = '\0';
 }
 
 void CloudStateMachine::begin() {
@@ -86,7 +91,10 @@ void CloudStateMachine::handleWifiConnecting() {
 
 void CloudStateMachine::handleWaitingForMcuSerial() {
     if (!wifi_->isConnected()) { setState(CloudState::WifiConnecting); return; }
-    // Waiting for setMcuSerial() call
+    if (serialVerified_) {
+        lastProvisionAttempt_ = HAL_MILLIS() - config_.provisionRetryMs;
+        setState(CloudState::Provisioning);
+    }
 }
 
 void CloudStateMachine::handleProvisioning() {
@@ -140,6 +148,7 @@ void CloudStateMachine::handleAwaitingClaim() {
     if (now - lastClaimPoll_ < config_.claimPollIntervalMs) return;
     lastClaimPoll_ = now;
 
+    emitDiagnostic("claim: checking backend");
     ClaimCheckResult result = api_->checkClaim(identity_.token);
     if (!result.success || !result.claimed) return;
 
@@ -148,6 +157,7 @@ void CloudStateMachine::handleAwaitingClaim() {
     awaitingClaim_ = false;
 
     HAL_LOG_INFO("CLOUD", "Device claimed! deviceId=%s", identity_.deviceId);
+    emitDiagnostic2("claim: backend confirmed deviceId=", identity_.deviceId);
     if (claimCompleteCallback_) claimCompleteCallback_(identity_.deviceId, claimCompleteCtx_);
     setState(CloudState::Ready);
 }
@@ -169,9 +179,15 @@ void CloudStateMachine::handleMqttConnecting() {
     HAL_LOG_INFO("CLOUD", "Connecting to MQTT...");
 
     if (!mqttInitialized_) {
-        mqtt_->begin(identity_.serialNumber, identity_.token);
+        const char* key = (mqttKey_[0] != '\0') ? mqttKey_ : identity_.serialNumber;
+        mqtt_->begin(key, identity_.token);
         mqttInitialized_ = true;
     }
+    // Диагностика heap перед mbedtls handshake — включать при подозрениях на
+    // фрагментацию .bss, ломающую TLS.
+    // HAL_LOG_INFO("CLOUD", "heap before MQTT connect: free=%u largest=%u",
+    //              (unsigned)heap_caps_get_free_size(MALLOC_CAP_DEFAULT),
+    //              (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_DEFAULT));
     mqtt_->connect();
 }
 
@@ -182,16 +198,51 @@ void CloudStateMachine::handleOnline() {
 }
 
 bool CloudStateMachine::requestClaim() {
-    if (identity_.hasDeviceId()) { HAL_LOG_WARN("CLOUD", "Already claimed: %s", identity_.deviceId); return false; }
-    if (!wifi_->isConnected()) { HAL_LOG_ERROR("CLOUD", "WiFi not connected"); return false; }
+    idryer::ClaimRequestResult result = requestClaimDetailed();
+    return result == idryer::ClaimRequestResult::Started ||
+           result == idryer::ClaimRequestResult::AlreadyClaimed;
+}
+
+idryer::ClaimRequestResult CloudStateMachine::requestClaimDetailed() {
+    if (identity_.hasDeviceId()) {
+        HAL_LOG_WARN("CLOUD", "Local NVS has deviceId=%s, checking backend claim state...", identity_.deviceId);
+        emitDiagnostic2("claim: local NVS has deviceId=", identity_.deviceId);
+        emitDiagnostic("claim: checking backend");
+        if (!identity_.hasToken()) {
+            HAL_LOG_WARN("CLOUD", "Stale claim NVS: deviceId exists but token is missing");
+            emitDiagnostic("claim: stale NVS, token is missing");
+            return idryer::ClaimRequestResult::StaleNvs;
+        }
+
+        ClaimCheckResult claim = api_->checkClaim(identity_.token);
+        if (claim.success && claim.claimed) {
+            if (claim.deviceId[0] != '\0' && strcmp(claim.deviceId, identity_.deviceId) != 0) {
+                identity_.setDeviceId(claim.deviceId);
+                store_->save(identity_);
+            }
+            HAL_LOG_INFO("CLOUD", "Backend confirms claim: deviceId=%s", identity_.deviceId);
+            emitDiagnostic2("claim: backend confirmed deviceId=", identity_.deviceId);
+            return idryer::ClaimRequestResult::AlreadyClaimed;
+        }
+
+        HAL_LOG_WARN("CLOUD", "Stale claim NVS: backend did not confirm deviceId=%s", identity_.deviceId);
+        emitDiagnostic2("claim: stale NVS, backend did not confirm deviceId=", identity_.deviceId);
+        return idryer::ClaimRequestResult::StaleNvs;
+    }
+
+    if (!wifi_->isConnected()) { HAL_LOG_ERROR("CLOUD", "WiFi not connected"); return idryer::ClaimRequestResult::WifiNotConnected; }
+    if (config_.waitForMcuSerial && !serialVerified_) {
+        HAL_LOG_WARN("CLOUD", "Claim rejected: waiting for MCU serial");
+        return idryer::ClaimRequestResult::WaitingForMcuSerial;
+    }
 
     if (!identity_.hasToken()) {
         HAL_LOG_INFO("CLOUD", "No token, doing provision first...");
         ProvisionResult provResult = api_->provision(identity_.serialNumber);
-        if (!provResult.success) { HAL_LOG_ERROR("CLOUD", "Provision failed"); return false; }
+        if (!provResult.success) { HAL_LOG_ERROR("CLOUD", "Provision failed"); return idryer::ClaimRequestResult::ProvisionFailed; }
         if (provResult.isClaimed && provResult.token[0] == '\0') {
             HAL_LOG_WARN("CLOUD", "Serial claimed but token withheld. Delete device in app first.");
-            return false;
+            return idryer::ClaimRequestResult::TokenWithheld;
         }
         identity_.setToken(provResult.token);
         store_->save(identity_);
@@ -199,7 +250,7 @@ bool CloudStateMachine::requestClaim() {
             identity_.setDeviceId(provResult.deviceId);
             store_->save(identity_);
             HAL_LOG_INFO("CLOUD", "Already claimed: %s", identity_.deviceId);
-            return true;
+            return idryer::ClaimRequestResult::AlreadyClaimed;
         }
     }
 
@@ -210,19 +261,20 @@ bool CloudStateMachine::requestClaim() {
             uint32_t remaining  = (elapsedSec < pinTotalSeconds_) ? (pinTotalSeconds_ - elapsedSec) : 0;
             claimPinCallback_(pendingPin_, remaining, claimPinCtx_);
         }
-        return true;
+        return idryer::ClaimRequestResult::Started;
     }
 
     HAL_LOG_INFO("CLOUD", "Registering device for claim...");
+    emitDiagnostic("claim: requesting PIN from backend");
     RegisterResult regResult = api_->registerDevice(identity_.token, identity_.serialNumber);
-    if (!regResult.success) { HAL_LOG_ERROR("CLOUD", "Register failed"); return false; }
+    if (!regResult.success) { HAL_LOG_ERROR("CLOUD", "Register failed"); return idryer::ClaimRequestResult::RegisterFailed; }
 
     if (regResult.alreadyClaimed && regResult.deviceId[0] != '\0') {
         HAL_LOG_INFO("CLOUD", "Recovery: device already claimed, deviceId=%s", regResult.deviceId);
         identity_.setDeviceId(regResult.deviceId);
         store_->save(identity_);
         setState(CloudState::Ready);
-        return true;
+        return idryer::ClaimRequestResult::AlreadyClaimed;
     }
 
     strncpy(pendingPin_, regResult.pin, sizeof(pendingPin_) - 1);
@@ -233,33 +285,118 @@ bool CloudStateMachine::requestClaim() {
     lastClaimPoll_ = HAL_MILLIS() - config_.claimPollIntervalMs;
 
     HAL_LOG_INFO("CLOUD", "PIN: %s (expires in %us)", pendingPin_, regResult.remainingSeconds);
+    emitDiagnostic2("claim: PIN received pin=", pendingPin_);
     if (claimPinCallback_) claimPinCallback_(pendingPin_, regResult.remainingSeconds, claimPinCtx_);
 
     setState(CloudState::AwaitingClaim);
+    return idryer::ClaimRequestResult::Started;
+}
+
+idryer::McuSerialResult CloudStateMachine::setMcuSerial(const char* mcuSerial) {
+    if (!mcuSerial || mcuSerial[0] == '\0') {
+        return idryer::McuSerialResult::Ignored;
+    }
+
+    if (!identity_.hasBoundMqttKey()) {
+        // First bind: no prior bound key — accept and use linkSerial as mqttKey
+        strncpy(mcuSerial_, mcuSerial, sizeof(mcuSerial_) - 1);
+        mcuSerial_[sizeof(mcuSerial_) - 1] = '\0';
+        strncpy(mqttKey_, identity_.serialNumber, sizeof(mqttKey_) - 1);
+        mqttKey_[sizeof(mqttKey_) - 1] = '\0';
+        bindSwitchPending_ = true;
+        serialVerified_ = true;
+        HAL_LOG_INFO("CLOUD", "mcuSerial accepted (first bind): linkSerial=%s mcuSerial=%s",
+                     identity_.serialNumber, mcuSerial_);
+        if (state_ == CloudState::WaitingForMcuSerial) {
+            lastProvisionAttempt_ = HAL_MILLIS() - config_.provisionRetryMs;
+            setState(CloudState::Provisioning);
+        }
+        return idryer::McuSerialResult::AcceptedFirstBind;
+    }
+
+    if (strcmp(identity_.boundMqttKey, mcuSerial) == 0) {
+        // Already bound: same RP2040 — use boundMqttKey as mqttKey
+        strncpy(mcuSerial_, mcuSerial, sizeof(mcuSerial_) - 1);
+        mcuSerial_[sizeof(mcuSerial_) - 1] = '\0';
+        strncpy(mqttKey_, identity_.boundMqttKey, sizeof(mqttKey_) - 1);
+        mqttKey_[sizeof(mqttKey_) - 1] = '\0';
+        bindSwitchPending_ = false;
+        serialVerified_ = true;
+        HAL_LOG_INFO("CLOUD", "mcuSerial accepted (already bound): mqttKey=%s", mqttKey_);
+        if (state_ == CloudState::WaitingForMcuSerial) {
+            lastProvisionAttempt_ = HAL_MILLIS() - config_.provisionRetryMs;
+            setState(CloudState::Provisioning);
+        }
+        return idryer::McuSerialResult::AcceptedBound;
+    }
+
+    HAL_LOG_WARN("CLOUD", "mcuSerial MISMATCH: bound=%s uart=%s",
+                 identity_.boundMqttKey, mcuSerial);
+    return idryer::McuSerialResult::Mismatch;
+}
+
+bool CloudStateMachine::handleBindAck(const char* mqttTopicKey, const char* mcuSerial) {
+    if (!mqttTopicKey || !mcuSerial) return false;
+
+    // One-ID: mqttTopicKey matches linkSerial — no MQTT switch needed
+    if (strcmp(mqttTopicKey, identity_.serialNumber) == 0) {
+        HAL_LOG_INFO("CLOUD", "bind_ack accepted (one-ID): topic unchanged");
+        bindSwitchPending_ = false;
+        return true;
+    }
+
+    // Two-chip: verify against mcuSerial_ we received in UART Hello
+    if (mcuSerial_[0] == '\0' ||
+        strcmp(mqttTopicKey, mcuSerial_) != 0 ||
+        strcmp(mcuSerial,    mcuSerial_) != 0) {
+        HAL_LOG_WARN("CLOUD", "bind_ack rejected: expected=%s got mqttTopicKey=%s mcuSerial=%s",
+                     mcuSerial_, mqttTopicKey, mcuSerial);
+        return false;
+    }
+
+    // Save boundMqttKey to NVS and switch MQTT identity
+    identity_.setBoundMqttKey(mqttTopicKey);
+    store_->save(identity_);
+
+    strncpy(mqttKey_, mqttTopicKey, sizeof(mqttKey_) - 1);
+    mqttKey_[sizeof(mqttKey_) - 1] = '\0';
+    bindSwitchPending_ = false;
+
+    HAL_LOG_INFO("CLOUD", "bind_ack accepted: switching MQTT to mqttKey=%s", mqttKey_);
+
+    if (mqtt_->isConnected()) mqtt_->disconnect();
+    mqttInitialized_ = false;
+    setState(CloudState::MqttConnecting);
     return true;
 }
 
-void CloudStateMachine::setMcuSerial(const char* mcuSerial) {
-    if (!mcuSerial || mcuSerial[0] == '\0') return;
-    if (serialVerified_ && strcmp(identity_.serialNumber, mcuSerial) == 0) return;
+const char* CloudStateMachine::getMcuSerial() const {
+    return (mcuSerial_[0] != '\0') ? mcuSerial_ : nullptr;
+}
 
-    if (identity_.hasSerialNumber() && strcmp(identity_.serialNumber, mcuSerial) != 0) {
-        HAL_LOG_WARN("CLOUD", "MCU serial MISMATCH: NVS=%s UART=%s", identity_.serialNumber, mcuSerial);
-        serialVerified_ = false;
-        if (mqtt_->isConnected()) { mqtt_->disconnect(); mqttInitialized_ = false; }
-        if (unclaimedCallback_) unclaimedCallback_(unclaimedCtx_);
-        return;
-    }
+void CloudStateMachine::setMcuFirmwareVersion(uint32_t fwVersion) {
+    snprintf(mcuFirmwareVersion_, sizeof(mcuFirmwareVersion_), "%u.%u.%u",
+             (fwVersion >> 16) & 0xFF,
+             (fwVersion >> 8)  & 0xFF,
+             fwVersion         & 0xFF);
+}
 
-    identity_.setSerialNumber(mcuSerial);
-    serialVerified_ = true;
-    store_->save(identity_);
-    HAL_LOG_INFO("CLOUD", "mcuSerial verified: %s", mcuSerial);
+const char* CloudStateMachine::getMcuFirmwareVersion() const {
+    return (mcuFirmwareVersion_[0] != '\0') ? mcuFirmwareVersion_ : nullptr;
+}
 
-    if (state_ == CloudState::WaitingForMcuSerial) {
-        lastProvisionAttempt_ = HAL_MILLIS() - config_.provisionRetryMs;
-        setState(CloudState::Provisioning);
-    }
+void CloudStateMachine::setMcuHardwareVersion(const char* hwVersion) {
+    if (!hwVersion) { mcuHardwareVersion_[0] = '\0'; return; }
+    strncpy(mcuHardwareVersion_, hwVersion, sizeof(mcuHardwareVersion_) - 1);
+    mcuHardwareVersion_[sizeof(mcuHardwareVersion_) - 1] = '\0';
+}
+
+const char* CloudStateMachine::getMcuHardwareVersion() const {
+    return (mcuHardwareVersion_[0] != '\0') ? mcuHardwareVersion_ : nullptr;
+}
+
+const char* CloudStateMachine::getMqttKey() const {
+    return (mqttKey_[0] != '\0') ? mqttKey_ : identity_.serialNumber;
 }
 
 bool CloudStateMachine::refreshToken() {
@@ -301,6 +438,21 @@ void CloudStateMachine::setClaimCompleteCallback(ClaimCompleteCallback cb, void*
 }
 void CloudStateMachine::setUnclaimedCallback(UnclaimedCallback cb, void* ctx) {
     unclaimedCallback_ = cb; unclaimedCtx_ = ctx;
+}
+
+void CloudStateMachine::setDiagnosticCallback(DiagnosticCallback cb, void* ctx) {
+    diagnosticCallback_ = cb; diagnosticCtx_ = ctx;
+}
+
+void CloudStateMachine::emitDiagnostic(const char* message) {
+    if (diagnosticCallback_ && message) diagnosticCallback_(message, diagnosticCtx_);
+}
+
+void CloudStateMachine::emitDiagnostic2(const char* prefix, const char* value) {
+    if (!diagnosticCallback_ || !prefix) return;
+    char line[128];
+    snprintf(line, sizeof(line), "%s%s", prefix, value ? value : "");
+    diagnosticCallback_(line, diagnosticCtx_);
 }
 
 } // namespace cloud

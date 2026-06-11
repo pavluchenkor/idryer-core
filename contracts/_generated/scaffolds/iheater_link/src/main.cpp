@@ -1,6 +1,6 @@
 // ============================================================================
 // SCAFFOLD: iheater_link
-// Generated 2026-05-19 by contracts/gen_scaffold.py from mqtt_contract.yaml
+// Generated 2026-06-07 by contracts/gen_scaffold.py from mqtt_contract.yaml
 //
 // HOW TO START:
 //   1. Copy this directory to your PlatformIO project root.
@@ -25,11 +25,14 @@ static const idryer::Config CFG = {
     .deviceType        = idryer::DeviceType::IHeaterLink,
     .unitsCount        = 1,
     // Peripheral capabilities:
-    .hasHeaterPower         = true,   // Управляемый нагреватель (targetTempC, durationS)
-    .hasFanStatus           = true,   // Вентилятор (on/off)
+    .hasHeater              = true,   // Управляемый нагреватель (targetTempC, durationS)
+    .hasFan                 = true,   // Вентилятор (on/off)
     .hasLed                 = false,  // (not in this profile)
-    .hasScales              = false,  // (not in this profile)
+    .hasWeight              = false,  // (not in this profile)
     .hasRfid                = false,  // (not in this profile)
+    .hasAirTemp             = false,  // (not in this profile)
+    .hasAirHumidity         = false,  // (not in this profile)
+    .hasHeaterTemp          = false,  // (not in this profile)
     // Basic air sensors (set true if your hardware has them):
     .hasAirTemp        = false,  // TODO: SHT31, DHT22, etc.
     .hasAirHumidity    = false,

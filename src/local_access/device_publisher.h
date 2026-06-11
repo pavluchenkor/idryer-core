@@ -77,6 +77,12 @@ public:
     /** rfid topic (retained). */
     bool publishRfid(JsonDocument& doc);
 
+    /** weights topic (non-retained). */
+    bool publishWeights(JsonDocument& doc);
+
+    /** rfid/write_result (non-retained). Ответ на commands/write_rfid (Variant B). */
+    bool publishRfidWriteResult(JsonDocument& doc);
+
     bool isMqttConnected() const  { return mqtt_->isConnected(); }
 #if defined(ESP32) || defined(ESP_PLATFORM)
     bool isLocalConnected() const { return local_ && local_->isClientConnected(); }

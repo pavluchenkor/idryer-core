@@ -52,7 +52,7 @@ bridge.loop();
 
 发送方法分为两组：
 
-- ESP32 → RP2040：`sendHelloAck`、`sendCommand`、`sendProfileCommand`、`sendConfigPush`、`sendHeartbeat`、`sendClaimStatus`、`sendClaimComplete`、`sendWsStatus`、`sendTelemetryAck`、`sendCommandAck`、`sendConfigAck`。
+- ESP32 → RP2040：`sendHelloAck`、`sendCommand`、`sendProfileCommand`、`sendHeartbeat`、`sendClaimStatus`、`sendClaimComplete`、`sendWsStatus`、`sendTelemetryAck`、`sendCommandAck`、`sendConfigAck`。
 - RP2040 → ESP32（或用于测试）：`sendHello`、`sendTelemetry`、`sendStatus`、`sendWeights`、`sendRfid`。
 
 ACK/重试：具有 `UART_FLAG_ACK_REQ` 标志的帧重试最多 3 次，超时 700 毫秒。如果未收到 ACK — `send*` 返回 `false`。

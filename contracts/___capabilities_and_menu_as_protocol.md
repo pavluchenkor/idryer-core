@@ -1,5 +1,53 @@
 # Capabilities и меню как декларативный протокол
 
+---
+
+## 📌 Статус 2026-05-27 (читать первым)
+
+Концепция эволюционировала. Базовые идеи (`canonical_roles`, `set`+`invoke`, menu-as-protocol) — в силе. Но **виджеты-композиты в меню отменены** в пользу **product-specific карточек на портале**.
+
+### Актуальная модель (заменяет §5c, §5d, §8 widget-поле, шаги 4-5, §15 Шаги 4-5)
+
+- **Меню** рендерится **только примитивами** (`value` → инпут, `toggle` → чекбокс, `action` → кнопка). Никаких `widget:` в menu.yaml.
+- **Виджет = карточка устройства на дашборде** (`HeaterCard`, `StorageCard`) — product-specific React-компонент в портале. Один тип устройства = одна карточка. Не из реестра.
+- **Canonical roles** остаются, но **без поля `widget`** — описывают только семантику данных. Виджет ищет нужные пункты меню по ролям.
+- **Две формы invoke** (зафиксированы в `mqtt_contract.yaml` секция 2):
+  - **A:** `{cmd:invoke, id}` — action из меню, args нет.
+  - **B:** `{cmd:invoke, action, args}` — прямая команда устройству с runtime-параметрами.
+
+### Сделано
+
+- ✅ canonical_roles + set/invoke handlers в прошивке iHeater, Storage.
+- ✅ menu-as-protocol: устройства публикуют меню в `idryer/{serial}/config`.
+- ✅ `DeviceMenuPanel` в портале рендерит меню примитивами.
+- ✅ **HeaterCard + StorageCard на дашборде и DeviceDetailPage — протестированы на DEVICE_ACEBE6490534 + DEVICE_ACEBE64AF988, работают корректно.**
+- ✅ Telemetry NAN → SDK не публикует поле (нет лишних 0.0 на UI).
+- ✅ HA controls iHeater переехали на menu-значения (`heat_temp` + `heat_duration` через `ha.number`).
+- ✅ `write_rfid` handler в idryer-link + публикация `rfid/write_result` через новый `publishRfidWriteResult` в idryer-core.
+- ✅ Канонические правки контракта: `iDryerRP2040`→`iDryerControllerV2` (53 ссылки), `IdryerDevice.cpp`→`main.cpp`, удалён `heater_unsupported_commands`, актуализирован `invoke_payload_shape`.
+- ✅ `air_temp`/`air_humidity`/`heater_temp` вынесены из хардкода `gen_idryer_api_h.py` в `capability_vocabulary`.
+- ✅ Удалены `widget-registry.tsx` + `DynamicCard.tsx` + `components/widgets/` в портале. `resolveRoleLabel` вынесена в `contracts/roleLabel.ts`.
+- ✅ Удалены `contracts/widgets/` + `WIDGETS.md` + блок копирования в `regen.sh` (заменён комментарием-маркером 2026-05-27).
+- ✅ `docs/en/09-add-product/02-add-widget.md` переписан под новую концепцию (виджет = карточка дашборда). В 10 локализациях outdated-header со ссылкой на EN. `contracts/README.md`/`README.ru.md` обновлены.
+- ✅ Универсальный progress: `status.units[i].progressPercent` в контракте + прошивка iHeater (`enrichStatus` hook + триггер ∆≥1%) + backend broadcast + frontend (`ActiveSessionBlock.progressPercent`, HeaterCard live state). Bambu mc_percent доходит до карточки.
+- ✅ Backend убрал дефолт `targetDurationMins=240` — бессрочный нагрев теперь хранится как `null`, UI скрывает прогресс-бар и строку времени вместо «remaining 4h 0m».
+
+### Открытые долги
+
+Полный список (с группировкой по архитектурным / interop / RFID / мелким) — в [iHeater-link/___!!!cotrect_report.md](../../iHeater-link/___!!!cotrect_report.md). Этот документ — концептуальная база, не реестр задач.
+
+### Что в этом документе **устарело** (не читать как руководство к действию)
+
+- §5c-5d «Dashboard — два режима с HARDCODED_CARDS» — отменено. У нас полные карточки на каждый deviceType.
+- §8: примеры `canonical_roles` с полем `widget:` — оставлены для истории, в актуальном `mqtt_contract.yaml` поле widget убирается из ролей.
+- §13 Шаг 5b (widget-registry), Шаг 5c-5d (DynamicDeviceCard) — отменено.
+- §14 «ещё не реализовано» — устарело, см. чеклист выше.
+- §15 Шаг 4 (widget-registry), Шаг 5 (DynamicDeviceCard) — отменено.
+
+Остальное (§1-7, §8 без поля widget, §9-12, §15 Шаги 1-3, 6-8) — в силе как концептуальная база.
+
+---
+
 ## TL;DR — быстрая выжимка
 
 **Что делаем:** Устройство само описывает свой UI через MQTT. Портал рендерит карточку автоматически — без хардкода под каждый тип устройства.
@@ -276,15 +324,10 @@ config** (как поля `min`, `max`, `step`, `val` в menu items). Дубли
 
 ### 5.1. Принципы
 
-1. **info** описывает физическое устройство: какие физические компоненты
-   на борту, сколько юнитов, какие интеграции поддерживает прошивка.
-2. **config** описывает что устройство умеет настраивать и делать:
-   полное меню с параметрами и actions.
-3. **commands/set** изменяет параметр меню. **commands/invoke** вызывает
-   action меню. Этого достаточно для **всех** управляющих команд.
-4. **canonical_roles** — закрытый словарь в контракте. Только эти имена
-   портал знает наизусть. Всё остальное портал получает из config
-   конкретного устройства.
+1. **info** описывает физическое устройство: какие физические компоненты на борту, сколько юнитов, какие интеграции поддерживает прошивка.
+2. **config** описывает что устройство умеет настраивать и делать: полное меню с параметрами и actions.
+3. **commands/set** изменяет параметр меню. **commands/invoke** вызывает action меню. Этого достаточно для **всех** управляющих команд.
+4. **canonical_roles** — закрытый словарь в контракте. Только эти имена портал знает наизусть. Всё остальное портал получает из config конкретного устройства.
 5. **Адресация юнита через активный юнит** (`controller_choice` в меню).
    Портал переключает активный юнит отдельной командой `set`, далее
    все `set/invoke` применяются к нему. Никакого `unitId` в payload

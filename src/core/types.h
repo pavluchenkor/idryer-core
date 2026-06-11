@@ -5,10 +5,29 @@
 
 namespace idryer {
 
+enum class McuSerialResult : uint8_t {
+    Ignored,           ///< mcuSerial was empty — stay in WaitingForMcuSerial
+    AcceptedFirstBind, ///< First bind: boundMqttKey empty, mqttKey = linkSerial
+    AcceptedBound,     ///< Already bound: boundMqttKey == mcuSerial, mqttKey = DE...
+    Mismatch           ///< boundMqttKey != mcuSerial — wrong RP2040 connected
+};
+
+enum class ClaimRequestResult : uint8_t {
+    Started,
+    AlreadyClaimed,
+    StaleNvs,
+    WifiNotConnected,
+    WaitingForMcuSerial,
+    ProvisionFailed,
+    RegisterFailed,
+    TokenWithheld
+};
+
 struct DeviceIdentity {
     char serialNumber[IDRYER_MAX_SERIAL_NUMBER_LEN];
     char token[IDRYER_MAX_TOKEN_LEN];
     char deviceId[IDRYER_MAX_DEVICE_ID_LEN];
+    char boundMqttKey[IDRYER_MAX_SERIAL_NUMBER_LEN];
 
     DeviceIdentity() { clear(); }
 
@@ -16,11 +35,13 @@ struct DeviceIdentity {
         memset(serialNumber, 0, sizeof(serialNumber));
         memset(token, 0, sizeof(token));
         memset(deviceId, 0, sizeof(deviceId));
+        memset(boundMqttKey, 0, sizeof(boundMqttKey));
     }
 
     bool hasToken() const         { return token[0] != '\0'; }
     bool hasDeviceId() const      { return deviceId[0] != '\0'; }
     bool hasSerialNumber() const  { return serialNumber[0] != '\0'; }
+    bool hasBoundMqttKey() const  { return boundMqttKey[0] != '\0'; }
 
     void setSerialNumber(const char* src) {
         if (src) { strncpy(serialNumber, src, sizeof(serialNumber) - 1); serialNumber[sizeof(serialNumber)-1] = '\0'; }
@@ -30,6 +51,9 @@ struct DeviceIdentity {
     }
     void setDeviceId(const char* src) {
         if (src) { strncpy(deviceId, src, sizeof(deviceId) - 1); deviceId[sizeof(deviceId)-1] = '\0'; }
+    }
+    void setBoundMqttKey(const char* src) {
+        if (src) { strncpy(boundMqttKey, src, sizeof(boundMqttKey) - 1); boundMqttKey[sizeof(boundMqttKey)-1] = '\0'; }
     }
 };
 

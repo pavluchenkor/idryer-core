@@ -71,6 +71,15 @@ void IdryerRuntime::onMqttCommand(const char* command, JsonObjectConst data) {
         return;
     }
 
+    // bind_ack: handled here to keep MQTT identity switching inside the library.
+    // Product commandHandler_ must not receive this — it has no access to cloud state.
+    if (strcmp(command, "bind_ack") == 0) {
+        const char* mqttTopicKey = data["mqttTopicKey"].as<const char*>();
+        const char* mcuSerial    = data["mcuSerial"].as<const char*>();
+        cloud_->handleBindAck(mqttTopicKey, mcuSerial);
+        return;
+    }
+
     // If the product registers a command handler, route everything else through it.
     // This allows MQTT and local WS to share a single business-level handler
     // without duplicating routing logic.

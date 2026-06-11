@@ -30,12 +30,14 @@ import yaml
 
 # yaml UartDryerMode → facade UnitMode (1-в-1 + Unknown как fallback).
 UNIT_MODE_FROM_DRYER_MODE = [
-    ("Idle",    "unit not running"),
-    ("Drying",  "active drying session"),
-    ("Storage", "storage mode (gentle low-power keep-dry)"),
-    ("Profile", "running multi-step profile"),
-    ("Fault",   "unrecoverable hardware error"),
-    ("Unknown", "fallback for unrecognized UART mode (does not close session)"),
+    ("Idle",           "unit not running"),
+    ("Drying",         "active drying session (DRYER)"),
+    ("Storage",        "storage mode — gentle low-power keep-dry (DRYER)"),
+    ("Profile",        "running multi-step profile (DRYER)"),
+    ("Heating",        "active chamber heating (iHeater-link)"),
+    ("LightAnimation", "active LED override animation (Storage Link)"),
+    ("Fault",          "unrecoverable hardware error"),
+    ("Unknown",        "fallback for unrecognized UART mode (does not close session)"),
 ]
 
 # RequestKind = подмножество commands направления backend_to_device, которые
@@ -58,7 +60,6 @@ TELEMETRY_FIELDS = [
     ("heaterTemp",       "float",   True,    "hasHeaterTemp",  "heater body temperature, °C"),
     ("heaterPower",      "float",   True,    "hasHeaterPower", "normalized heater power, 0..1"),
     ("fanStatus",        "bool",    True,    "hasFanStatus",   "fan running"),
-    ("weight",           "uint16_t","True",  "hasScales",      "filament weight, grams"),
 ]
 
 # Telemetry struct field names that user fills (different from json_keys).
@@ -68,7 +69,6 @@ TELEMETRY_USER_FIELDS = [
     ("heaterTempC",      "float",     "hasHeaterTemp"),
     ("heaterPower01",    "float",     "hasHeaterPower"),
     ("fanOn",            "bool",      "hasFanStatus"),
-    ("weightG",          "uint16_t",  "hasScales"),
 ]
 
 # Integrations — флаги Config.allow* (compile-time выбор).
@@ -169,11 +169,13 @@ def render_integration_state_enum(doc: dict) -> list[str]:
 def render_event_kind_enum() -> list[str]:
     out = [
         "/// Event severity for raiseEvent() — JSON `severity` per contract.",
-        "/// Mirrors yaml.enums.PortalEventType severities (INFO/WARNING/ERROR).",
+        "/// Canonical severity vocabulary (matches RP2040 error bus + backend",
+        "/// events.handler): INFO / WARN / ERROR / CRIT. See eventSeverityString.",
         "enum class EventKind : uint8_t {",
         "    Info,",
         "    Warning,",
         "    Error,",
+        "    Critical,",
         "};",
     ]
     return out
@@ -279,15 +281,11 @@ def render_config_struct(doc: dict) -> list[str]:
         "    // Run contracts/regen.sh after adding a new capability to the vocabulary.",
     ]
     for cap_name, cap in vocab.items():
-        flag = cap.get("config_flag", f"has{cap_name.capitalize()}")
+        flag = cap.get("config_flag",
+                       "has" + "".join(p.capitalize() for p in cap_name.split("_")))
         desc = cap.get("description", "")
         out.append(f"    bool        {(flag + ';'):<21} ///< {desc}")
     out += [
-        "",
-        "    // ── Basic air sensors (not in capability_vocabulary — present on most devices) ──",
-        "    bool        hasAirTemp;          ///< air temperature sensor (SHT/DHT)",
-        "    bool        hasAirHumidity;      ///< air humidity sensor",
-        "    bool        hasHeaterTemp;       ///< heater body temperature sensor",
         "",
         "    // ── Integration availability (compile-time decision) ──",
     ]

@@ -1,6 +1,6 @@
 # storage_link
 
-Auto-generated scaffold. Capabilities: **led, weight, rfid**.
+Auto-generated scaffold. Capabilities: **led, air_temp, air_humidity**.
 
 ## Quick start
 

@@ -42,6 +42,14 @@ public:
     /// @brief Callback invoked when a @c commands/* message arrives.
     using CommandCallback = Callback<void(const char*, JsonObjectConst)>;
 
+    /// @brief Callback для бинарных OTA-chunks. Срабатывает на топиках вида
+    /// @c commands/firmware_update_chunk/{commandId}/{chunkIdx}, payload идёт
+    /// как сырой бинарь (см. ___OTA_MQTT_DESIGN.md, format: raw_binary).
+    /// Не парсится как JSON и не копируется в локальный s_payload_buf — raw
+    /// pointer передаётся в callback напрямую (живёт только время вызова).
+    /// Сигнатура: (topic, payload, length).
+    using OtaChunkCallback = Callback<void(const char*, const uint8_t*, size_t)>;
+
     /**
      * @brief Initializes the MQTT client with device credentials.
      *
@@ -58,6 +66,15 @@ public:
      * Called by @c IdryerRuntime — you don't need to set this yourself.
      */
     void setCommandCallback(CommandCallback::FnPtr fn, void* ctx = nullptr);
+
+    /**
+     * @brief Регистрирует callback для бинарных OTA-chunks
+     * (@c commands/firmware_update_chunk/{commandId}/{chunkIdx}).
+     *
+     * Вызывается OtaReceiver. Если не зарегистрирован — chunks молча
+     * игнорируются (никакого OTA-flow в прошивке).
+     */
+    void setOtaChunkCallback(OtaChunkCallback::FnPtr fn, void* ctx = nullptr);
 
     /**
      * @brief Connects to the broker and subscribes to @c commands/#.
@@ -105,6 +122,31 @@ public:
     /// @brief Publishes to @c idryer/{serial}/rfid (retained).
     bool publishRfid(JsonDocument& json);
 
+    /// @brief Publishes to @c idryer/{serial}/weights (non-retained).
+    bool publishWeights(JsonDocument& json);
+
+    /// @brief Publishes to @c idryer/{serial}/rfid/write_result (non-retained).
+    /// Используется bridge для ответа порталу на commands/write_rfid (Variant B).
+    /// Payload: {commandId, status: "ok"|"failed", error?}.
+    bool publishRfidWriteResult(JsonDocument& json);
+
+    // ─── Phase 6 OTA event publishers ──────────────────────────────────
+    /// @brief Publishes to @c idryer/{serial}/events/firmware_update_ack.
+    /// Используется OtaReceiver в ответ на commands/firmware_update_announce.
+    bool publishFirmwareUpdateAck(JsonDocument& json);
+
+    /// @brief Publishes to @c idryer/{serial}/events/firmware_update_progress.
+    /// OtaReceiver шлёт на каждый принятый chunk — gating-сигнал для backend.
+    bool publishFirmwareUpdateProgress(JsonDocument& json);
+
+    /// @brief Publishes to @c idryer/{serial}/events/firmware_update_complete.
+    /// Финальный статус OTA до ребута (verified/sha_mismatch/flash_failed/...).
+    bool publishFirmwareUpdateComplete(JsonDocument& json);
+
+    /// @brief Publishes to @c idryer/{serial}/events/firmware_check_update.
+    /// Pull-flow: устройство спрашивает backend о наличии новой версии (~24h).
+    bool publishFirmwareCheckUpdate(JsonDocument& json);
+
     /**
      * @brief Publishes a raw JSON string to @c idryer/{serial}/config.
      *
@@ -136,6 +178,7 @@ private:
 #endif
     PubSubClient mqttClient_;
     CommandCallback commandCallback_;
+    OtaChunkCallback otaChunkCallback_;
 
     char serialNumber_[32];
     char token_[512];

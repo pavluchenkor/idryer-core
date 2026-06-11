@@ -1,4 +1,11 @@
-# Comece em 5 minutos
+---
+title: "Iniciar um dispositivo idryer-core em 5 minutos"
+description: "Arranque rápido para programadores: criar um dispositivo ESP32 mínimo com idryer-core, ligar Wi-Fi e MQTT e verificar comandos."
+---
+
+# Iniciar um dispositivo idryer-core em 5 minutos
+
+Esta página ajuda a verificar rapidamente que um dispositivo ESP32 arranca com `idryer-core`, liga-se à rede e troca dados. Use-a como primeiro teste técnico antes de desenvolver um secador, câmara aquecida, iluminação ou outro módulo.
 
 Depois desta página seu ESP32 estará programado, conectado ao WiFi e aparecerá em [portal.idryer.org](https://portal.idryer.org/) com status Online. Requisitos: ESP32-C3 (DevKit, Super Mini ou compatível), cabo USB, PlatformIO no VS Code.
 

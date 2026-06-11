@@ -23,5 +23,6 @@
   "common.find": "Find device",
   "common.clear_errors": "Clear errors",
   "system.active_unit": "Active unit",
-  "system.language": "Language"
+  "system.language": "Language",
+  "system.ignore_external_cmd": "Ignor ext cmd"
 }

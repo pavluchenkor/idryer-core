@@ -45,6 +45,24 @@ void MqttClient::setCommandCallback(CommandCallback::FnPtr fn, void* ctx) {
     commandCallback_.set(fn, ctx);
 }
 
+void MqttClient::setOtaChunkCallback(OtaChunkCallback::FnPtr fn, void* ctx) {
+    otaChunkCallback_.set(fn, ctx);
+}
+
+// ─── Phase 6 OTA event publishers ────────────────────────────────────────
+bool MqttClient::publishFirmwareUpdateAck(JsonDocument& json) {
+    return publishJson(IDRYER_TOPIC_FW_UPDATE_ACK, json, /*retained=*/false);
+}
+bool MqttClient::publishFirmwareUpdateProgress(JsonDocument& json) {
+    return publishJson(IDRYER_TOPIC_FW_UPDATE_PROGRESS, json, /*retained=*/false);
+}
+bool MqttClient::publishFirmwareUpdateComplete(JsonDocument& json) {
+    return publishJson(IDRYER_TOPIC_FW_UPDATE_COMPLETE, json, /*retained=*/false);
+}
+bool MqttClient::publishFirmwareCheckUpdate(JsonDocument& json) {
+    return publishJson(IDRYER_TOPIC_FW_CHECK_UPDATE, json, /*retained=*/false);
+}
+
 void MqttClient::disconnect() {
     if (mqttClient_.connected()) mqttClient_.disconnect();
     initialized_ = false;
@@ -149,6 +167,14 @@ bool MqttClient::publishRfid(JsonDocument& json) {
     return publishJson(IDRYER_TOPIC_RFID, json, IDRYER_RETAINED_RFID);
 }
 
+bool MqttClient::publishWeights(JsonDocument& json) {
+    return publishJson(IDRYER_TOPIC_WEIGHTS, json, IDRYER_RETAINED_WEIGHTS);
+}
+
+bool MqttClient::publishRfidWriteResult(JsonDocument& json) {
+    return publishJson(IDRYER_TOPIC_RFID_WRITE_RESULT, json, IDRYER_RETAINED_RFID_WRITE_RESULT);
+}
+
 uint16_t MqttClient::publishConfigRaw(const char* json, size_t length) {
     if (!mqttClient_.connected() || !json || length == 0) return 0;
 
@@ -215,8 +241,25 @@ bool MqttClient::publishConfigDelta(const char* json, size_t length) {
 
 void MqttClient::mqttCallback(char* topic, byte* payload, unsigned int length) {
     if (!instance_) return;
-    // Входящие команды маленькие (< 512 байт). Статический буфер без heap.
-    static char s_payload_buf[512];
+
+    // OTA-chunks (commands/firmware_update_chunk/{commandId}/{chunkIdx}) — это
+    // сырой бинарь до 4 КБ (см. ___OTA_MQTT_DESIGN.md, format: raw_binary).
+    // НЕ копируем в s_payload_buf (он 1 КБ — chunks бы дропались) и НЕ парсим
+    // как JSON. Передаём raw pointer OtaReceiver, он уже знает что с этим
+    // делать (Update.write + mbedtls_sha256_update). Pointer живёт только
+    // время этого вызова — OtaReceiver обязан скопировать или записать сразу.
+    if (strstr(topic, "/commands/firmware_update_chunk/")) {
+        if (instance_->otaChunkCallback_) {
+            instance_->otaChunkCallback_(
+                topic,
+                reinterpret_cast<const uint8_t*>(payload),
+                static_cast<size_t>(length));
+        }
+        return;
+    }
+
+    // profile-команда с 10 стадиями занимает ~540 байт.
+    static char s_payload_buf[1024];
     if (length >= sizeof(s_payload_buf)) {
         HAL_LOG_ERROR("MQTT", "← payload too large: %u bytes, dropped", length);
         return;
@@ -235,7 +278,7 @@ void MqttClient::handleMessage(const char* topic, const char* payload, size_t le
     if (!cmdStart) return;
     cmdStart += strlen(cmdPrefix);
 
-    StaticJsonDocument<512> doc;
+    StaticJsonDocument<1024> doc;
     DeserializationError err = deserializeJson(doc, payload, length);
     if (err) {
         HAL_LOG_ERROR("MQTT", "JSON parse error: %s", err.c_str());

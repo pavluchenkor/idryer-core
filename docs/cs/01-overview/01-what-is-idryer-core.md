@@ -1,4 +1,11 @@
-# Co je idryer-core
+---
+title: "Co je idryer-core a kdy ho použít"
+description: "Účel idryer-core: společná knihovna pro ESP32 zařízení iDryer, MQTT, Wi-Fi, telemetrii a příkazy z portálu."
+---
+
+# Co je idryer-core a kdy ho použít
+
+Použijte `idryer-core`, když se zařízení má připojit k ekosystému iDryer: publikovat telemetrii, přijímat příkazy, projít přiřazením a komunikovat přes MQTT. Hodí se pro sušičky filamentu, aktivní komory, osvětlení, senzory a další moduly kolem 3D tiskárny.
 
 Pokud vytváříte zařízení ESP32 pro cloud iDryer, tato knihovna zpracovává zřizování WiFi (Improv), protokol claim, relaci MQTT (TLS, reconnect, time sync), periodické publikování telemetrie/stavu a směrování příchozích příkazů. Přibližně 500 řádků boilerplate se zhroutí do `link.begin(); link.loop();`.
 

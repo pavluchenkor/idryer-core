@@ -15,7 +15,7 @@
       "type": "object",
       "additionalProperties": {
         "type": "object",
-        "required": ["json_key", "config_flag", "description"],
+        "required": ["json_key", "description"],
         "additionalProperties": true,
         "properties": {
           "json_key":       { "type": "string" },
@@ -39,7 +39,26 @@
       }
     },
     "canonical_roles":    { "type": "object", "additionalProperties": true },
-    "migration_status":   { "type": "object", "additionalProperties": true },
+    "widgets":            { "type": "object", "additionalProperties": true },
+    "product_topic_support": {
+      "type": "object",
+      "description": "Топик → список продуктов, которые его обрабатывают.",
+      "additionalProperties": {
+        "type": "array",
+        "items": { "type": "string" }
+      }
+    },
+    "unit_modes_per_product": {
+      "type": "object",
+      "description": "product_id → классификация mode-значений (active/idle/fault). Backend читает отсюда вместо хардкода 'DRYING/STORAGE/PROFILE'.",
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      }
+    },
     "source_of_truth": { "$ref": "#/$defs/SourceOfTruth" },
     "rules": { "$ref": "#/$defs/Rules" },
     "uart_kind_ranges": { "$ref": "#/$defs/UartKindRanges" },
@@ -78,10 +97,6 @@
     "known_mismatches": {
       "type": "array",
       "items": { "$ref": "#/$defs/Mismatch" }
-    },
-    "todo": {
-      "type": "array",
-      "items": { "type": "string" }
     }
   },
 
@@ -90,8 +105,11 @@
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "code": { "type": "array", "items": { "type": "string" } },
-        "docs": { "type": "array", "items": { "type": "string" } }
+        "repositories": {
+          "type": "object",
+          "description": "Карта репозиторий → роль. Конкретные файлы/строки не фиксируются — устаревают при рефакторинге.",
+          "additionalProperties": { "type": "string" }
+        }
       }
     },
 
@@ -184,6 +202,18 @@
       "additionalProperties": { "$ref": "#/$defs/FieldSpec" }
     },
 
+    "Scaling": {
+      "description": "Linear scaling: physical_value = raw_value * factor + offset. DBC-style. Из этого блока генератор делает inline accessors (get/set) с автоматической конверсией raw↔physical.",
+      "type": "object",
+      "required": ["factor", "unit"],
+      "additionalProperties": false,
+      "properties": {
+        "factor": { "type": "number" },
+        "offset": { "type": "number" },
+        "unit":   { "type": "string" }
+      }
+    },
+
     "FieldSpec": {
       "description": "Inline или block-стиль описания поля. Mandatory: type. Optional: остальное.",
       "oneOf": [
@@ -200,6 +230,7 @@
             "count": { "type": "integer", "minimum": 1 },
             "item_fields": { "$ref": "#/$defs/FieldsBlock" },
             "unit": { "type": "string" },
+            "scaling": { "$ref": "#/$defs/Scaling" },
             "encoding": { "type": "string" },
             "default": {},
             "required": { "type": "boolean" },

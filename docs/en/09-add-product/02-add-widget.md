@@ -1,242 +1,88 @@
-# Add a Widget and a New Device
+# Add a Dashboard Card for a New Device
 
-Complete cycle: from forking the repository to a merged PR. Covers firmware, contract, React widget, and portal testing.
+A "widget" in the iDryer ecosystem is a **device card on the portal dashboard** — a product-specific React component that composes the device's UI from reusable blocks. There is no widget registry, no generated React files, no `contracts/widgets/` directory.
 
-If you only need firmware without a new widget — see [01-add-new-product.md](01-add-new-product.md).
-
----
-
-## Prerequisites
-
-- Python 3.9+ with `pip install pyyaml jsonschema`
-- Node.js 18+
-- PlatformIO CLI
-- Access to the iDryer portal for UIKit testing
+This page covers adding such a card for a new device type. For firmware-only work see [01-add-new-product.md](01-add-new-product.md).
 
 ---
 
-## Step 1. Fork and Clone
+## What lives where
 
-1. Fork the `idryer-core` repository on GitHub.
-2. Clone your fork locally:
-
-    ```bash
-    git clone https://github.com/<your-username>/idryer-core.git
-    cd idryer-core
-    git checkout -b feature/my-new-device
-    ```
-
-3. Verify the contract passes validation in the current state:
-
-    ```bash
-    cd contracts
-    ./regen.sh --firmware-only
-    ```
+| Layer | Repository | Source of truth |
+|---|---|---|
+| Contract (deviceType, capabilities, invoke actions, telemetry, menu) | `idryer-core` | `contracts/mqtt_contract.yaml` |
+| Generated headers / TS types / Dart types | `idryer-core` | `contracts/_generated/*` |
+| Firmware | per device repo (e.g. `iHeater-link`, `iDryer-Storage`) | hand-written |
+| Dashboard card | `iDryerPortal/frontend-v2` | `src/components/dashboard/cards/*.tsx` |
+| Reusable card blocks | `iDryerPortal/frontend-v2` | `src/components/device/*.tsx` |
+| Card registration | `iDryerPortal/frontend-v2` | `src/components/dashboard/DeviceDashboardCard.tsx` |
+| UIKit preview | `iDryerPortal/frontend-v2` | `src/pages/UiKitPage.tsx` |
 
 ---
 
-## Step 2. Edit the Contract
+## Command channel rules
 
-All changes go into `contracts/mqtt_contract.yaml`. Keep everything in a single changeset.
+Cards talk to devices via two MQTT paths defined in the contract:
 
-!!! warning
-    Do not edit files in `_generated/` — they are overwritten by generators.
+- **Invoke (form A)** — emit a menu action by its `id`, no args. Use when the action is already in the device menu and reachable from another client.
+- **Invoke (form B)** — emit `{action, args}` directly, bypassing the menu. Use for parameterized actions (`heat.start` with `tempC`/`durationMin`, `led.pulse` with `r/g/b/animation`).
+- **Set** — write a config value (`set <role> <value>`). Use only for persistent settings, not for processes with a beginning and an end.
 
-### 2a. Capability vocabulary (new peripheral type)
-
-If the device has a new hardware type (e.g., a CO2 sensor), add an entry to the `capability_vocabulary` section:
-
-```yaml
-capability_vocabulary:
-  co2:
-    description: "CO2 sensor (ppm)"
-    config_flag: hasAirCo2
-    telemetry_field: airCo2Ppm
-```
-
-This automatically adds the field `hasAirCo2: bool` to `iDryer::Config` on the next regeneration.
-
-### 2b. Canonical roles (new role + widget)
-
-If the device exposes a new menu item, register the role in `canonical_roles`:
-
-```yaml
-canonical_roles:
-  co2.read:
-    type: float
-    widget: Co2Display
-    unit: ppm
-    labels:
-      ru: "CO₂"
-      en: "CO₂"
-```
-
-The `widget` value is the name of the React component you will write in Step 5.
-
-### 2c. Invoke actions (if the widget sends commands)
-
-If the widget triggers an action on the device, describe it in `invoke_actions`:
-
-```yaml
-invoke_actions:
-  my_device:
-    co2.calibrate:
-      description: "Start CO2 sensor calibration"
-      args:
-        targetPpm:
-          type: uint16
-          description: "Reference CO2 value (ppm)"
-          required: true
-```
-
-### 2d. Device profile (new device type)
-
-Add the profile to `device_profiles`:
-
-```yaml
-device_profiles:
-  my_device:
-    description: "My device"
-    capabilities: [led, co2]
-    invoke_actions: [co2.calibrate]
-```
-
-Capability values come from the `capability_vocabulary` defined in step 2a.
+For processes that start and finish (heating, drying, animation), always use **invoke**, never `set heat_active=true` style toggles.
 
 ---
 
-## Step 3. Validate and Regenerate
+## Telemetry null policy
 
-```bash
-cd contracts
-./regen.sh
-```
+If a sensor is missing or its reading is unavailable, the firmware must omit the field from the telemetry payload (not send `null`, not send `0`, not send `NaN`). The card must treat an absent field as "no data" and render a placeholder instead of guessing zero.
 
-Flags:
+See `rules.telemetry_null_policy` in the contract for the canonical wording.
 
-| Flag | Effect |
+---
+
+## Checklist — adding a card for a new device
+
+1. **Contract** — add the device profile and any new capabilities, roles and invoke actions to `contracts/mqtt_contract.yaml`. Run `./regen.sh` and commit the regenerated `_generated/*`.
+2. **Firmware** — implement `onCommand("invoke")` for the new actions; emit telemetry per the null policy.
+3. **Card component** — create `iDryerPortal/frontend-v2/src/components/dashboard/cards/<DeviceType>Card.tsx`. Compose it from the reusable blocks in [src/components/device/](https://github.com/iDryer/iDryerPortal/tree/main/frontend-v2/src/components/device).
+4. **Register** — add the new `deviceType` to the switch in [DeviceDashboardCard.tsx](https://github.com/iDryer/iDryerPortal/blob/main/frontend-v2/src/components/dashboard/DeviceDashboardCard.tsx).
+5. **DeviceDetailPage** — extend `controlsOrProgress` in [DeviceDetailPage.tsx](https://github.com/iDryer/iDryerPortal/blob/main/frontend-v2/src/pages/DeviceDetailPage.tsx) so the same card appears on the device page.
+6. **UIKit** — add an Idle + Active example to the "Device Widgets" group in [UiKitPage.tsx](https://github.com/iDryer/iDryerPortal/blob/main/frontend-v2/src/pages/UiKitPage.tsx) with mock data so the card can be inspected at `/uikit` without a real device.
+7. **Test** — run the portal locally, verify the card renders correctly Idle and Active, sends the expected invoke payload, and reacts to telemetry updates.
+8. **PR** — open one PR in `idryer-core` (contract + firmware submodule bumps) and one in `iDryerPortal` (card + registration + UIKit). Link them in the description.
+
+---
+
+## Reusable card blocks
+
+These live in [src/components/device/](https://github.com/iDryer/iDryerPortal/tree/main/frontend-v2/src/components/device) and should be the first building blocks you reach for. Compose them before writing custom JSX.
+
+| Block | Purpose |
 |---|---|
-| (none) | Validate + all generators + copy to portal |
-| `--firmware-only` | Firmware generators only, skip portal copy |
-| `--help` | Show help |
+| `DeviceHeader` | Device name, status pill, online/offline indicator |
+| `DeviceTelemetryBlock` | Renders a list of telemetry rows, hides missing fields by default |
+| `ActiveSessionBlock` | Progress UI for processes with target + remaining time |
+| `NumberInput` | Numeric input bound to a min/max/step from the menu metadata |
+| `CardActions` | Bottom-row button group (Start / Stop etc.) |
 
-On success, `_generated/` is updated with:
-
-- `uart_protocol.h`, `mqtt_topics.h` — C++ headers
-- `iDryer_api.h` — Config/DeviceType facade
-- `mqtt-api.types.ts` — TypeScript types
-- `scaffolds/my_device/` — PlatformIO project skeleton
-- On the portal: files in `src/components/widgets/`
-
-If `regen.sh` exits with an error, fix the problem before continuing.
+If a new block would be reused by ≥ 2 cards, add it under `src/components/device/` rather than inlining it.
 
 ---
 
-## Step 4. Implement Firmware
+## Existing cards (reference)
 
-Use the generated scaffold project:
+| Card | Device type | Notes |
+|---|---|---|
+| `HeaterCard` | `IHEATER_LINK` | Idle: temp + duration inputs + Start. Active: ActiveSessionBlock with remaining time + Stop. |
+| `StorageCard` | `STORAGE_LINK` | SHT31 telemetry + LED animation/color picker + Turn On/Off (invoke `led.pulse`). |
+| `IDryerCard` | fallback | Generic card for devices without a dedicated implementation. |
 
-```bash
-cp -r contracts/_generated/scaffolds/my_device/ ~/my_device_fw/
-cd ~/my_device_fw
-```
-
-Fill in the TODO sections in `src/main.cpp`:
-
-- `onOnline()` — load config from NVS, initialize hardware.
-- `loop()` — poll sensors, call `s_runtime.publishTelemetry(tel)`.
-- `buildInfoJson()` — already populated by the generator from capabilities.
-- `onInvoke()` — handle `co2.calibrate`.
-
-For details, see [01-add-new-product.md](01-add-new-product.md).
+Open them as concrete examples before starting a new card.
 
 ---
 
-## Step 5. Create the React Widget
+## What used to exist and why it's gone
 
-Widgets live in `contracts/widgets/` and are copied to the portal by `regen.sh`.
+Earlier the project tried to keep widgets inside `idryer-core/contracts/widgets/`, ship them through `regen.sh` to the portal, and register them in a `widget-registry.tsx`. That layer was removed on **2026-05-27**: dashboard cards are product-specific React code, the contract has no opinion on JSX, and an extra copy-step between repositories added friction without value.
 
-!!! note
-    Do not edit widgets directly in `portal/src/components/widgets/` — they will be overwritten on the next `regen.sh` run. Edit only in `contracts/widgets/`.
-
-### Create the widget file
-
-```tsx
-// contracts/widgets/Co2Display.tsx
-import type { WidgetProps } from "./widget-props";
-
-export function Co2DisplayWidget({ device }: WidgetProps) {
-  const unit = device.units[0];
-  const co2 = unit?.co2Ppm ?? null;
-  return (
-    <div style={{ padding: "8px 16px" }}>
-      {co2 !== null ? `${co2} ppm` : "—"}
-    </div>
-  );
-}
-```
-
-### Register in index.ts
-
-```ts
-// contracts/widgets/index.ts
-export { Co2DisplayWidget } from "./Co2Display";
-```
-
-### Register in widget-registry.tsx (on the portal)
-
-After the next `regen.sh` run the file will appear at `portal/src/components/widgets/Co2Display.tsx`. Add an entry to `widget-registry.tsx` manually:
-
-```tsx
-import { Co2DisplayWidget } from "./Co2Display";
-
-export const WIDGET_REGISTRY: Record<WidgetName, React.ComponentType<WidgetProps>> = {
-  // ...
-  Co2Display: Co2DisplayWidget,
-};
-```
-
----
-
-## Step 6. Test in UIKit
-
-Open `portal/src/pages/UiKitPage.tsx` and add a section with mock data inside the **Device Dashboard Widgets** group:
-
-```tsx
-<KitSection title="Co2Display">
-  <Co2DisplayWidget device={MOCK_DEVICE} item={MOCK_CO2_ITEM} socket={null} />
-</KitSection>
-```
-
-Open the portal locally and navigate to `/uikit` — the widget should render without a login.
-
----
-
-## Step 7. PR Checklist
-
-Before submitting the PR, verify that:
-
-- [ ] `./contracts/regen.sh` completes without errors
-- [ ] `_generated/*` is committed (not in `.gitignore`)
-- [ ] `contracts/widgets/` — new widget file added
-- [ ] `contracts/widgets/index.ts` — widget exported
-- [ ] `widget-registry.tsx` on the portal — widget registered
-- [ ] Widget renders at `/uikit` without console errors
-- [ ] Scaffold in `_generated/scaffolds/my_device/` correctly reflects capabilities
-- [ ] PR description states: device purpose, capabilities, widget name
-
-Submit the PR against the `main` branch of the `idryer-core` repository.
-
----
-
-## All Changes in One PR
-
-| File | Change type |
-|---|---|
-| `contracts/mqtt_contract.yaml` | Source of truth |
-| `contracts/_generated/*` | Auto-generated — committed in full |
-| `contracts/widgets/MyWidget.tsx` | New file |
-| `contracts/widgets/index.ts` | +1 export line |
-| *(portal, after `regen.sh`)* | `src/components/widgets/MyWidget.tsx` — copy |
-| *(portal, manual)* | `src/components/widgets/widget-registry.tsx` — +1 entry |
-| *(portal, manual)* | `src/pages/UiKitPage.tsx` — +1 section in KitGroup |
+If you find references to the old approach (`widget-registry`, `contracts/widgets/`, `Co2DisplayWidget`-style names) in older docs or branches — they are obsolete. Use this page.

@@ -44,7 +44,7 @@ const char* moonrakerConnectionStateToString(MoonrakerConnectionState value);
 struct MoonrakerStatus
 {
     float    chamberTarget          = 0.0f;   // VIRTUAL_CHAMBER.target
-    float    chamberTemperature     = 0.0f;   // VIRTUAL_CHAMBER.temperature (валидна при hasSensor)
+    float    chamberTemperature     = NAN;    // VIRTUAL_CHAMBER.temperature. NAN пока has_sensor=0 или значение не получено.
     bool     chamberHasSensor       = false;  // VIRTUAL_CHAMBER.has_sensor (1 → true)
     bool     virtualChamberAvailable = false; // пришёл ли снэпшот объекта макроса
     char     printerState[16]       = {0};    // print_stats.state: "standby"/"printing"/...
@@ -63,7 +63,7 @@ struct VirtualChamberData
     bool  available   = false;  // объект `gcode_macro VIRTUAL_CHAMBER` виден в Klipper
     bool  hasSensor   = false;  // установлено `variable_has_sensor: 1` в макросе
     float target      = 0.0f;   // °C (0 = выкл)
-    float temperature = 0.0f;   // °C (валидно только при hasSensor == true)
+    float temperature = NAN;    // °C. NAN если hasSensor == false или значение ещё не пришло.
 };
 
 class MoonrakerClient

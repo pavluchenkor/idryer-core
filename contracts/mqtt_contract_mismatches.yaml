@@ -1,0 +1,219 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# iDryer protocol — known mismatches (drift tracker)
+# ─────────────────────────────────────────────────────────────────────────────
+# Спутник-файл к mqtt_contract.yaml. Перечисляет известные расхождения
+# между контрактом и реализациями. Каждая запись: суть (summary), влияние
+# (impact), принятое решение (decision), каноническая норма (canonical_*)
+# и статус. Это карта того, где код ещё догоняет контракт, а не руководство
+# к действию.
+#
+# Кросс-ссылки в mqtt_contract.yaml формата `known_mismatches.<id>`
+# указывают на записи здесь.
+# ─────────────────────────────────────────────────────────────────────────────
+
+known_mismatches:
+  - id: rfid_stack_partial_in_core
+    severity: high
+    summary: "RFID-стек в core SDK реализован только частично: UART-уровень есть, MQTT-уровень и enum событий — нет."
+    present_in_core:
+      - "UART transport: lib/idryer-core/src/uart/uart_bridge.cpp (sendRfid/sendRfidReadData/sendRfidWriteData + handlers)"
+      - "UART structs: lib/idryer-core/src/uart/uart_protocol.h:300-314 (UartRfidPayload, UartRfidDataPayload)"
+      - "UART message kinds: Rfid=0x14, RfidReadData=0x1A, RfidWriteData=0x1B"
+      - "UART command codes: ReadRfid=0x07, WriteRfid=0x08"
+    missing_in_core:
+      - "Enum class RfidEvent {TagDetected=1, TagRemoved=2, ReaderUnavailable=3} — есть только в legacy idryer-link/lib/idryer-protocol/src/uart/uart_protocol.h:398-403"
+      - "MqttClient::publishRfid() / publishRfidData() — отсутствуют в idryer-core/src/mqtt/mqtt_client.h"
+      - "TelemetryPublisher::publishRfid + rfidEventToString() — отсутствуют в idryer-core (есть в idryer-link/lib/idryer-protocol/src/cloud/telemetry_publisher.cpp:197-410)"
+    impact: |
+      При портировании любого продукта с RFID (новый Storage / Dryer на core SDK) разработчик
+      обнаружит, что нечем сериализовать UartRfidPayload в JSON для MQTT, и нет enum для
+      интерпретации `event` поля. Придётся либо реимплементировать тонкий слой в продукте,
+      либо доперенести из legacy в core.
+    decision_required: |
+      1) Перенести RfidEvent enum + publishRfid/publishRfidData + rfidEventToString из
+         legacy idryer-link в idryer-core (рекомендую — единый source of truth);
+      2) ИЛИ оставить как есть, и в каждом продукте писать свою сериализацию
+         (мусорно, но работает).
+    status: design_or_partial
+    interop_break: false
+    needs_action_for_new_products: true
+  - id: rfid_topic_overload
+    summary: "rfid_event и rfid_read_data делят один MQTT-топик idryer/{serial}/rfid; разделяются по shape."
+    impact: "Портал имеет два handler-а (rfid.handler.ts и rfid-data.handler.ts) с разной логикой."
+  - id: invoke_payload_shape
+    summary: "Две формы invoke решают разные задачи на разных слоях: {id} — UART/wire form, {action,args} — портальный DTO и прямые команды."
+    status: design_note
+    interop_break: false
+    forms:
+      wire_form_uart:
+        payload: { cmd: "invoke", id: <menu_index> }
+        used_by: "Portal → idryer-link bridge → iDryerControllerV2 (ConfigPush JSON через UART)"
+        dispatch: "iDryerControllerV2 ищет g_menu[id].u.action.invoke (uart_manager.cpp:1022-1050)"
+      direct_action_form:
+        payload: { cmd: "invoke", action: "<name>", args: { ... } }
+        used_by: "iHeater-link (heat.start / heat.stop / led.pulse — обработчики в command_routing.cpp); core SDK runtime callbacks (device.getConfig и др.)"
+        dispatch: "Прямой колбэк по имени action в прошивке"
+      portal_dto:
+        accepts_both: true
+        purpose: "DTO принимает обе формы как UI-удобство; разрешение action → id для UART-пути выполняется в портале/SDK по menu snapshot до публикации в MQTT"
+    rationale: |
+      Разрешение action → id на стороне UART потребовало бы строковой таблицы action-имён
+      в firmware iDryerControllerV2 (flash + RAM на каждый пункт меню) ради функции, которую
+      портал уже решает через menu snapshot. UART-форма остаётся бинарно-индексной,
+      action-форма живёт там, где имя действия — это идентификатор колбэка (iHeater-link,
+      core SDK runtime).
+  # ── Interop-баги между Portal/legacy bridge/iDryerControllerV2 (требуют решения по коду) ──
+  - id: write_rfid_payload_mismatch
+    severity: critical
+    summary: "Portal посылает {commandId, unitId, expectedUid, ttlMs, format, data, timestamp}; legacy firmware ждёт {unitId, data, verify}; iHeater игнорирует"
+    portal_publishes: "iDryerPortal/backend/src/rfid/write-orchestrator.service.ts:211-234"
+    firmware_consumes: "idryer-link/lib/idryer-protocol/src/cloud/command_handler.cpp:415-512"
+    iheater_ignores: "iHeater-link/src/heater/command_routing.cpp:206-215"
+    decision_made: "Variant B — firmware aligns to Portal payload"
+    decision_date: "2026-05-01"
+    canonical_payload:
+      commandId:
+        {
+          type: string,
+          format: uuid_v4,
+          required: true,
+          purpose: "корреляция запроса с ответом в rfid/write_result",
+        }
+      unitId:
+        {
+          type: int_or_string,
+          required: true,
+          note: "число 0..3 либо 'U1'..'U4'",
+        }
+      expectedUid:
+        {
+          type: string,
+          format: hex,
+          required: true,
+          purpose: "UID метки с предыдущего read; гарантия записи на ту же метку",
+        }
+      ttlMs:
+        {
+          type: uint32,
+          required: true,
+          default: 15000,
+          note: "таймаут на стороне устройства",
+        }
+      format:
+        {
+          type: string,
+          required: true,
+          note: "тип кодирования: ndef / bambu / proprietary — селектор драйвера записи",
+        }
+      data:
+        {
+          type: string,
+          format: base64,
+          required: true,
+          purpose: "готовый бинарь, формируется на портале; устройство пишет байт-в-байт",
+        }
+      timestamp: { type: string, format: ISO8601, required: true }
+    expected_response:
+      topic: "idryer/{serial}/rfid/write_result"
+      payload:
+        commandId: "echo из запроса"
+        status: "'ok' | 'failed'"
+        error: "string при failed"
+    implementation_notes:
+      - "Портал уже формирует бинарь — прошивка просто пишет байты, не парсит data."
+      - "iHeater Link продолжает игнорировать write_rfid (нет RFID-ридера) — это нормально."
+      - "После реализации обновить status entry messages.rfid_write_data: design_or_partial → implemented."
+    status: design_or_partial
+    interop_break: true
+    todo:
+      - "Реализовать на стороне idryer-link / iDryerControllerV2 приём нового payload"
+      - "Реализовать публикацию rfid/write_result"
+
+  - id: portal_not_capability_aware
+    summary: "Portal шлёт одни и те же команды всем устройствам. iHeater (нагреватель) и Storage Link (коробка хранения) получают команды от полной сушилки V3, для которых у них нет ни функционала, ни hardware."
+    why_it_is_wrong: |
+      Устройства разные. На iHeater нет сессий сушки, профилей, RFID, паузы;
+      на Storage нет нагревателя. Команда commands/profile нагревателю
+      бессмысленна; commands/drying коробке хранения — тем более.
+      Контракт описывает кому что применимо: mqtt_contract.yaml,
+      секция product_topic_support (~line 109).
+    what_portal_should_send_to_iheater:
+      - "commands/get_config — запросить меню"
+      - "commands/set — изменить значение в меню"
+      - "commands/invoke — запустить/остановить нагрев (action heat.start/heat.stop) или вызвать пункт меню по id"
+    fix: |
+      Portal читает product из device info (iheater_link / storage_link /
+      dryer_v3) и фильтрует команды по product_topic_support перед публикацией.
+      Запуск/остановка для iHeater и Storage Link — через commands/invoke с
+      action, не через legacy commands/drying|storage|stop.
+    open_question: "commands/pause и commands/resume отсутствуют в product_topic_support вообще — нужно решить: добавить для dryer_v3 (если применимо) или удалить публикацию из портала."
+
+  - id: iheater_find_action_backlog
+    status: backlog
+    summary: "commands/find на iHeater сейчас пустой (нет индикатора). Можно реализовать через LED-паттерн (invoke led.pulse) — потом добавить iheater_link в product_topic_support: commands/find."
+
+  - id: status_config_delta_not_implemented_in_current
+    severity: high
+    summary: "yaml messages.status и messages.config_delta помечены как implemented, но current iHeater-link и current iDryer-Storage не имеют publishStatus()/publishConfigDelta() путей."
+    legacy_only: "publishStatus/publishConfigDelta существуют в legacy idryer-link/lib/idryer-protocol — не в current SDK"
+    decision_required: |
+      1) Понизить status/config_delta до 'legacy_only' или 'planned' в текущем yaml-сегменте current-scope;
+      2) ИЛИ: реализовать publishStatus и publishConfigDelta в current iHeater-link и iDryer-Storage.
+    status: design_or_partial
+    interop_break: true
+
+  - id: portal_does_not_subscribe_offline_lwt
+    severity: high
+    summary: "Device-side LWT настроен ровно как yaml говорит, но Portal не subscribe-ится на idryer/{serial}/offline. Portal online/offline state вычисляется из 60-second telemetry heartbeat timeout."
+    decision_required: |
+      1) Portal: добавить subscribe на idryer/+/offline и handler;
+      2) ИЛИ: задокументировать в yaml что offline LWT работает только broker-side, портал использует heartbeat timeout (60s).
+    status: design_or_partial
+    interop_break: true
+
+  - id: rfid_event_readerId_required_in_portal
+    severity: high
+    summary: "yaml payloads.Rfid.fields.readerId описывает поле как опциональный физический индекс, но Portal rfid.handler.ts:43-48 dropит event если readerId отсутствует."
+    portal: "iDryerPortal/backend/src/mqtt-telemetry/handlers/rfid.handler.ts:43-48 — required-чек"
+    legacy_publisher: "idryer-link/lib/idryer-protocol/src/cloud/telemetry_publisher.cpp:221-225 — всегда отправляет readerId"
+    note: "Сейчас runtime работает потому что legacy всегда шлёт. Контракт слишком расслабленный для будущих/новых producer'ов."
+    decision_made: "yaml: пометить readerId как required для MQTT JSON-формы (UART struct и так его всегда несёт)."
+    status: implemented
+    found_by: "external audit (RFID-003)"
+    todo:
+      - "Поправить payloads.Rfid.fields.readerId — добавить required:true для MQTT serialization."
+
+  - id: rfid_write_result_unitId_string_only_in_portal
+    severity: high
+    summary: "yaml mqtt_only[rfid/write_result] разрешает unitId как 'U1..U4' OR uint8 0..3. Portal pending-write lookup использует deviceId:unitId как ключ — если firmware вернёт numeric 0..3, ключ станет 'deviceId:0', а pending хранит 'deviceId:U1' → match не найдётся."
+    portal_writer: "iDryerPortal/backend/src/rfid/write-orchestrator.service.ts:154-159,211-230 — store pending key с string unitId 'U2'"
+    portal_reader: "iDryerPortal/backend/src/rfid/write-orchestrator.service.ts:288-295 — lookup по тому же составному ключу"
+    decision_made: "yaml: в rfid/write_result.json_shape пометить unitId — STRICTLY string 'U1..U4' (не numeric)."
+    status: implemented
+    found_by: "external audit (RFID-011)"
+    todo:
+      - "Уточнить json_shape в mqtt_only[rfid/write_result] — unitId только string."
+
+  - id: ha_publisher_loop_bound_bugs
+    severity: high
+    summary: "Shared HA consumer (ha_publisher.cpp) использует неправильные upper bounds в loop'ах: Telemetry/Status truncate to 3 (i<3), Weights использует i<8 для weights[4] — потенциальный read past array."
+    impact: "Telemetry/Status: 4-й юнит не публикуется в HA. Weights: при некорректном count>4 чтение за пределами массива (UB)."
+    decision_required: |
+      1) Поправить ha_publisher.cpp loops: i<4 везде (либо использовать NUM_UNITS константу).
+    status: design_or_partial
+    interop_break: false
+    todo:
+      - "Code-fix в SDK (HA-publisher): заменить magic-границы циклов 3/8 на 4 (или NUM_UNITS)."
+
+  - id: rfid_event_readerId_note_wrong_path
+    severity: medium
+    summary: "yaml payloads.Rfid.fields.readerId.note описывает поведение '0xFF resolution by unitId', но это поведение для ВХОДЯЩЕГО RfidWriteData write fragment (iDryerControllerV2 main.cpp:1061-1069), НЕ для исходящего Rfid (0x14) event."
+    rfid_event_path: "iDryerControllerV2 main.cpp:2022-2031, 2063-2067 — sender всегда заполняет readerId конкретным числом"
+    rfid_write_data_path: "iDryerControllerV2 main.cpp:1061-1069 — для входящего write-fragment LINK может слать 0xFF, iDryerControllerV2 резолвит по unitId"
+    decision_made: "yaml: переместить '0xFF resolution' note из payloads.Rfid.fields.readerId в payloads.RfidData.fields.readerId — там это уместно."
+    status: implemented
+    found_by: "external audit (SPA-RFID-02)"
+    todo:
+      - "yaml: payloads.Rfid.fields.readerId — убрать '0xFF resolution' note, оставить только 'physical reader index'."
+      - "yaml: payloads.RfidData.fields.readerId — добавить note про '0xFF=auto-resolve by unitId' для incoming write-fragments."
+

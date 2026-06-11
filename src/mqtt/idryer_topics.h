@@ -21,6 +21,8 @@ extern "C" {
 #define IDRYER_TOPIC_CONFIG_DELTA       "config/delta"
 #define IDRYER_TOPIC_OFFLINE            "offline"
 #define IDRYER_TOPIC_RFID               "rfid"
+#define IDRYER_TOPIC_RFID_WRITE_RESULT  "rfid/write_result"
+#define IDRYER_TOPIC_WEIGHTS            "weights"
 
 // Backend -> Device
 #define IDRYER_TOPIC_CMD_SET            "commands/set"
@@ -29,6 +31,12 @@ extern "C" {
 
 // Integrations
 #define IDRYER_TOPIC_INTEGRATIONS_STATUS "integrations/status"
+
+// Phase 6 OTA event suffixes (publisher-side; commands/* приходят через wildcard)
+#define IDRYER_TOPIC_FW_UPDATE_ACK       "events/firmware_update_ack"
+#define IDRYER_TOPIC_FW_UPDATE_PROGRESS  "events/firmware_update_progress"
+#define IDRYER_TOPIC_FW_UPDATE_COMPLETE  "events/firmware_update_complete"
+#define IDRYER_TOPIC_FW_CHECK_UPDATE     "events/firmware_check_update"
 
 // QoS for subscribe — enforced by PubSubClient.
 // NOTE: publish always uses QoS 0 (PubSubClient limitation; no publish QoS API).
@@ -42,6 +50,8 @@ extern "C" {
 #define IDRYER_RETAINED_CONFIG          1
 #define IDRYER_RETAINED_CONFIG_DELTA    0
 #define IDRYER_RETAINED_RFID            1
+#define IDRYER_RETAINED_RFID_WRITE_RESULT 0
+#define IDRYER_RETAINED_WEIGHTS         0
 
 // Publish intervals (ms)
 #define IDRYER_INTERVAL_TELEMETRY_MS    5000

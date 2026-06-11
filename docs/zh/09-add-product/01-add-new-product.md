@@ -1,4 +1,11 @@
-# 如何添加新產品
+---
+title: "如何添加基于 idryer-core 的新产品"
+description: "添加新 iDryer 设备的检查清单：profile、命令、遥测、MQTT、门户支持，以及库代码和产品代码的边界。"
+---
+
+# 如何添加基于 idryer-core 的新产品
+
+当你基于 `idryer-core` 制作新产品时使用本指南：耗材干燥箱、加热模块、照明、传感器或其他设备。它说明哪些内容应留在库中，哪些内容属于具体产品代码。
 
 A practical checklist for building a new device on top of `idryer-core`.
 

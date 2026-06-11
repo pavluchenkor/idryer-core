@@ -64,7 +64,7 @@ struct BambuPrinterStatus
     float    nozzleTarget     = 0.0f;  // nozzle_target_temper
     float    bedTemp          = 0.0f;  // bed_temper
     float    bedTarget        = 0.0f;  // bed_target_temper
-    float    chamberTemp      = 0.0f;  // chamber_temper (X1C)
+    float    chamberTemp      = NAN;   // chamber_temper. NAN пока принтер не прислал поле (нет датчика камеры — A1/P1S).
     float    chamberTarget    = 0.0f;  // chamber_target (X1C; 0 если нет)
 
     // Текущий активный филамент (для Reader-сценария iHeater).

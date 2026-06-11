@@ -1,4 +1,11 @@
-# Get started in 5 minutes
+---
+title: "Start an idryer-core device in 5 minutes"
+description: "A quick developer start: build a minimal ESP32 device with idryer-core, connect Wi-Fi and MQTT, and verify commands."
+---
+
+# Start an idryer-core device in 5 minutes
+
+This page helps you quickly check that an ESP32 device can start with `idryer-core`, connect to the network, and exchange data. Use it as the first technical test before building your own dryer, heated chamber, lighting, or another module.
 
 After this page your ESP32 will be flashed, will connect to WiFi, and will appear in [portal.idryer.org](https://portal.idryer.org/) with status Online. Requirements: ESP32-C3 (DevKit, Super Mini, or compatible), USB cable, PlatformIO in VS Code.
 

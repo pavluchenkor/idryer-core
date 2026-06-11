@@ -44,6 +44,7 @@
 #     common.clear_errors         action     button
 #     system.active_unit          uint       hidden
 #     system.language             uint       select
+#     system.ignore_external_cmd  bool       toggle
 #
 # ПРАВИЛА:
 #   • bind ≤ 15 символов (лимит NVS-ключа).
@@ -110,6 +111,22 @@
           persist: true
           scope: global
           default: false
+
+    # ─── Стандартный toggle: игнор внешних команд ────────────────
+    # Source-of-truth для remote-control gate в SDK. Меняй handler так:
+    #   menu_apply_by_bind("ignore_external_cmd", [](float v){
+    #       link.setIgnoreExternalCmd(v != 0.0f);
+    #   });
+    # SDK сам отклоняет MQTT/WS команды и публикует event COMMAND_REJECTED.
+    - id: ignore_external_cmd
+      type: toggle
+      title: { ru: "ИГНОР. ВНЕШ. КОМАНД", en: "IGNOR EXT CMD" }
+      vtype: bool
+      bind: ignore_external_cmd
+      persist: true
+      scope: global
+      default: false
+      role: system.ignore_external_cmd
 
     # ─── Обязательно последние два пункта (контракт) ─────────────
     - id: units_count

@@ -86,45 +86,40 @@ alias contract='python3 contracts/show.py'
 
 ## Add a New Device
 
-Full workflow (fork -> yaml -> regen -> firmware -> widget -> UIKit -> PR):
+Full workflow (fork -> yaml -> regen -> firmware -> dashboard card -> UIKit -> PR):
 
--> **[docs/ru/09-add-product/02-add-widget.md](../docs/ru/09-add-product/02-add-widget.md)**
--> **[docs/en/09-add-product/02-add-widget.md](../docs/en/09-add-product/02-add-widget.md)**
+-> **[docs/en/09-add-product/02-add-widget.md](../docs/en/09-add-product/02-add-widget.md)** (source of truth)
+-> **[docs/ru/09-add-product/02-add-widget.md](../docs/ru/09-add-product/02-add-widget.md)** (outdated, see EN)
 
-In practice, adding a new device is easiest when it uses already existing widgets.
+A "widget" in this codebase is a **device card on the portal dashboard** — a product-specific
+React component in `iDryerPortal/frontend-v2/src/components/dashboard/cards/`. The contract
+has no opinion on JSX; there is no widget registry and no generated React files.
 
-Currently, only these dashboard widgets are actually connected in portal:
-- `HeaterControl`
-- `LedPulse`
+Dashboard cards currently in the portal:
+- `HeaterCard` — `IHEATER_LINK`
+- `StorageCard` — `STORAGE_LINK`
+- `IDryerCard` — fallback for devices without a dedicated card
 
-This list will grow over time.
-If you need a new widget, open a PR in `iDryerPortal/frontend-v2`
-(register in `src/components/widgets/widget-registry.tsx` and add an example in `src/pages/UiKitPage.tsx`).
+Adding a card for a new device type is a portal-side task (see the page linked above).
 
-Other widget types (`button`, `slider`, `toggle`, `number`, `select`, `hidden`,
-`ProfileEditor`, `RfidWriter`) are currently mapped to `NullWidget` in `widget-registry.tsx`
-(so they are not rendered as dedicated dashboard components).
-
-Short flow (when using an existing widget):
+Short flow:
 
 ```text
 mqtt_contract.yaml
   capability_vocabulary   <- new peripheral -> hasXxx in Config
-  canonical_roles         <- role + React widget name
-  invoke_actions          <- command arguments for widget
+  canonical_roles         <- semantic role for menu items
+  invoke_actions          <- command arguments
   device_profiles         <- device capabilities + invoke_actions
         |
         +-> ./contracts/regen.sh
               +-> _generated/scaffolds/my_device/  (firmware scaffold)
-              +-> mqtt-api.types.ts                (TS types)
-              +-> portal/.../widgets/...           (copied widget files)
+              +-> mqtt-api.types.ts                (TS types -> portal)
+              +-> roles.*.json                     (i18n -> portal)
+              +-> canonical_roles.dart             (mobile)
 ```
 
-If you need a new custom widget (not one of existing ones), this is a separate task:
-1. Add or update widget component in `contracts/widgets/`.
-2. Run `./contracts/regen.sh` (copies files into `iDryerPortal/frontend-v2`).
-3. Manually register widget in `frontend-v2/src/components/widgets/widget-registry.tsx`.
-4. Add demo section in `frontend-v2/src/pages/UiKitPage.tsx`.
+The portal then consumes `mqtt-api.types.ts` and renders the device with the appropriate card
+(switched by `deviceType` in `src/components/dashboard/DeviceDashboardCard.tsx`).
 
 ## Pipeline
 

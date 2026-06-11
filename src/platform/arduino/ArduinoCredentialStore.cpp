@@ -18,20 +18,23 @@ bool ArduinoCredentialStore::load(DeviceIdentity& identity) {
         return false;
     }
 
-    String token    = prefs_.getString("token",    "");
-    String deviceId = prefs_.getString("deviceId", "");
-    String serial   = prefs_.getString("serial",   "");
+    String token        = prefs_.getString("token",        "");
+    String deviceId     = prefs_.getString("deviceId",     "");
+    String serial       = prefs_.getString("serial",       "");
+    String boundMqttKey = prefs_.getString("boundMqttKey", "");
 
-    if (token.length()    > 0) identity.setToken(token.c_str());
-    if (deviceId.length() > 0) identity.setDeviceId(deviceId.c_str());
-    if (serial.length()   > 0) identity.setSerialNumber(serial.c_str());
+    if (token.length()        > 0) identity.setToken(token.c_str());
+    if (deviceId.length()     > 0) identity.setDeviceId(deviceId.c_str());
+    if (serial.length()       > 0) identity.setSerialNumber(serial.c_str());
+    if (boundMqttKey.length() > 0) identity.setBoundMqttKey(boundMqttKey.c_str());
 
     prefs_.end();
 
-    HAL_LOG_DEBUG("STORE", "Loaded: serial=%s token=%s deviceId=%s",
-                  identity.hasSerialNumber() ? identity.serialNumber : "(none)",
-                  identity.hasToken()        ? "yes" : "no",
-                  identity.hasDeviceId()     ? identity.deviceId : "(none)");
+    HAL_LOG_DEBUG("STORE", "Loaded: serial=%s token=%s deviceId=%s boundMqttKey=%s",
+                  identity.hasSerialNumber()  ? identity.serialNumber  : "(none)",
+                  identity.hasToken()         ? "yes" : "no",
+                  identity.hasDeviceId()      ? identity.deviceId      : "(none)",
+                  identity.hasBoundMqttKey()  ? identity.boundMqttKey  : "(none)");
 
     return identity.hasToken();
 }
@@ -41,9 +44,10 @@ bool ArduinoCredentialStore::save(const DeviceIdentity& identity) {
         HAL_LOG_ERROR("STORE", "Failed to open NVS for writing");
         return false;
     }
-    prefs_.putString("token",    identity.token);
-    prefs_.putString("deviceId", identity.deviceId);
-    prefs_.putString("serial",   identity.serialNumber);
+    prefs_.putString("token",        identity.token);
+    prefs_.putString("deviceId",     identity.deviceId);
+    prefs_.putString("serial",       identity.serialNumber);
+    prefs_.putString("boundMqttKey", identity.boundMqttKey);
     prefs_.end();
     HAL_LOG_INFO("STORE", "Saved credentials to NVS");
     return true;

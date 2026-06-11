@@ -1,4 +1,11 @@
-# 什麼是 idryer-core
+---
+title: "idryer-core 是什么，什么时候使用"
+description: "idryer-core 的用途：面向 ESP32 iDryer 设备的通用库，处理 MQTT、Wi-Fi、遥测和门户命令。"
+---
+
+# idryer-core 是什么，什么时候使用
+
+当设备需要接入 iDryer 生态系统时使用 `idryer-core`：发布遥测、接收命令、完成绑定并通过 MQTT 通信。它特别适合耗材干燥箱、主动加热腔、照明、传感器和 3D 打印机周边模块。
 
 如果您正在為 iDryer 雲端構建 ESP32 設備，此庫處理 WiFi 佈建（Improv）、聲明協議、MQTT 會話（TLS、重新連接、時間同步）、定期遙測/狀態發佈和傳入命令路由。大約 500 行的樣板代碼簡化為 `link.begin(); link.loop();`。
 

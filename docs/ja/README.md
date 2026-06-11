@@ -1,4 +1,11 @@
-# idryer-core — ライブラリドキュメント
+---
+title: "iDryerデバイスと自作モジュール向けidryer-core"
+description: "idryer-coreの資料: ESP32デバイス、MQTT、Wi-Fi、クラウド状態機械、フィラメント乾燥機や3Dプリンターモジュール向けコマンド。"
+---
+
+# iDryerデバイスと自作モジュール向けidryer-core
+
+`idryer-core` は、自作のフィラメント乾燥機、加熱チャンバー、照明、その他の3Dプリンターモジュールを管理可能なiDryerデバイスにしたい場合に使います。Wi-Fi、MQTT、コマンド、テレメトリ、ポータル通信をライブラリが担当します。
 
 `idryer-core` — ESP32ベースのiDryerデバイス向けC++ライブラリ(Arduino/PlatformIO)。WiFi、MQTT、クラウド状態マシン、およびコマンドルーティングを管理します。製品はデバイス固有の動作のみを実装します。
 

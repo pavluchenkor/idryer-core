@@ -10,6 +10,7 @@
 #include "iDryer.h"
 
 #include "mqtt/mqtt_client.h"   // MQTT_CONFIG_CHUNK_SIZE
+#include "work_time_tracker.h"  // накопительный workTimeCounter
 #include <Arduino.h>
 #include <WiFi.h>
 #include <ArduinoJson.h>
@@ -18,6 +19,7 @@
 
 #include "idryer_core.h"
 #include "idryer_integrations.h"
+#include "cloud/cloud_state_machine.h"
 #include "local_access/local_access.h"
 #include "local_access/device_publisher.h"
 
@@ -40,8 +42,9 @@ const char* unitModeString(UnitMode m);
 
 class FacadeProfile : public idryer::IProfile {
 public:
-    FacadeProfile(const Config& cfg, const idryer::ArduinoCredentialStore& credentials)
-        : cfg_(cfg), credentials_(credentials) {}
+    FacadeProfile(const Config& cfg, const idryer::ArduinoCredentialStore& credentials,
+                  idryer::cloud::CloudStateMachine* cloud = nullptr)
+        : cfg_(cfg), credentials_(credentials), cloud_(cloud) {}
 
     void onOnline() override {
         // No product-specific hardware to bring online — facade is generic.
@@ -74,12 +77,29 @@ public:
         StaticJsonDocument<1024> doc;
         doc["hardwareVersion"] = cfg_.hardwareVersion ? cfg_.hardwareVersion : "";
         doc["firmwareVersion"] = cfg_.firmwareVersion ? cfg_.firmwareVersion : "";
-        doc["workTimeCounter"] = millis() / 1000u;
+        doc["workTimeCounter"] = idryer::WorkTimeTracker::instance().total();
         doc["unitsCount"]      = cfg_.unitsCount;
-        if (id.hasSerialNumber()) {
+        // For two-chip devices, use the mcuSerial from CloudStateMachine (set via
+        // UART Hello). For one-ID devices (no cloud_ or no mcuSerial set),
+        // fall back to identity_.serialNumber = DEVICE_... as before.
+        const char* mcu = cloud_ ? cloud_->getMcuSerial() : nullptr;
+        if (mcu && mcu[0] != '\0') {
+            doc["mcuSerial"] = mcu;
+        } else if (id.hasSerialNumber()) {
             doc["mcuSerial"] = id.serialNumber;
         }
+        const char* mcuFw = cloud_ ? cloud_->getMcuFirmwareVersion() : nullptr;
+        if (mcuFw && mcuFw[0] != '\0') {
+            doc["mcuFirmwareVersion"] = mcuFw;
+        }
+        const char* mcuHw = cloud_ ? cloud_->getMcuHardwareVersion() : nullptr;
+        if (mcuHw && mcuHw[0] != '\0') {
+            doc["mcuHardwareVersion"] = mcuHw;
+        }
         doc["deviceType"] = deviceTypeString(cfg_.deviceType);
+        if (cfg_.model && cfg_.model[0] != '\0') {
+            doc["model"] = cfg_.model;
+        }
 
         // units[] with per-unit capabilities (legacy field names).
         JsonArray units = doc.createNestedArray("units");
@@ -88,8 +108,8 @@ public:
             u["unitId"] = i;        // integer per legacy
 
             JsonObject caps = u.createNestedObject("capabilities");
-            caps["heater"]           = cfg_.hasHeaterPower;
-            caps["fan"]              = cfg_.hasFanStatus;
+            caps["heater"]           = cfg_.hasHeater;
+            caps["fan"]              = cfg_.hasFan;
             caps["servo"]            = false;     // not in Config
             caps["RhAirSensor"]      = cfg_.hasAirHumidity;
             caps["TempAirSensor"]    = cfg_.hasAirTemp;
@@ -103,6 +123,8 @@ public:
     }
 
 private:
+    idryer::cloud::CloudStateMachine* cloud_ = nullptr;
+
     static const char* deviceTypeString(DeviceType t) {
         switch (t) {
             case DeviceType::Dryer:       return "dryer";
@@ -143,7 +165,7 @@ struct Link::Impl {
           pub(&mqtt, &local),
           intManager(&mqtt, &intStore),
           improv(&Serial),
-          profile(this->cfg, credentials),
+          profile(this->cfg, credentials, &cloud),
           runtime(&cloud, &dispatcher, &profile, &mqtt) {}
 
     // Saved configuration (mutable — setUnitsCount() updates it at runtime).
@@ -200,6 +222,7 @@ struct Link::Impl {
     // User callbacks.
     Link::IntegrationStatusCallback onIntegrationStatus;
     Link::ClaimPinCallback          onClaimPin;
+    Link::DiagnosticCallback        onDiagnostic;
     Link::PublishHookCallback       onTelemetryPublish;
     Link::PublishHookCallback       onStatusPublish;
 
@@ -219,6 +242,13 @@ struct Link::Impl {
     uint32_t sessionNum[MAX_UNITS]   = {0, 0, 0, 0};
     UnitMode lastModeForSn[MAX_UNITS]= { UnitMode::Idle, UnitMode::Idle,
                                          UnitMode::Idle, UnitMode::Idle };
+
+    // Device-wide remote-control gate. true → SDK отклоняет входящие команды
+    // из MQTT/Local-WS и публикует event COMMAND_REJECTED с reason=ignore_external_cmd.
+    // Source of truth — NVS/EEPROM продукта; продукт вызывает setIgnoreExternalCmd()
+    // при загрузке и при изменении из локального меню.
+    bool ignoreExternalCmd = false;
+
 };
 
 // ──────────────────────────────────────────────────────────────────────
@@ -237,7 +267,6 @@ Link::Link(const Config& cfg) {
         telemetry.heaterTempC[i]    = 0.0f;
         telemetry.heaterPower01[i]  = 0.0f;
         telemetry.fanOn[i]          = false;
-        telemetry.weightG[i]        = 0;
 
         status.mode[i]        = UnitMode::Idle;
         status.targetTempC[i] = 0.0f;
@@ -250,6 +279,11 @@ Link::~Link() { impl_ = nullptr; }
 
 bool Link::begin() {
     Serial.begin(115200);
+
+    // Accumulated work-time counter — читаем из NVS до того как продукт
+    // что-либо запустит. Любой ребут (включая OTA) теперь сохраняет общее
+    // время работы устройства. См. work_time_tracker.h.
+    idryer::WorkTimeTracker::instance().begin();
 
 #ifdef IDRYER_DEV_REPL
     // Dev mode: HAL logs go to Serial right away; product owns Serial input.
@@ -315,9 +349,9 @@ bool Link::begin() {
         idryer::ha::HaCapabilities caps;
         caps.airTemp     = impl_->cfg.hasAirTemp;
         caps.airHumidity = impl_->cfg.hasAirHumidity;
-        caps.heaterPower = impl_->cfg.hasHeaterPower;
-        caps.fan         = impl_->cfg.hasFanStatus;
-        caps.weight      = impl_->cfg.hasScales;
+        caps.heaterPower = impl_->cfg.hasHeater;
+        caps.fan         = impl_->cfg.hasFan;
+        caps.weight      = impl_->cfg.hasWeight;
         impl_->intManager.setHaCapabilities(caps);
     }
     // Map facade DeviceType → SDK UartDeviceType.
@@ -359,6 +393,10 @@ bool Link::begin() {
         auto* self = static_cast<Link::Impl*>(ctx);
         if (self->onClaimPin) self->onClaimPin(pin, expires);
     }, impl_);
+    impl_->cloud.setDiagnosticCallback([](const char* message, void* ctx) {
+        auto* self = static_cast<Link::Impl*>(ctx);
+        if (self->onDiagnostic) self->onDiagnostic(message);
+    }, impl_);
 
     // Bring runtime online.
     impl_->runtime.begin();
@@ -367,6 +405,10 @@ bool Link::begin() {
 }
 
 void Link::loop() {
+    // Throttled NVS-persist для накопительного workTimeCounter — каждые 5 мин.
+    // No-op в большинстве итераций (внутренний interval check).
+    idryer::WorkTimeTracker::instance().loop();
+
 #ifndef IDRYER_DEV_REPL
     // До WiFi: только Improv. runtime.loop() → cloud.loop() →
     // WiFi.scanNetworks (~5с) переполняет USB CDC FIFO и ломает Improv-RPC.
@@ -393,14 +435,38 @@ void Link::loop() {
                     s_serial_len = 0;
                     const char* cmd = s_serial_buf;
                     if (strcmp(cmd, "START_CLAIM") == 0 || strcmp(cmd, "claim") == 0) {
-                        if (isOnline()) {
-                            idryer::DeviceIdentity id;
-                            impl_->credentials.load(id);
-                            Serial.printf("CLAIM_ALREADY:%s\n",
-                                          id.hasSerialNumber() ? id.serialNumber : "?");
-                        } else {
-                            bool ok = requestClaim();
-                            Serial.println(ok ? "CLAIM_STARTED:OK" : "CLAIM_STARTED:ERROR");
+                        idryer::DeviceIdentity id;
+                        impl_->credentials.load(id);
+                        iDryer::ClaimRequestResult result = requestClaimDetailed();
+                        switch (result) {
+                            case iDryer::ClaimRequestResult::Started:
+                                Serial.println("CLAIM_STARTED:OK");
+                                break;
+                            case iDryer::ClaimRequestResult::AlreadyClaimed:
+                                Serial.printf("CLAIM_ALREADY:%s\n",
+                                              id.hasSerialNumber() ? id.serialNumber : "?");
+                                break;
+                            case iDryer::ClaimRequestResult::StaleNvs:
+                                Serial.printf("CLAIM_STALE_NVS:%s:%s\n",
+                                              id.hasSerialNumber() ? id.serialNumber : "?",
+                                              id.hasDeviceId() ? id.deviceId : "?");
+                                break;
+                            case iDryer::ClaimRequestResult::WaitingForMcuSerial:
+                                Serial.println("CLAIM_STARTED:ERROR:WAITING_FOR_MCU_SERIAL");
+                                break;
+                            case iDryer::ClaimRequestResult::WifiNotConnected:
+                                Serial.println("CLAIM_STARTED:ERROR:WIFI_NOT_CONNECTED");
+                                break;
+                            case iDryer::ClaimRequestResult::TokenWithheld:
+                                Serial.println("CLAIM_STARTED:ERROR:TOKEN_WITHHELD");
+                                break;
+                            case iDryer::ClaimRequestResult::ProvisionFailed:
+                                Serial.println("CLAIM_STARTED:ERROR:PROVISION_FAILED");
+                                break;
+                            case iDryer::ClaimRequestResult::RegisterFailed:
+                            default:
+                                Serial.println("CLAIM_STARTED:ERROR:REGISTER_FAILED");
+                                break;
                         }
                         Serial.flush();
                     }
@@ -493,22 +559,26 @@ uint8_t parseUnitId(const char* s) {
 // UnitMode → contract string. Mirrors yaml.enums.UartDryerMode + PortalUnitStatus.UNKNOWN.
 const char* unitModeString(UnitMode m) {
     switch (m) {
-        case UnitMode::Idle:    return "IDLE";
-        case UnitMode::Drying:  return "DRYING";
-        case UnitMode::Storage: return "STORAGE";
-        case UnitMode::Profile: return "PROFILE";
-        case UnitMode::Fault:   return "FAULT";
-        case UnitMode::Unknown: return "UNKNOWN";
+        case UnitMode::Idle:           return "IDLE";
+        case UnitMode::Drying:         return "DRYING";
+        case UnitMode::Storage:        return "STORAGE";
+        case UnitMode::Profile:        return "PROFILE";
+        case UnitMode::Heating:        return "HEATING";
+        case UnitMode::LightAnimation: return "LIGHT_ANIMATION";
+        case UnitMode::Fault:          return "FAULT";
+        case UnitMode::Unknown:        return "UNKNOWN";
     }
     return "UNKNOWN";
 }
 
-// EventKind → JSON `severity` (uppercase per contract).
+// EventKind → JSON `severity`. Канон CRIT/ERROR/WARN/INFO — единый словарь
+// с RP2040 error bus и backend events.handler.
 const char* eventSeverityString(EventKind k) {
     switch (k) {
-        case EventKind::Info:    return "INFO";
-        case EventKind::Warning: return "WARNING";
-        case EventKind::Error:   return "ERROR";
+        case EventKind::Info:     return "INFO";
+        case EventKind::Warning:  return "WARN";
+        case EventKind::Error:    return "ERROR";
+        case EventKind::Critical: return "CRIT";
     }
     return "INFO";
 }
@@ -529,12 +599,24 @@ void Link::publishTelemetryNow() {
         u["unitId"] = uid;
 
         // Only fields enabled in Config are emitted.
-        if (cfg.hasAirTemp)     u["temperature"] = telemetry.airTempC[i];
-        if (cfg.hasAirHumidity) u["humidity"]    = telemetry.airHumidityPct[i];
-        if (cfg.hasHeaterTemp)  u["heaterTemp"]  = telemetry.heaterTempC[i];
-        if (cfg.hasHeaterPower) u["heaterPower"] = (int)roundf(telemetry.heaterPower01[i] * 100.0f);
-        if (cfg.hasFanStatus)   u["fanStatus"]   = telemetry.fanOn[i];
-        if (cfg.hasScales)      u["weight"]      = telemetry.weightG[i];
+        // Float-поля: NAN ⇒ поле НЕ публикуется вообще (нет данных). Продукт
+        // ставит NAN когда датчик не отвечает / не подключён. На проводе и в
+        // случае cfg.has*=false, и в случае NAN — поле отсутствует. Frontend
+        // обрабатывает одинаково: TelemetryRow скрывает cell.
+        if (cfg.hasAirTemp) {
+            float v = telemetry.airTempC[i];
+            if (!isnan(v)) u["temperature"] = v;
+        }
+        if (cfg.hasAirHumidity) {
+            float v = telemetry.airHumidityPct[i];
+            if (!isnan(v)) u["humidity"] = v;
+        }
+        if (cfg.hasHeaterTemp) {
+            float v = telemetry.heaterTempC[i];
+            if (!isnan(v)) u["heaterTemp"] = v;
+        }
+        if (cfg.hasHeater) u["heaterPower"] = (int)roundf(telemetry.heaterPower01[i] * 100.0f);
+        if (cfg.hasFan)    u["fanStatus"]   = telemetry.fanOn[i];
     }
 
     doc["rssi"]   = WiFi.RSSI();
@@ -562,10 +644,15 @@ void Link::publishStatusNow() {
 
         // sessionNum: backend requires > 0 for DRYING/STORAGE/PROFILE.
         // Increment on transition from non-active to active.
-        const bool wasActive = (impl_->lastModeForSn[i] == UnitMode::Drying ||
-                                impl_->lastModeForSn[i] == UnitMode::Storage);
-        const bool isActive  = (status.mode[i] == UnitMode::Drying ||
-                                status.mode[i] == UnitMode::Storage);
+        // «Активный» режим = всё, что не Idle/Fault/Unknown. Phase 5: добавили
+        // Heating, LightAnimation, Profile. Generic-проверка вместо whitelist,
+        // чтобы новые mode'ы автоматически попадали в session-tracking без
+        // правки SDK.
+        auto isActiveMode = [](UnitMode m) {
+            return m != UnitMode::Idle && m != UnitMode::Fault && m != UnitMode::Unknown;
+        };
+        const bool wasActive = isActiveMode(impl_->lastModeForSn[i]);
+        const bool isActive  = isActiveMode(status.mode[i]);
         if (isActive && !wasActive) impl_->sessionNum[i]++;
         impl_->lastModeForSn[i] = status.mode[i];
 
@@ -587,6 +674,7 @@ void Link::publishStatusNow() {
 
     doc["uptime"] = millis() / 1000u;
     doc["rssi"]   = WiFi.RSSI();   // bonus: free signal info on every status
+    doc["ignoreExternalCmd"] = impl_->ignoreExternalCmd;
 
     if (impl_->onStatusPublish) {
         impl_->onStatusPublish(doc.as<JsonObject>());
@@ -638,6 +726,48 @@ bool Link::onCommand(const char* name, CommandCallback cb) {
 void Link::dispatchCommand(const char* command, JsonObjectConst data) {
     if (!command || !command[0]) return;
 
+    // ─── Gate: ignoreExternalCmd ─────────────────────────────────────────
+    // Защищает от внешних команд-ДЕЙСТВИЙ (запуск нагрева, включение ленты,
+    // запись RFID и т.п.). Не блокирует read/config: пользователь должен
+    // иметь возможность читать состояние и менять параметры даже когда
+    // действия запрещены.
+    //
+    // Whitelist (всегда проходят):
+    //   set, get_config, ping, link_integration,
+    //   firmware_update_announce, firmware_check_update_response
+    // Всё остальное (invoke, drying/storage/profile/stop, bambu_apply,
+    // write_rfid, неизвестные) — блокируется и публикуется COMMAND_REJECTED.
+    //
+    // firmware_update_* — критическая security-инфраструктура (Phase 6).
+    // Auto-update не должен блокироваться пользовательским гейтом, иначе
+    // security-patches не доедут до устройств с ign_ext_cmd=true. Защита
+    // OTA — это право push'а в admin/firmware/push (роль SUPERUSER в
+    // backend), не флаг в меню устройства.
+    if (impl_->ignoreExternalCmd) {
+        const bool isExempt =
+            (strcmp(command, "set") == 0) ||
+            (strcmp(command, "get_config") == 0) ||
+            (strcmp(command, "ping") == 0) ||
+            (strcmp(command, "link_integration") == 0) ||
+            (strcmp(command, "firmware_update_announce") == 0) ||
+            (strcmp(command, "firmware_check_update_response") == 0);
+        if (!isExempt) {
+            StaticJsonDocument<256> doc;
+            doc["severity"] = eventSeverityString(EventKind::Warning);
+            doc["event"]    = "COMMAND_REJECTED";
+            doc["message"]  = command;                       // имя отклонённой команды (human-readable)
+            doc["unitId"]   = "DEVICE";                      // device-wide
+            doc["reason"]   = "ignore_external_cmd";         // machine-readable
+            if (data && data["commandId"].is<const char*>()) {
+                doc["commandId"] = data["commandId"].as<const char*>();
+            }
+            impl_->pub.publishEvent(doc);
+            HAL_LOG_WARN("LINK", "rejected '%s' (ignore_external_cmd=true)", command);
+            return;
+        }
+        HAL_LOG_INFO("LINK", "passing '%s' through gate (read/config)", command);
+    }
+
     // ─── Built-in side-effects (always run) ──────────────────────────────
     // Эти команды обрабатывает либа сама. Продукт может ДОПОЛНИТЕЛЬНО
     // подписаться через onCommand(name, ...) — будет вызван post-hook'ом,
@@ -669,6 +799,10 @@ void Link::dispatchCommand(const char* command, JsonObjectConst data) {
 
 void Link::onClaimPin(ClaimPinCallback cb) {
     impl_->onClaimPin = std::move(cb);
+}
+
+void Link::onDiagnostic(DiagnosticCallback cb) {
+    impl_->onDiagnostic = cb;
 }
 
 void Link::onTelemetryPublish(PublishHookCallback cb) {
@@ -730,6 +864,10 @@ bool Link::requestClaim() {
     return impl_->cloud.requestClaim();
 }
 
+iDryer::ClaimRequestResult Link::requestClaimDetailed() {
+    return impl_->cloud.requestClaimDetailed();
+}
+
 idryer::cloud::LinkIntegrationsManager* Link::integrationsManager() {
     return &impl_->intManager;
 }
@@ -758,6 +896,18 @@ void Link::setUnitsCount(uint8_t n) {
     impl_->cfg.unitsCount = n;
 }
 
+void Link::setIgnoreExternalCmd(bool flag) {
+    if (impl_->ignoreExternalCmd == flag) return;
+    impl_->ignoreExternalCmd = flag;
+    // Сразу пубим status, чтобы портал быстро увидел изменение
+    // (а не ждал следующего periodic-снимка).
+    publishStatusNow();
+}
+
+bool Link::isIgnoreExternalCmd() const {
+    return impl_->ignoreExternalCmd;
+}
+
 void Link::publishInfoNow() {
     char infoBuf[1024];
     impl_->profile.buildInfoJson(infoBuf, sizeof(infoBuf));
@@ -768,6 +918,34 @@ void Link::eraseClaimAndRestart() {
     impl_->credentials.clear();
     delay(200);
     ESP.restart();
+}
+
+void Link::setWaitForMcuSerial(bool wait) {
+    impl_->cloud.setWaitForMcuSerial(wait);
+}
+
+iDryer::McuSerialResult Link::setMcuSerial(const char* mcuSerial) {
+    return impl_->cloud.setMcuSerial(mcuSerial);
+}
+
+void Link::setMcuFirmwareVersion(uint32_t fwVersion) {
+    impl_->cloud.setMcuFirmwareVersion(fwVersion);
+}
+
+void Link::setMcuHardwareVersion(const char* hwVersion) {
+    impl_->cloud.setMcuHardwareVersion(hwVersion);
+}
+
+const char* Link::mcuSerial() const {
+    return impl_->cloud.getMcuSerial();
+}
+
+const char* Link::mcuHardwareVersion() const {
+    return impl_->cloud.getMcuHardwareVersion();
+}
+
+const char* Link::mqttKey() const {
+    return impl_->cloud.getMqttKey();
 }
 
 const char* Link::serial() const {

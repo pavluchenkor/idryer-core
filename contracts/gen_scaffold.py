@@ -89,12 +89,12 @@ def gen_main_cpp(profile_name: str, capabilities: list[str], doc: dict) -> str:
     cap_flag_lines: list[str] = []
     for cap in capabilities:
         entry = vocab.get(cap) or {}
-        flag  = entry.get("config_flag", f"has{cap.capitalize()}")
+        flag  = entry.get("config_flag", "has" + "".join(p.capitalize() for p in cap.split("_")))
         desc  = entry.get("description", cap)
         cap_flag_lines.append(f"    .{flag:<22} = true,   // {desc}")
     for cap, entry in vocab.items():
         if cap not in capabilities:
-            flag = entry.get("config_flag", f"has{cap.capitalize()}")
+            flag = entry.get("config_flag", "has" + "".join(p.capitalize() for p in cap.split("_")))
             cap_flag_lines.append(f"    .{flag:<22} = false,  // (not in this profile)")
 
     # ── buildInfoJson capabilities ───────────────────────────────────────────

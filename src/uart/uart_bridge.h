@@ -39,7 +39,6 @@ public:
     using TelemetryHandler       = std::function<void(const UartTelemetryPayload&, const UartFrameHeader&)>;
     using CommandHandler         = std::function<void(const UartCmdPayload&,       const UartFrameHeader&)>;
     using ProfileHandler         = std::function<void(const UartProfilePayload&,   const UartFrameHeader&)>;
-    using ConfigHandler          = std::function<void(const UartConfigPayload&,    const UartFrameHeader&)>;
     using ConfigChunkHandler     = std::function<void(const UartConfigChunkPayload&, uint8_t dataLen, const UartFrameHeader&)>;
     using CommandAckHandler      = std::function<void(const UartAckPayload&,       const UartFrameHeader&)>;
     using ConfigAckHandler       = std::function<void(const UartAckPayload&,       const UartFrameHeader&)>;
@@ -57,6 +56,16 @@ public:
     using WsStatusHandler        = std::function<void(const UartWsStatusPayload&,  const UartFrameHeader&)>;
     using WsResetClientsHandler  = std::function<void(const UartFrameHeader&)>;
     using WsStatusRequestHandler = std::function<void(const UartFrameHeader&)>;
+
+    // DRYER paired OTA (kinds 0x80-0x84). OtaChunkForMcu приходит фрагментированным
+    // (FRAGMENT / LAST_FRAGMENT); handler получает сырой фрагмент, сборку делает
+    // приёмная сторона (RP) по transferId внутри UartOtaChunkForMcuPayload header.
+    using OtaAnnounceForMcuHandler = std::function<void(const UartOtaAnnounceForMcuPayload&, const UartFrameHeader&)>;
+    using OtaChunkForMcuHandler    = std::function<void(const uint8_t* payload, uint8_t length, uint8_t flags, const UartFrameHeader&)>;
+    using OtaChunkAckHandler       = std::function<void(const UartOtaChunkAckPayload&,  const UartFrameHeader&)>;
+    using OtaCommitNowHandler      = std::function<void(const UartOtaCommitNowPayload&, const UartFrameHeader&)>;
+    using OtaStatusHandler         = std::function<void(const UartOtaStatusPayload&,    const UartFrameHeader&)>;
+    using OtaCheckRequestHandler   = std::function<void(const UartOtaCheckRequestPayload&, const UartFrameHeader&)>;
 
     /**
      * @brief Initializes the bridge on the given serial port.
@@ -80,7 +89,6 @@ public:
     bool sendHelloAck(const UartHelloAckPayload& p);
     bool sendCommand(const UartCmdPayload& p, bool ackRequired = true);
     bool sendProfileCommand(const UartProfilePayload& p, bool ackRequired = true);
-    bool sendConfigPush(const UartConfigPayload& p, bool ackRequired = true);
     bool sendConfigPushChunk(const UartConfigChunkPayload& p, uint8_t payloadLen, uint8_t flags);
     bool sendHeartbeat(const UartHeartbeatPayload& p);
     bool sendClaimStatus(const UartClaimStatusPayload& p);
@@ -93,6 +101,14 @@ public:
     bool sendLog(const char* cstr);
     bool sendLog(const UartLogPayload& p);
     bool sendRfidWriteData(const UartRfidDataPayload& p, uint8_t flags = 0);
+
+    // DRYER paired OTA: ESP → RP направление.
+    // sendOtaChunkForMcu — нарезку на фрагменты делает вызывающий код (как
+    // sendConfigPushChunk); payloadLen ≤ UART_MAX_PAYLOAD; flags комбинируются
+    // из UART_FLAG_FRAGMENT / UART_FLAG_LAST_FRAGMENT.
+    bool sendOtaAnnounceForMcu(const UartOtaAnnounceForMcuPayload& p);
+    bool sendOtaChunkForMcu(const uint8_t* payload, uint8_t payloadLen, uint8_t flags);
+    bool sendOtaStatus(const UartOtaStatusPayload& p);
     /// @}
 
     /// @name RP2040-side methods (also usable in tests)
@@ -107,6 +123,11 @@ public:
     bool sendWsEnable(const UartWsEnablePayload& p);
     bool sendWsResetClients();
     bool sendWsStatusRequest();
+
+    // DRYER paired OTA: RP → ESP направление.
+    bool sendOtaChunkAck(const UartOtaChunkAckPayload& p);
+    bool sendOtaCommitNow(const UartOtaCommitNowPayload& p);
+    bool sendOtaCheckRequest(const UartOtaCheckRequestPayload& p);
     /// @}
 
     /**
@@ -122,7 +143,6 @@ public:
     void setTelemetryHandler(const TelemetryHandler& h)          { telemetryHandler_ = h; }
     void setCommandHandler(const CommandHandler& h)              { commandHandler_ = h; }
     void setProfileHandler(const ProfileHandler& h)              { profileHandler_ = h; }
-    void setConfigHandler(const ConfigHandler& h)                { configHandler_ = h; }
     void setConfigChunkHandler(const ConfigChunkHandler& h)      { configChunkHandler_ = h; }
     void setCommandAckHandler(const CommandAckHandler& h)        { commandAckHandler_ = h; }
     void setConfigAckHandler(const ConfigAckHandler& h)          { configAckHandler_ = h; }
@@ -140,6 +160,14 @@ public:
     void setWsStatusHandler(const WsStatusHandler& h)            { wsStatusHandler_ = h; }
     void setWsResetClientsHandler(const WsResetClientsHandler& h){ wsResetClientsHandler_ = h; }
     void setWsStatusRequestHandler(const WsStatusRequestHandler& h){ wsStatusRequestHandler_ = h; }
+
+    // DRYER paired OTA — см. Этап 2/3 ___OTA_MQTT_DESIGN.md.
+    void setOtaAnnounceForMcuHandler(const OtaAnnounceForMcuHandler& h) { otaAnnounceForMcuHandler_ = h; }
+    void setOtaChunkForMcuHandler(const OtaChunkForMcuHandler& h) { otaChunkForMcuHandler_ = h; }
+    void setOtaChunkAckHandler(const OtaChunkAckHandler& h)       { otaChunkAckHandler_ = h; }
+    void setOtaCommitNowHandler(const OtaCommitNowHandler& h)     { otaCommitNowHandler_ = h; }
+    void setOtaStatusHandler(const OtaStatusHandler& h)           { otaStatusHandler_ = h; }
+    void setOtaCheckRequestHandler(const OtaCheckRequestHandler& h) { otaCheckRequestHandler_ = h; }
     /// @}
 
 private:
@@ -182,7 +210,6 @@ private:
     TelemetryHandler       telemetryHandler_;
     CommandHandler         commandHandler_;
     ProfileHandler         profileHandler_;
-    ConfigHandler          configHandler_;
     ConfigChunkHandler     configChunkHandler_;
     CommandAckHandler      commandAckHandler_;
     ConfigAckHandler       configAckHandler_;
@@ -200,6 +227,13 @@ private:
     WsStatusHandler        wsStatusHandler_;
     WsResetClientsHandler  wsResetClientsHandler_;
     WsStatusRequestHandler wsStatusRequestHandler_;
+
+    OtaAnnounceForMcuHandler otaAnnounceForMcuHandler_;
+    OtaChunkForMcuHandler    otaChunkForMcuHandler_;
+    OtaChunkAckHandler       otaChunkAckHandler_;
+    OtaCommitNowHandler      otaCommitNowHandler_;
+    OtaStatusHandler         otaStatusHandler_;
+    OtaCheckRequestHandler   otaCheckRequestHandler_;
 };
 
 } // namespace idryer

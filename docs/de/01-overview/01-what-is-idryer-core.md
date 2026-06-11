@@ -1,4 +1,11 @@
-# Was ist idryer-core
+---
+title: "Was idryer-core ist und wann man es nutzt"
+description: "Zweck von idryer-core: gemeinsame Bibliothek für ESP32-iDryer-Geräte, MQTT, Wi-Fi, Telemetrie und Portalbefehle."
+---
+
+# Was idryer-core ist und wann man es nutzt
+
+Verwende `idryer-core`, wenn ein Gerät zur iDryer-Umgebung gehören soll: Telemetrie senden, Befehle empfangen, gekoppelt werden und über MQTT kommunizieren. Das passt besonders zu Filamenttrocknern, aktiven Kammern, Beleuchtung, Sensoren und weiteren Modulen am 3D-Drucker.
 
 Wenn Sie ein ESP32-Gerät für die iDryer Cloud entwickeln, handhabt diese Bibliothek WiFi-Bereitstellung (Improv), das Claim-Protokoll, die MQTT-Sitzung (TLS, erneute Verbindung, Zeitsynchronisierung), periodische Telemetrie-/Statusveröffentlichung und eingehende Befehlsweiterleitung. Etwa 500 Zeilen Boilerplate-Code fallen in `link.begin(); link.loop();` zusammen.
 
