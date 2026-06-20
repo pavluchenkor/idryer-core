@@ -241,9 +241,10 @@ void UartBridge::processIncomingByte(uint8_t byte) {
 
             uint16_t computed = uartCalculateCrc(buf, HEADER_SIZE + frame.header.payloadLength);
             if (computed != frame.crc) {
-                HAL_LOG_ERROR("UART", "CRC mismatch seq=%u kind=0x%02X exp=0x%04X got=0x%04X",
+                HAL_LOG_ERROR("UART", "CRC mismatch seq=%u kind=0x%02X len=%u exp=0x%04X got=0x%04X",
                               frame.header.sequence,
                               static_cast<uint8_t>(frame.header.kind),
+                              frame.header.payloadLength,
                               computed, frame.crc);
                 emitError(UartErrCode::CrcMismatch, frame.header.sequence,
                           frame.header.payloadLength, false);

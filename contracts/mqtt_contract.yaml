@@ -3409,4 +3409,62 @@ wifi_provisioning:
 
   notes:
     - "Improv-протокол поверх Serial использует binary-фреймы — клиент должен поддерживать Improv (Chrome/Edge через improv-wifi.com или соответствующее мобильное приложение)."
-    - "Reset credentials — через UART-команду или factory-reset (см. uart_only)."
+
+# =============================================================================
+# LOCAL WS PROTOCOL (LAN-режим, без участия портала)
+# =============================================================================
+#
+# Устройство поднимает WebSocket-сервер на порту 81 и объявляет себя через mDNS.
+# Приложение может подключиться напрямую по LAN — без интернета, без MQTT, без портала.
+# Реализация на стороне устройства: idryer-core/src/local_access/local_access.h
+#
+# Команды и события ИДЕНТИЧНЫ MQTT-контракту выше — тот же набор (get_config,
+# set, invoke, clear_errors и т.д.), те же payload'ы. Отличается только транспорт.
+#
+local_ws_protocol:
+  description: >
+    Прямой WebSocket-канал приложение → устройство по LAN.
+    Работает без интернета и без портала. Команды и события полностью идентичны
+    MQTT-контракту — только транспорт другой.
+
+  discovery:
+    mechanism: mDNS
+    service: _idryer._tcp
+    port: 81
+    hostname: "<serialNumber>.local"
+    note: "mDNS стартует сразу после WiFi-connect, до поднятия WS-сервера — чтобы приложение могло обнаружить устройство как можно раньше."
+
+  connection:
+    max_clients: 1
+    note: "Только один клиент одновременно. Новое подключение вытесняет предыдущее."
+
+  auth:
+    description: "Первое сообщение от клиента после connect — обязательно auth-фрейм."
+    incoming: '{"type":"auth","token":"<device_token>"}'
+    on_success: "Устройство начинает принимать команды от этого клиента."
+    on_failure: '{"type":"invalid_token"} — клиент должен запросить свежий токен у портала.'
+    note: "device_token — тот же JWT, что устройство получает от портала при регистрации."
+
+  incoming_envelope:
+    description: "Формат входящих сообщений (команды от приложения к устройству)."
+    format: '{"type":"command","command":"<name>","data":{...}}'
+    fields:
+      type: 'всегда "command"'
+      command: "имя команды — то же что суффикс MQTT-топика (get_config / set / invoke / clear_errors / ...)"
+      data: "payload команды — идентичен MQTT payload для данной команды"
+
+  outgoing_envelope:
+    description: "Формат исходящих сообщений (события и данные от устройства к приложению)."
+    format: '{"type":"<type>","data":{...}}'
+    fields:
+      type: "тип события — те же типы что в MQTT events (status / telemetry / event / config / ...)"
+      data: "payload события — идентичен MQTT payload"
+
+  commands:
+    note: >
+      Полный список доступных команд и их payload'ов — см. секцию commands выше
+      (get_config, set, invoke, clear_errors, find и т.д.).
+      Команды write_rfid и firmware_update_* через Local WS не поддерживаются —
+      они требуют binary-фрагментации и идут только через MQTT.
+
+  sdk_impl: "idryer-core/src/local_access/local_access.h + local_access.cpp"
