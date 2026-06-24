@@ -1,12 +1,12 @@
 # Raiz de composição
 
-O produto cria todos os objetos da biblioteca em \`main.cpp\` como variáveis estáticas e passa dependências através de construtores. Sem fábricas, sem registros globais — apenas montagem explícita.
+O produto cria todos os objetos da biblioteca em `main.cpp` como variáveis estáticas e passa dependências através de construtores. Sem fábricas, sem registros globais — apenas montagem explícita.
 
 ## Ordem de criação de objetos
 
 As dependências são construídas de baixo para cima: primeira camada de plataforma, depois pilha de nuvem, depois tempo de execução.
 
-\`\`\`cpp
+```cpp
 // 1. Camada de plataforma
 idryer::ArduinoWifiStore       s_wifiStore;      // NVS: SSID/password
 idryer::ArduinoWifiManager     s_wifi;           // Gerenciamento WiFi
@@ -24,11 +24,11 @@ LedStripProfile s_profile(&s_executor);
 
 // 4. Tempo de execução — vincula tudo
 idryer::IdryerRuntime s_runtime(&s_cloud, &s_dispatcher, &s_profile, &s_mqtt);
-\`\`\`
+```
 
 ## O que setup() faz
 
-\`\`\`cpp
+```cpp
 void setup() {
     // HAL: logs vão para /dev/null enquanto Improv possui Serial
     idryer::hal::initArduinoHal(nullptr);
@@ -65,25 +65,25 @@ void loop() {
     s_runtime.loop();     // CloudStateMachine + IProfile::loop()
     // ... lógica do produto (sensores, telemetria)
 }
-\`\`\`
+```
 
 ## Regras de montagem
 
-- Todos os objetos da biblioteca são estáticos (\`static\`). Sem \`new\` ou \`malloc\` para objetos de nível superior.
-- \`runtime.begin()\` é chamado por último em \`setup()\`, depois de todos os manipuladores serem registrados.
-- \`runtime.loop()\` é chamado primeiro em \`loop()\`.
-- Objetos de produto (sensores, telemetria) são criados separadamente e conectados diretamente a \`s_mqtt\` — o tempo de execução não os conhece.
+- Todos os objetos da biblioteca são estáticos (`static`). Sem `new` ou `malloc` para objetos de nível superior.
+- `runtime.begin()` é chamado por último em `setup()`, depois de todos os manipuladores serem registrados.
+- `runtime.loop()` é chamado primeiro em `loop()`.
+- Objetos de produto (sensores, telemetria) são criados separadamente e conectados diretamente a `s_mqtt` — o tempo de execução não os conhece.
 
 ## Exemplo: Storage Link
 
-A raiz de composição completa de Storage Link está em \`src/main.cpp\` no repositório iDryer-Storage (publicado separadamente).
+A raiz de composição completa de Storage Link está em `src/main.cpp` no repositório iDryer-Storage (publicado separadamente).
 
 Camadas de dispositivo em ordem de montagem:
 
 | Camada | Objetos | Fonte |
 |--------|---------|-------|
-| Plataforma | \`s_wifiStore\`, \`s_wifi\`, \`s_credentials\`, \`s_http\` | \`idryer-core\` |
-| Nuvem | \`s_api\`, \`s_mqtt\`, \`s_cloud\`, \`s_dispatcher\` | \`idryer-core\` |
-| Dispositivo | \`s_executor\`, \`s_profile\` | \`src/storage/led_strip/\` |
-| Tempo de execução | \`s_runtime\` | \`idryer-core\` |
-| Sensores | \`s_sensor\`, \`s_telemetry\` | \`src/storage/sensors/\`, \`src/storage/telemetry/\` |
+| Plataforma | `s_wifiStore`, `s_wifi`, `s_credentials`, `s_http` | `idryer-core` |
+| Nuvem | `s_api`, `s_mqtt`, `s_cloud`, `s_dispatcher` | `idryer-core` |
+| Dispositivo | `s_executor`, `s_profile` | `src/storage/led_strip/` |
+| Tempo de execução | `s_runtime` | `idryer-core` |
+| Sensores | `s_sensor`, `s_telemetry` | `src/storage/sensors/`, `src/storage/telemetry/` |

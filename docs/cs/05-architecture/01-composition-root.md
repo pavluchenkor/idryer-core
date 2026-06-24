@@ -6,7 +6,7 @@ Produkt vytváří všechny objekty knihovny v `main.cpp` jako statické proměn
 
 Závislosti se budují zdola nahoru: nejdříve vrstva platformy, pak cloud stack, pak runtime.
 
-\`\`\`cpp
+```cpp
 // 1. Vrstva platformy
 idryer::ArduinoWifiStore       s_wifiStore;      // NVS: SSID/password
 idryer::ArduinoWifiManager     s_wifi;           // Správa WiFi
@@ -24,11 +24,11 @@ LedStripProfile s_profile(&s_executor);
 
 // 4. Runtime — spojuje všechno dohromady
 idryer::IdryerRuntime s_runtime(&s_cloud, &s_dispatcher, &s_profile, &s_mqtt);
-\`\`\`
+```
 
 ## Co dělá setup()
 
-\`\`\`cpp
+```cpp
 void setup() {
     // HAL: logy jdou do /dev/null, zatímco Improv vlastní Serial
     idryer::hal::initArduinoHal(nullptr);
@@ -65,25 +65,25 @@ void loop() {
     s_runtime.loop();     // CloudStateMachine + IProfile::loop()
     // ... logika produktu (senzory, telemetrie)
 }
-\`\`\`
+```
 
 ## Pravidla montáže
 
-- Všechny objekty knihovny jsou statické (\`static\`). Žádné \`new\` nebo \`malloc\` pro objekty nejvyšší úrovně.
-- \`runtime.begin()\` se volá poslední v \`setup()\`, po registraci všech handlerů.
-- \`runtime.loop()\` se volá první v \`loop()\`.
-- Objekty produktu (senzory, telemetrie) se vytváří samostatně a připojují se přímo k \`s_mqtt\` — runtime o nich neví.
+- Všechny objekty knihovny jsou statické (`static`). Žádné `new` nebo `malloc` pro objekty nejvyšší úrovně.
+- `runtime.begin()` se volá poslední v `setup()`, po registraci všech handlerů.
+- `runtime.loop()` se volá první v `loop()`.
+- Objekty produktu (senzory, telemetrie) se vytváří samostatně a připojují se přímo k `s_mqtt` — runtime o nich neví.
 
 ## Příklad: Storage Link
 
-Úplný kořen kompozice Storage Link je v \`src/main.cpp\` v repozitáři iDryer-Storage (publikován samostatně).
+Úplný kořen kompozice Storage Link je v `src/main.cpp` v repozitáři iDryer-Storage (publikován samostatně).
 
 Vrstvy zařízení v pořadí montáže:
 
 | Vrstva | Objekty | Zdroj |
 |--------|---------|-------|
-| Platforma | \`s_wifiStore\`, \`s_wifi\`, \`s_credentials\`, \`s_http\` | \`idryer-core\` |
-| Cloud | \`s_api\`, \`s_mqtt\`, \`s_cloud\`, \`s_dispatcher\` | \`idryer-core\` |
-| Zařízení | \`s_executor\`, \`s_profile\` | \`src/storage/led_strip/\` |
-| Runtime | \`s_runtime\` | \`idryer-core\` |
-| Senzory | \`s_sensor\`, \`s_telemetry\` | \`src/storage/sensors/\`, \`src/storage/telemetry/\` |
+| Platforma | `s_wifiStore`, `s_wifi`, `s_credentials`, `s_http` | `idryer-core` |
+| Cloud | `s_api`, `s_mqtt`, `s_cloud`, `s_dispatcher` | `idryer-core` |
+| Zařízení | `s_executor`, `s_profile` | `src/storage/led_strip/` |
+| Runtime | `s_runtime` | `idryer-core` |
+| Senzory | `s_sensor`, `s_telemetry` | `src/storage/sensors/`, `src/storage/telemetry/` |
