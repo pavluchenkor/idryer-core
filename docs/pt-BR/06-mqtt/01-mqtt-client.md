@@ -12,8 +12,8 @@ Chamado por `CloudStateMachine` após provisionamento bem-sucedido. Não se cone
 
 Parâmetros:
 
-- `serialNumber` — número de série do dispositivo. Utilizado como ID de cliente MQTT e nome de utilizador.
-- `token` — token do dispositivo. Utilizado como palavra-passe MQTT.
+- `serialNumber` — número de série do dispositivo. Utilizado como ID de cliente MQTT e nome de usuário.
+- `token` — token do dispositivo. Utilizado como senha MQTT.
 
 Quando compilado com a flag `MQTT_USE_TLS=1`, o cliente configura `WiFiClientSecure` com a CA raiz Let's Encrypt (incorporada em `root_ca.h`).
 
@@ -25,7 +25,7 @@ mqttClient_.setKeepAlive(60);
 
 ## Tamanho do buffer {#buffer-size}
 
-`PubSubClient` utiliza um buffer de 256 bytes por padrão — suficiente apenas para mensagens curtas. Para dispositivos iDryer isto é demasiado pequeno: a carga útil principal "pesada" é a configuração do dispositivo (menu), que é publicada no tópico `idryer/{serial}/config` de uma só vez.
+`PubSubClient` utiliza um buffer de 256 bytes por padrão — suficiente apenas para mensagens curtas. Para dispositivos iDryer isto é muito pequeno: a carga útil principal "pesada" é a configuração do dispositivo (menu), que é publicada no tópico `idryer/{serial}/config` de uma só vez.
 
 `MqttClient` define o buffer para `MQTT_BUFFER_SIZE` e limita o tamanho do fragmento para configurações grandes a `MQTT_CONFIG_CHUNK_SIZE`. Ambas as constantes estão definidas em `lib/idryer-core/src/mqtt/mqtt_client.h`:
 
@@ -43,23 +43,23 @@ Relação entre elas:
 
 O número foi escolhido não por razões estéticas, mas pela **carga útil máxima esperada do dispositivo**, que é a transferência de configurações/menu:
 
-- Armazenamento Link e configuração Link/iHeater (menu) serializa como JSON com escape. Uma fotografia completa do menu atual cabe em ~10–14 KB.
+- Armazenamento Link e configuração Link/iHeater (menu) serializa como JSON com escape. Um snapshot completo do menu atual cabe em ~10–14 KB.
 - A margem até 16384 cobre crescimento do menu sem necessidade de dividir em fragmentos.
 - O valor é múltiplo de 4 KB — conveniente para alocação em ESP32.
 
-Se o seu produto tiver uma configuração maior (por exemplo, um menu estendido com muitos itens ou valores binários), dois caminhos estão disponíveis:
+Se seu produto tiver uma configuração maior (por exemplo, um menu estendido com muitos itens ou valores binários), dois caminhos estão disponíveis:
 
 1. **Aumentar `MQTT_BUFFER_SIZE`** — sobrescrever via `build_flags` em `platformio.ini`:
    ```ini
    build_flags = -DMQTT_BUFFER_SIZE=32768
    ```
-   Tenha em conta o uso de RAM: `PubSubClient` mantém este buffer continuamente. Em ESP32-C3 (~400 KB de heap livre) 32 KB é aceitável, mas avançar mais começa a apresentar riscos.
+   Tenha em mente o uso de RAM: `PubSubClient` mantém este buffer continuamente. Em ESP32-C3 (~400 KB de heap livre) 32 KB é aceitável, mas avançar mais começa a apresentar riscos.
 
-2. **Utilizar `publishConfigRaw(json, length)`** — divide a carga útil em fragmentos de `MQTT_CONFIG_CHUNK_SIZE`; o backend os remontar pelos campos `tid` / `idx` / `total` / `last`. Este caminho é preferido para configurações provenientes de RP2040 sobre UART em peças de comprimento arbitrário.
+2. **Utilizar `publishConfigRaw(json, length)`** — divide a carga útil em fragmentos de `MQTT_CONFIG_CHUNK_SIZE`; o backend os remonta pelos campos `tid` / `idx` / `total` / `last`. Este caminho é preferido para configurações provenientes de RP2040 sobre UART em peças de comprimento arbitrário.
 
 ### Aplica-se a publicações de produto
 
-O mesmo limite de 16384 bytes aplica-se a `publishTelemetry`, `publishStatus`, `publishEvent`. Na prática, telemetria e eventos são muito menores (centenas de bytes); apenas publicações de configuração aproximam-se deste limite. Se o seu projeto publicar periodicamente uma carga útil grande (por exemplo, um despejo de matriz de medição), estime o seu tamanho com antecedência ou divida-o você mesmo.
+O mesmo limite de 16384 bytes aplica-se a `publishTelemetry`, `publishStatus`, `publishEvent`. Na prática, telemetria e eventos são muito menores (centenas de bytes); apenas publicações de configuração aproximam-se deste limite. Se seu projeto publicar periodicamente uma carga útil grande (por exemplo, um dump de matriz de medição), estime seu tamanho com antecedência ou divida-o você mesmo.
 
 ## Conexão
 
@@ -69,13 +69,13 @@ bool MqttClient::connect();
 
 Realiza:
 
-1. Conexão ao intermediário com sessão persistente (`clean_session = false`). Sessão persistente é obrigatória — sem ela, comandos chegados enquanto o dispositivo está offline são perdidos.
+1. Conexão ao broker com sessão persistente (`clean_session = false`). Sessão persistente é obrigatória — sem ela, comandos chegados enquanto o dispositivo está offline são perdidos.
 2. Define a mensagem LWT no tópico `idryer/{serial}/offline` (QoS 1, não retido).
-3. Subscreve a `idryer/{serial}/commands/#` (QoS 1). Faz até 3 tentativas; em caso de falha, desconecta.
+3. Se inscreve em `idryer/{serial}/commands/#` (QoS 1). Faz até 3 tentativas; em caso de falha, desconecta.
 
-Retorna `true` se a conexão e subscrição foram bem-sucedidas.
+Retorna `true` se a conexão e inscrição foram bem-sucedidas.
 
-## Ciclo
+## Loop
 
 ```cpp
 void MqttClient::loop();
@@ -105,7 +105,7 @@ Todos os métodos de publicação adicionam um campo `timestamp` (ISO 8601 UTC) 
 
 ## Recebimento de comandos
 
-Mensagens recebidas no tópico `idryer/{serial}/commands/{cmd}` são analisadas como JSON e passadas para o `CommandCallback` registado:
+Mensagens recebidas no tópico `idryer/{serial}/commands/{cmd}` são analisadas como JSON e passadas para o `CommandCallback` registrado:
 
 ```cpp
 void setCommandCallback(CommandCallback callback);
@@ -127,4 +127,4 @@ static char* generateUuid(char* buffer);    // buffer >= 37 bytes
 
 - Uma instância de `MqttClient` por dispositivo (singleton via `instance_`).
 - Tamanho máximo de uma única mensagem JSON — `MQTT_BUFFER_SIZE` (padrão 16384 bytes). Dimensionado para a carga útil mais pesada do dispositivo — tipicamente a configuração serializada (menu). Para configurações maiores aumente a constante via `build_flags` ou utilize `publishConfigRaw` com divisão automática de fragmentos. Ver [Tamanho do buffer](#buffer-size).
-- TLS está activado pela flag de compilação `MQTT_USE_TLS`.
+- TLS está ativado pela flag de compilação `MQTT_USE_TLS`.
