@@ -111,11 +111,33 @@ export enum UartFlags {
   LAST_FRAGMENT = 16,
 }
 
-export type PortalUnitStatus = "IDLE" | "DRYING" | "STORAGE" | "PROFILE" | "HEATING" | "LIGHT_ANIMATION" | "FAULT" | "UNKNOWN";
+export type PortalUnitStatus =
+  | "IDLE"
+  | "DRYING"
+  | "STORAGE"
+  | "PROFILE"
+  | "HEATING"
+  | "LIGHT_ANIMATION"
+  | "FAULT"
+  | "UNKNOWN";
 
-export type PortalEventType = "COMMAND_ACK" | "COMMAND_REJECTED" | "SESSION_COMPLETE" | "SESSION_INTERRUPTED" | "STAGE_CHANGED" | "PROFILE_COMPLETED" | "ERRC_STATE_CHANGE" | "MAINTENANCE_REQUIRED";
+export type PortalEventType =
+  | "COMMAND_ACK"
+  | "COMMAND_REJECTED"
+  | "SESSION_COMPLETE"
+  | "SESSION_INTERRUPTED"
+  | "STAGE_CHANGED"
+  | "PROFILE_COMPLETED"
+  | "ERRC_STATE_CHANGE"
+  | "MAINTENANCE_REQUIRED";
 
-export type IntegrationState = "config_missing" | "connecting" | "disabled" | "error" | "idle" | "online";
+export type IntegrationState =
+  | "config_missing"
+  | "connecting"
+  | "disabled"
+  | "error"
+  | "idle"
+  | "online";
 
 export type ActiveIntegration = "bambu" | "ha" | "moonraker" | "none";
 export const ActiveIntegrationNumeric = {
@@ -172,24 +194,24 @@ export interface UartProfileStage {
 
 /** Конфигурация одного юнита внутри Hello.units[4]. Fixed-size 12 bytes, packed. */
 export interface UartUnitConfig {
-  unitId: number;  /** Индекс юнита (0..3). */
-  _pad1: number;  /** Wire-padding для выравнивания uint16 capabilities. */
-  capabilities: number;  /** Битмаска UnitCaps (HEATER/FAN/SERVO/RH/TEMP_AIR/TEMP_HEATER + reserved). См. enu */
-  scales: number[];  /** Индексы весовых датчиков на этом юните; 0xFF = слот пустой. */
-  rfid: number[];  /** Индексы RFID-ридеров на этом юните; 0xFF = слот пустой. */
+  unitId: number; /** Индекс юнита (0..3). */
+  _pad1: number; /** Wire-padding для выравнивания uint16 capabilities. */
+  capabilities: number; /** Битмаска UnitCaps (HEATER/FAN/SERVO/RH/TEMP_AIR/TEMP_HEATER + reserved). См. enu */
+  scales: number[]; /** Индексы весовых датчиков на этом юните; 0xFF = слот пустой. */
+  rfid: number[]; /** Индексы RFID-ридеров на этом юните; 0xFF = слот пустой. */
 }
 
 /** Идентификация контроллера для bridge-ESP32; включает units[] и capabilities. */
 export interface Hello {
   role: UartRole;
   deviceType: UartDeviceType;
-  _pad1: number[];  /** wire-padding между deviceType и firmwareVersion для выравнивания uint32 */
+  _pad1: number[]; /** wire-padding между deviceType и firmwareVersion для выравнивания uint32 */
   firmwareVersion: number;
   workTimeCounter: number;
-  hardwareVersion: string;  /** HW-идентификатор контроллера (rp2040-v1, stm32f103-v1). v2: расширено с char[8]. */
-  unitsCount: number;  /** Wire array units[4]; current iDryerControllerV2 product subset MENU_MAX_UNITS=3, */
+  hardwareVersion: string; /** HW-идентификатор контроллера (rp2040-v1, stm32f103-v1). v2: расширено с char[8]. */
+  unitsCount: number; /** Wire array units[4]; current iDryerControllerV2 product subset MENU_MAX_UNITS=3, */
   units: UartUnitConfig[];
-  mcuSerial: string;  /** flash ID hex + '\0' */
+  mcuSerial: string; /** flash ID hex + '\0' */
 }
 
 /** ESP32-сторона возвращает IP/SSID для отображения на экране MCU. */
@@ -208,42 +230,42 @@ export interface Telemetry {
 export interface Status {
   count: number;
   units: UartStatusEntry[];
-  uptime: number;  /** wire-layout: uptime идёт ПОСЛЕ units[], не до. См. uart_protocol.h:UartStatusPay */
-  ignoreExternalCmd: number;  /** 0/1 — device-wide флаг блокировки внешних команд. Source: menu.ign_ext_cmd на RP */
+  uptime: number; /** wire-layout: uptime идёт ПОСЛЕ units[], не до. См. uart_protocol.h:UartStatusPay */
+  ignoreExternalCmd: number; /** 0/1 — device-wide флаг блокировки внешних команд. Source: menu.ign_ext_cmd на RP */
 }
 
 /** Показания весов (до 4 датчиков). */
 export interface Weights {
-  count: number;  /** Wire array weights[4]; producer clamp i<4. */
+  count: number; /** Wire array weights[4]; producer clamp i<4. */
   weights: UartWeightEntry[];
 }
 
 /** Событие RFID-ридера: метка обнаружена / снята / ридер недоступен. */
 export interface Rfid {
-  event: number;  /** Wire-уровневый numeric enum. JSON-форма (lowercase строка) собирается legacy pub */
-  readerId: number;  /** Физический индекс ридера на iDryerControllerV2 (0..N-1). Producer (iDryerControl */
-  tag: string;  /** HEX-строка ID метки */
-  unitId: number;  /** Логический индекс камеры (0..3). Маппинг reader→unit в rfidManager на iDryerCont */
-  _pad: number[];  /** trailing wire-padding для выравнивания структуры; должен быть 0 */
+  event: number; /** Wire-уровневый numeric enum. JSON-форма (lowercase строка) собирается legacy pub */
+  readerId: number; /** Физический индекс ридера на iDryerControllerV2 (0..N-1). Producer (iDryerControl */
+  tag: string; /** HEX-строка ID метки */
+  unitId: number; /** Логический индекс камеры (0..3). Маппинг reader→unit в rfidManager на iDryerCont */
+  _pad: number[]; /** trailing wire-padding для выравнивания структуры; должен быть 0 */
 }
 
 /** Фрагмент данных метки (до 888 байт суммарно через несколько фрагментов). */
 export interface RfidData {
-  readerId: number;  /** Для ВХОДЯЩИХ write-fragments LINK→iDryerControllerV2 может быть 0xFF — iDryerCon */
-  unitId: number;  /** Логический индекс камеры (0..3). Используется для авто-резолва readerId на сторо */
+  readerId: number; /** Для ВХОДЯЩИХ write-fragments LINK→iDryerControllerV2 может быть 0xFF — iDryerCon */
+  unitId: number; /** Логический индекс камеры (0..3). Используется для авто-резолва readerId на сторо */
   tag: string;
   fragment: number[];
-  _pad: number[];  /** trailing wire-padding до 200 байт UART_MAX_PAYLOAD */
+  _pad: number[]; /** trailing wire-padding до 200 байт UART_MAX_PAYLOAD */
 }
 
 /** Универсальная команда с MQTT через ESP32 на контроллер. */
 export interface Command {
   command: UartCmdCode;
-  targetState: number;  /** целевой режим (для Start: Drying/Storage/Profile) */
-  unitId: number;  /** Конкретный юнит, обязательно (0..3). Для действия на нескольких юнитах клиент шл */
-  reserved: number[];  /** wire-padding между unitId и arg0 для выравнивания uint32; должен быть 0 */
-  arg0: number;  /** Семантика зависит от command/targetState. Для Start drying/storage — целевая тем */
-  arg1: number;  /** Семантика зависит от command/targetState. Для Start drying — duration в минутах. */
+  targetState: number; /** целевой режим (для Start: Drying/Storage/Profile) */
+  unitId: number; /** Конкретный юнит, обязательно (0..3). Для действия на нескольких юнитах клиент шл */
+  reserved: number[]; /** wire-padding между unitId и arg0 для выравнивания uint32; должен быть 0 */
+  arg0: number; /** Семантика зависит от command/targetState. Для Start drying/storage — целевая тем */
+  arg1: number; /** Семантика зависит от command/targetState. Для Start drying — duration в минутах. */
 }
 
 /** Многоэтапный профиль сушки (до 10 стадий). */
@@ -267,19 +289,19 @@ export interface ConfigChunk {
 
 /** Структурированное лог-сообщение от MCU. Fixed-size binary struct (legacy DryerUart::LogPayload). */
 export interface LogPayload {
-  severity: string;  /** null-terminated severity string ('CRIT'/'ERROR'/'WARN'/'INFO'/'DEBUG') */
-  source: string;  /** origin tag (например 'MCU', 'PID', 'SENSOR') */
-  event: string;  /** event name */
-  message: string;  /** human-readable сообщение */
-  unitId: number;  /** связанный юнит (0..3) или 0xFF если событие линка */
+  severity: string; /** null-terminated severity string ('CRIT'/'ERROR'/'WARN'/'INFO'/'DEBUG') */
+  source: string; /** origin tag (например 'MCU', 'PID', 'SENSOR') */
+  event: string; /** event name */
+  message: string; /** human-readable сообщение */
+  unitId: number; /** связанный юнит (0..3) или 0xFF если событие линка */
 }
 
 /** Keep-alive MCU↔ESP32 + сетевой статус для UI. */
 export interface Heartbeat {
   uptimeSeconds: number;
-  wifiRssiDbm: number;  /** iDryerControllerV2 шлёт всегда 0 (нет WiFi у MCU). Реальный RSSI — ESP32→iDryerC */
-  errorsSinceBoot: number;  /** iDryerControllerV2 stub-шлёт 0. Реальные счётчики ошибок ведутся на ESP32. */
-  cloudState: UartLinkCloudState;  /** Имеет смысл только в направлении ESP32→iDryerControllerV2 (статус облака). Когда */
+  wifiRssiDbm: number; /** iDryerControllerV2 шлёт всегда 0 (нет WiFi у MCU). Реальный RSSI — ESP32→iDryerC */
+  errorsSinceBoot: number; /** iDryerControllerV2 stub-шлёт 0. Реальные счётчики ошибок ведутся на ESP32. */
+  cloudState: UartLinkCloudState; /** Имеет смысл только в направлении ESP32→iDryerControllerV2 (статус облака). Когда */
 }
 
 /** Подтверждение принятого фрейма. */
@@ -299,8 +321,8 @@ export interface Error {
 export interface ClaimStatus {
   status: UartClaimStatus;
   pin: string;
-  expiresAt?: number;  /** Зарезервировано в wire-структуре. Потребителю опираться на remainingSeconds для  */
-  remainingSeconds: number;  /** Основное поле для UI. Выводится из claim-callback на стороне cloud. */
+  expiresAt?: number; /** Зарезервировано в wire-структуре. Потребителю опираться на remainingSeconds для  */
+  remainingSeconds: number; /** Основное поле для UI. Выводится из claim-callback на стороне cloud. */
 }
 
 /** Финальный результат claiming. */
@@ -312,7 +334,7 @@ export interface ClaimComplete {
 /** Включить/выключить локальный WS-сервер. sizeof(UartWsEnablePayload) == 4. */
 export interface WsEnable {
   enable: number;
-  reserved: number;  /** padding для выравнивания uint16 pin; должен быть 0 */
+  reserved: number; /** padding для выравнивания uint16 pin; должен быть 0 */
   pin: number;
 }
 
@@ -322,7 +344,7 @@ export interface WsStatus {
   pin: number;
   pairedCount: number;
   maxClients: number;
-  reserved: number;  /** trailing padding для выравнивания структуры до 6 байт; должен быть 0 */
+  reserved: number; /** trailing padding для выравнивания структуры до 6 байт; должен быть 0 */
 }
 
 /**
@@ -333,13 +355,13 @@ export interface WsStatus {
  * не проверяет, см. ___OTA_MQTT_DESIGN.md).
  */
 export interface OtaAnnounceForMcu {
-  commandId: number;  /** FNV1a32(MQTT commandId UUID) — для корреляции с последующими OtaChunkForMcu */
-  totalChunks: number;  /** общее число chunk'ов в этой OTA-сессии */
-  chunkSize: number;  /** размер chunk'а в байтах (последний может быть короче) */
-  totalSize: number;  /** полный размер прошивки в байтах */
-  expectedSha: number[];  /** SHA256 от полной прошивки — RP сверяет после последнего chunk'а */
-  targetMajor: number;  /** ожидаемый major новой прошивки RP (для логирования / sanity) */
-  _pad: number;  /** padding до 4+2+2+4+32+1+1 = 46 байт */
+  commandId: number; /** FNV1a32(MQTT commandId UUID) — для корреляции с последующими OtaChunkForMcu */
+  totalChunks: number; /** общее число chunk'ов в этой OTA-сессии */
+  chunkSize: number; /** размер chunk'а в байтах (последний может быть короче) */
+  totalSize: number; /** полный размер прошивки в байтах */
+  expectedSha: number[]; /** SHA256 от полной прошивки — RP сверяет после последнего chunk'а */
+  targetMajor: number; /** ожидаемый major новой прошивки RP (для логирования / sanity) */
+  _pad: number; /** padding до 4+2+2+4+32+1+1 = 46 байт */
 }
 
 /**
@@ -350,19 +372,19 @@ export interface OtaAnnounceForMcu {
  * expectedSha и totalSize см. OtaAnnounceForMcu (приходит до первого chunk'а).
  */
 export interface OtaChunkForMcu {
-  commandId: number;  /** ID OTA-сессии из MQTT announce — для корреляции */
-  chunkIdx: number;  /** 0-based, должен идти sequentially */
-  totalChunks: number;  /** копия из MQTT announce для контроля целостности */
-  dataLength: number;  /** фактический размер data[] этого chunk'а (последний может быть короче) */
-  _pad: number;  /** padding до 4 + 2 + 2 + 2 + 2 = 12 байт заголовка */
+  commandId: number; /** ID OTA-сессии из MQTT announce — для корреляции */
+  chunkIdx: number; /** 0-based, должен идти sequentially */
+  totalChunks: number; /** копия из MQTT announce для контроля целостности */
+  dataLength: number; /** фактический размер data[] этого chunk'а (последний может быть короче) */
+  _pad: number; /** padding до 4 + 2 + 2 + 2 + 2 = 12 байт заголовка */
 }
 
 /** Ответ RP на принятый chunk: ok / sha-fail / flash-fail. */
 export interface OtaChunkAck {
   commandId: number;
   chunkIdx: number;
-  status: number;  /** 0=ok, 1=sha_mismatch, 2=flash_failed, 3=out_of_order */
-  _pad: number;  /** padding до 8 байт */
+  status: number; /** 0=ok, 1=sha_mismatch, 2=flash_failed, 3=out_of_order */
+  _pad: number; /** padding до 8 байт */
 }
 
 /**
@@ -372,8 +394,8 @@ export interface OtaChunkAck {
  * PicoOTA.commit() + rp2040.reboot().
  */
 export interface OtaCommitNow {
-  targetMajor: number;  /** ожидаемый major после reboot — для верификации в post-handshake */
-  _pad: number;  /** padding до 2 байт (минимум для not-empty payload) */
+  targetMajor: number; /** ожидаемый major после reboot — для верификации в post-handshake */
+  _pad: number; /** padding до 2 байт (минимум для not-empty payload) */
 }
 
 /**
@@ -382,9 +404,9 @@ export interface OtaCommitNow {
  * Альтернатива расширения UartStatusPayload (которое было бы wire-break).
  */
 export interface OtaStatus {
-  espReady: number;  /** 0/1 — ESP свою прошивку скачала и валидировала */
-  espTargetMajor: number;  /** major скачанной у ESP прошивки, или 0 если nothing pending */
-  _pad: number;  /** padding до 4 байт */
+  espReady: number; /** 0/1 — ESP свою прошивку скачала и валидировала */
+  espTargetMajor: number; /** major скачанной у ESP прошивки, или 0 если nothing pending */
+  _pad: number; /** padding до 4 байт */
 }
 
 /**
@@ -395,7 +417,7 @@ export interface OtaStatus {
  * готовой прошивки в LittleFS нет — шлёт OtaCheckRequest и ждёт OtaAnnounceForMcu.
  */
 export interface OtaCheckRequest {
-  currentVersion: number;  /** текущая версия RP, major:minor:patch упакованы 16:8:8 (как UartHelloPayload.firm */
+  currentVersion: number; /** текущая версия RP, major:minor:patch упакованы 16:8:8 (как UartHelloPayload.firm */
 }
 
 // ── Topic helpers ─────────────────────────────────────────────────
@@ -416,27 +438,39 @@ export const Topics = {
   COMMAND_PROFILE: (serial: string) => `idryer/${serial}/commands/profile`,
   COMMAND_STOP: (serial: string) => `idryer/${serial}/commands/stop`,
   COMMAND_FIND: (serial: string) => `idryer/${serial}/commands/find`,
-  COMMAND_GET_CONFIG: (serial: string) => `idryer/${serial}/commands/get_config`,
+  COMMAND_GET_CONFIG: (serial: string) =>
+    `idryer/${serial}/commands/get_config`,
   COMMAND_SET: (serial: string) => `idryer/${serial}/commands/set`,
   COMMAND_READ_RFID: (serial: string) => `idryer/${serial}/commands/read_rfid`,
-  COMMAND_CLEAR_ERRORS: (serial: string) => `idryer/${serial}/commands/clear_errors`,
+  COMMAND_CLEAR_ERRORS: (serial: string) =>
+    `idryer/${serial}/commands/clear_errors`,
 
   /** backend → device (mqtt_only) */
   EVENTS: (serial: string) => `idryer/${serial}/events`,
-  INTEGRATIONS_STATUS: (serial: string) => `idryer/${serial}/integrations/status`,
+  INTEGRATIONS_STATUS: (serial: string) =>
+    `idryer/${serial}/integrations/status`,
   RFID_WRITE_RESULT: (serial: string) => `idryer/${serial}/rfid/write_result`,
   OFFLINE: (serial: string) => `idryer/${serial}/offline`,
   COMMANDS_PING: (serial: string) => `idryer/${serial}/commands/ping`,
   COMMANDS_INVOKE: (serial: string) => `idryer/${serial}/commands/invoke`,
-  COMMANDS_LINK_INTEGRATION: (serial: string) => `idryer/${serial}/commands/link_integration`,
-  COMMANDS_BAMBU_APPLY: (serial: string) => `idryer/${serial}/commands/bambu_apply`,
-  COMMANDS_FIRMWARE_UPDATE_ANNOUNCE: (serial: string) => `idryer/${serial}/commands/firmware_update_announce`,
-  COMMANDS_FIRMWARE_UPDATE_CHUNK__COMMANDID___CHUNKIDX_: (serial: string) => `idryer/${serial}/commands/firmware_update_chunk/{commandId}/{chunkIdx}`,
-  COMMANDS_FIRMWARE_CHECK_UPDATE_RESPONSE: (serial: string) => `idryer/${serial}/commands/firmware_check_update_response`,
-  EVENTS_FIRMWARE_UPDATE_ACK: (serial: string) => `idryer/${serial}/events/firmware_update_ack`,
-  EVENTS_FIRMWARE_UPDATE_PROGRESS: (serial: string) => `idryer/${serial}/events/firmware_update_progress`,
-  EVENTS_FIRMWARE_UPDATE_COMPLETE: (serial: string) => `idryer/${serial}/events/firmware_update_complete`,
-  EVENTS_FIRMWARE_CHECK_UPDATE: (serial: string) => `idryer/${serial}/events/firmware_check_update`,
+  COMMANDS_LINK_INTEGRATION: (serial: string) =>
+    `idryer/${serial}/commands/link_integration`,
+  COMMANDS_BAMBU_APPLY: (serial: string) =>
+    `idryer/${serial}/commands/bambu_apply`,
+  COMMANDS_FIRMWARE_UPDATE_ANNOUNCE: (serial: string) =>
+    `idryer/${serial}/commands/firmware_update_announce`,
+  COMMANDS_FIRMWARE_UPDATE_CHUNK__COMMANDID___CHUNKIDX_: (serial: string) =>
+    `idryer/${serial}/commands/firmware_update_chunk/{commandId}/{chunkIdx}`,
+  COMMANDS_FIRMWARE_CHECK_UPDATE_RESPONSE: (serial: string) =>
+    `idryer/${serial}/commands/firmware_check_update_response`,
+  EVENTS_FIRMWARE_UPDATE_ACK: (serial: string) =>
+    `idryer/${serial}/events/firmware_update_ack`,
+  EVENTS_FIRMWARE_UPDATE_PROGRESS: (serial: string) =>
+    `idryer/${serial}/events/firmware_update_progress`,
+  EVENTS_FIRMWARE_UPDATE_COMPLETE: (serial: string) =>
+    `idryer/${serial}/events/firmware_update_complete`,
+  EVENTS_FIRMWARE_CHECK_UPDATE: (serial: string) =>
+    `idryer/${serial}/events/firmware_check_update`,
 } as const;
 
 // ── Canonical roles (from canonical_roles) ────────────────────────
@@ -447,36 +481,166 @@ export const Topics = {
  * DO NOT EDIT — run contracts/regen.sh to regenerate.
  */
 export const CanonicalRoles = {
-  "drying.target_temperature": { type: "float", widget: "slider", unit: "°C", labels: { "ru": "Температура сушки", "en": "Drying temperature" } },
-  "drying.duration": { type: "uint", widget: "slider", unit: "min", labels: { "ru": "Длительность сушки", "en": "Drying duration" } },
-  "drying.start": { type: "action", widget: "button", unit: "", labels: { "ru": "Начать сушку", "en": "Start drying" } },
-  "drying.stop": { type: "action", widget: "button", unit: "", labels: { "ru": "Остановить сушку", "en": "Stop drying" } },
-  "storage.target_temperature": { type: "uint", widget: "slider", unit: "°C", labels: { "ru": "Температура хранения", "en": "Storage temperature" } },
-  "storage.target_humidity": { type: "uint", widget: "slider", unit: "%RH", labels: { "ru": "Влажность хранения", "en": "Storage humidity" } },
-  "storage.start": { type: "action", widget: "button", unit: "", labels: { "ru": "Начать хранение", "en": "Start storage" } },
-  "storage.stop": { type: "action", widget: "button", unit: "", labels: { "ru": "Остановить хранение", "en": "Stop storage" } },
-  "profile.start": { type: "action", widget: "button", unit: "", labels: { "ru": "Профиль сушки", "en": "Drying profile" } },
-  "profile.stop": { type: "action", widget: "button", unit: "", labels: { "ru": "Остановить профиль", "en": "Stop profile" } },
-  "rfid.read": { type: "action", widget: "button", unit: "", labels: { "ru": "Считать метку", "en": "Read tag" } },
-  "rfid.write": { type: "action", widget: "RfidWriter", unit: "", labels: { "ru": "Записать метку", "en": "Write tag" } },
-  "iheater.bambu_enabled": { type: "bool", widget: "toggle", unit: "", labels: { "ru": "Bambu Lab", "en": "Bambu Lab" } },
-  "iheater.moonraker_enabled": { type: "bool", widget: "toggle", unit: "", labels: { "ru": "Moonraker", "en": "Moonraker" } },
-  "iheater.ha_enabled": { type: "bool", widget: "toggle", unit: "", labels: { "ru": "Home Assistant", "en": "Home Assistant" } },
-  "iheater.heat_start": { type: "action", widget: "button", unit: "", labels: { "ru": "Нагрев", "en": "Heating" } },
-  "iheater.heat_stop": { type: "action", widget: "button", unit: "", labels: { "ru": "Остановить нагрев", "en": "Stop heating" } },
-  "storage.led_count": { type: "uint", widget: "number", unit: "", labels: { "ru": "Количество светодиодов", "en": "LED count" } },
-  "storage.led_brightness": { type: "uint", widget: "slider", unit: "", labels: { "ru": "Яркость", "en": "Brightness" } },
-  "led.pulse": { type: "action", widget: "button", unit: "", labels: { "ru": "Подсветка", "en": "LED pulse" } },
-  "common.stop": { type: "action", widget: "button", unit: "", labels: { "ru": "Стоп", "en": "Stop" } },
-  "common.find": { type: "action", widget: "button", unit: "", labels: { "ru": "Найти устройство", "en": "Find device" } },
-  "common.clear_errors": { type: "action", widget: "button", unit: "", labels: { "ru": "Сбросить ошибки", "en": "Clear errors" } },
-  "system.active_unit": { type: "uint", widget: "hidden", unit: "", labels: { "ru": "Активный юнит", "en": "Active unit" } },
-  "system.language": { type: "uint", widget: "select", unit: "", labels: { "ru": "Язык", "en": "Language" } },
-  "system.ignore_external_cmd": { type: "bool", widget: "toggle", unit: "", labels: { "ru": "Игнор. внеш. команды", "en": "Ignor ext cmd" } },
+  "drying.target_temperature": {
+    type: "float",
+    widget: "slider",
+    unit: "°C",
+    labels: { ru: "Температура сушки", en: "Drying temperature" },
+  },
+  "drying.duration": {
+    type: "uint",
+    widget: "slider",
+    unit: "min",
+    labels: { ru: "Длительность сушки", en: "Drying duration" },
+  },
+  "drying.start": {
+    type: "action",
+    widget: "button",
+    unit: "",
+    labels: { ru: "Начать сушку", en: "Start drying" },
+  },
+  "drying.stop": {
+    type: "action",
+    widget: "button",
+    unit: "",
+    labels: { ru: "Остановить сушку", en: "Stop drying" },
+  },
+  "storage.target_temperature": {
+    type: "uint",
+    widget: "slider",
+    unit: "°C",
+    labels: { ru: "Температура хранения", en: "Storage temperature" },
+  },
+  "storage.target_humidity": {
+    type: "uint",
+    widget: "slider",
+    unit: "%RH",
+    labels: { ru: "Влажность хранения", en: "Storage humidity" },
+  },
+  "storage.start": {
+    type: "action",
+    widget: "button",
+    unit: "",
+    labels: { ru: "Начать хранение", en: "Start storage" },
+  },
+  "storage.stop": {
+    type: "action",
+    widget: "button",
+    unit: "",
+    labels: { ru: "Остановить хранение", en: "Stop storage" },
+  },
+  "profile.start": {
+    type: "action",
+    widget: "button",
+    unit: "",
+    labels: { ru: "Профиль сушки", en: "Drying profile" },
+  },
+  "profile.stop": {
+    type: "action",
+    widget: "button",
+    unit: "",
+    labels: { ru: "Остановить профиль", en: "Stop profile" },
+  },
+  "rfid.read": {
+    type: "action",
+    widget: "button",
+    unit: "",
+    labels: { ru: "Считать метку", en: "Read tag" },
+  },
+  "rfid.write": {
+    type: "action",
+    widget: "RfidWriter",
+    unit: "",
+    labels: { ru: "Записать метку", en: "Write tag" },
+  },
+  "iheater.bambu_enabled": {
+    type: "bool",
+    widget: "toggle",
+    unit: "",
+    labels: { ru: "Bambu Lab", en: "Bambu Lab" },
+  },
+  "iheater.moonraker_enabled": {
+    type: "bool",
+    widget: "toggle",
+    unit: "",
+    labels: { ru: "Moonraker", en: "Moonraker" },
+  },
+  "iheater.ha_enabled": {
+    type: "bool",
+    widget: "toggle",
+    unit: "",
+    labels: { ru: "Home Assistant", en: "Home Assistant" },
+  },
+  "iheater.heat_start": {
+    type: "action",
+    widget: "button",
+    unit: "",
+    labels: { ru: "Нагрев", en: "Heating" },
+  },
+  "iheater.heat_stop": {
+    type: "action",
+    widget: "button",
+    unit: "",
+    labels: { ru: "Остановить нагрев", en: "Stop heating" },
+  },
+  "storage.led_count": {
+    type: "uint",
+    widget: "number",
+    unit: "",
+    labels: { ru: "Количество светодиодов", en: "LED count" },
+  },
+  "storage.led_brightness": {
+    type: "uint",
+    widget: "slider",
+    unit: "",
+    labels: { ru: "Яркость", en: "Brightness" },
+  },
+  "led.pulse": {
+    type: "action",
+    widget: "button",
+    unit: "",
+    labels: { ru: "Подсветка", en: "LED pulse" },
+  },
+  "common.stop": {
+    type: "action",
+    widget: "button",
+    unit: "",
+    labels: { ru: "Стоп", en: "Stop" },
+  },
+  "common.find": {
+    type: "action",
+    widget: "button",
+    unit: "",
+    labels: { ru: "Найти устройство", en: "Find device" },
+  },
+  "common.clear_errors": {
+    type: "action",
+    widget: "button",
+    unit: "",
+    labels: { ru: "Сбросить ошибки", en: "Clear errors" },
+  },
+  "system.active_unit": {
+    type: "uint",
+    widget: "hidden",
+    unit: "",
+    labels: { ru: "Активный юнит", en: "Active unit" },
+  },
+  "system.language": {
+    type: "uint",
+    widget: "select",
+    unit: "",
+    labels: { ru: "Язык", en: "Language" },
+  },
+  "system.ignore_external_cmd": {
+    type: "bool",
+    widget: "toggle",
+    unit: "",
+    labels: { ru: "Игнор. внеш. команды", en: "Ignor ext cmd" },
+  },
 } as const;
 
 export type CanonicalRole = keyof typeof CanonicalRoles;
-export type WidgetName = typeof CanonicalRoles[CanonicalRole]["widget"];
+export type WidgetName = (typeof CanonicalRoles)[CanonicalRole]["widget"];
 
 // ── Invoke action schemas (from invoke_actions) ───────────────────
 
@@ -486,23 +650,28 @@ export type WidgetName = typeof CanonicalRoles[CanonicalRole]["widget"];
  * DO NOT EDIT — run contracts/regen.sh to regenerate.
  */
 export const InvokeActions = {
-  "core": {
+  core: {
     "device.getConfig": {},
   },
-  "storage_link": {
+  storage_link: {
     "led.pulse": {
-      animation: ["solid", "breathe", "wave", "rainbow", "twinkle", "off"] as const,
+      animation: [
+        "solid",
+        "breathe",
+        "wave",
+        "rainbow",
+        "twinkle",
+        "off",
+      ] as const,
       colorEncoding: "#RRGGBB",
     },
   },
-  "iheater_link": {
+  iheater_link: {
     "heat.start": {},
     "heat.stop": {},
   },
-  "idryer_link": {
-  },
-  "rp2040": {
-  },
+  idryer_link: {},
+  rp2040: {},
 } as const;
 
 // ── Device capabilities (from capability_vocabulary) ──────────────
@@ -519,7 +688,7 @@ export interface HardwareUnitConfigCapabilities {
   fan?: boolean;
   /** Адресная LED-лента */
   led?: boolean;
-  /** Весовой датчик (граммы филамента) */
+  /** Датчик веса (граммы филамента) */
   weight?: boolean;
   /** RFID-ридер метки катушки */
   rfid?: boolean;
@@ -535,8 +704,11 @@ export interface HardwareUnitConfigCapabilities {
  * Known device profiles — which capabilities each product type has.
  * Generated from device_profiles in mqtt_contract.yaml.
  */
-export const DeviceCapabilityProfiles: Record<string, HardwareUnitConfigCapabilities> = {
-  "iheater_link": { heater: true, fan: true },
-  "storage_link": { led: true, air_temp: true, air_humidity: true },
-  "dryer_v3": { heater: true, fan: true, weight: true, rfid: true },
+export const DeviceCapabilityProfiles: Record<
+  string,
+  HardwareUnitConfigCapabilities
+> = {
+  iheater_link: { heater: true, fan: true },
+  storage_link: { led: true, air_temp: true, air_humidity: true },
+  dryer_v3: { heater: true, fan: true, weight: true, rfid: true },
 } as const;

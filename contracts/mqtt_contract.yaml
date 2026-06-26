@@ -62,7 +62,7 @@ capability_vocabulary:
 
   weight:
     json_key: "weight"
-    description: "Весовой датчик (граммы филамента)"
+    description: "Датчик веса (граммы филамента)"
 
   rfid:
     json_key: "rfid"
@@ -107,45 +107,45 @@ device_profiles:
 # Источник правды по «кто что поддерживает»: эта таблица. В описаниях
 # отдельных messages.* и invoke_actions.* такие сведения не дублируются.
 product_topic_support:
-
   # Device → Backend (publish):
-  info:                   [iheater_link, storage_link, dryer_v3]
-  telemetry:              [iheater_link, storage_link, dryer_v3]
-  status:                 [iheater_link, storage_link, dryer_v3]
-  weights:                [dryer_v3]
-  events:                 [iheater_link, storage_link, dryer_v3]
-  config:                 [iheater_link, storage_link, dryer_v3]
-  config/delta:           [iheater_link, storage_link, dryer_v3]
-  rfid:                   [dryer_v3]
-  rfid/write_result:      [dryer_v3]
-  integrations/status:    [iheater_link]
-  offline:                [iheater_link, storage_link, dryer_v3]  # LWT
+  info: [iheater_link, storage_link, dryer_v3]
+  telemetry: [iheater_link, storage_link, dryer_v3]
+  status: [iheater_link, storage_link, dryer_v3]
+  weights: [dryer_v3]
+  events: [iheater_link, storage_link, dryer_v3]
+  config: [iheater_link, storage_link, dryer_v3]
+  config/delta: [iheater_link, storage_link, dryer_v3]
+  rfid: [dryer_v3]
+  rfid/write_result: [dryer_v3]
+  integrations/status: [iheater_link]
+  offline: [iheater_link, storage_link, dryer_v3] # LWT
 
   # Backend → Device (commands):
-  commands/get_config:    [iheater_link, storage_link, dryer_v3]
-  commands/set:           [iheater_link, storage_link, dryer_v3]
-  commands/invoke:        [iheater_link, storage_link, dryer_v3]
-  commands/find:          [dryer_v3]
-  commands/clear_errors:  [dryer_v3]
-  commands/drying:        [dryer_v3]    # legacy; iheater использует commands/invoke heat.start
-  commands/storage:       [dryer_v3]    # legacy
-  commands/profile:       [dryer_v3]    # legacy
-  commands/stop:          [dryer_v3]    # legacy; iheater использует commands/invoke heat.stop
-  commands/read_rfid:     [dryer_v3]
-  commands/write_rfid:    [dryer_v3]
+  commands/get_config: [iheater_link, storage_link, dryer_v3]
+  commands/set: [iheater_link, storage_link, dryer_v3]
+  commands/invoke: [iheater_link, storage_link, dryer_v3]
+  commands/find: [dryer_v3]
+  commands/clear_errors: [dryer_v3]
+  commands/drying: [dryer_v3] # legacy; iheater использует commands/invoke heat.start
+  commands/storage: [dryer_v3] # legacy
+  commands/profile: [dryer_v3] # legacy
+  commands/stop: [dryer_v3] # legacy; iheater использует commands/invoke heat.stop
+  commands/read_rfid: [dryer_v3]
+  commands/write_rfid: [dryer_v3]
 
   # OTA через MQTT (Phase 6, см. ___OTA_MQTT_DESIGN.md). DRYER (dryer_v3)
   # поддерживает оба target esp|rp2040: target=esp обновляет idryer-link,
   # target=rp2040 обновляет iDryerControllerV2 через UART-мост.
-  commands/firmware_update_announce:        [iheater_link, storage_link, dryer_v3]
-  commands/firmware_update_chunk:           [iheater_link, storage_link, dryer_v3]
+  commands/firmware_update_announce: [iheater_link, storage_link, dryer_v3]
+  commands/firmware_update_chunk: [iheater_link, storage_link, dryer_v3]
   # commands/firmware_update_confirm удалён 2026-06-04 — confirm-flow отменён,
   # см. mqtt_only секцию ниже и ___OTA_MQTT_DESIGN.md.
-  commands/firmware_check_update_response:  [iheater_link, storage_link, dryer_v3]
-  events/firmware_update_ack:               [iheater_link, storage_link, dryer_v3]
-  events/firmware_update_progress:          [iheater_link, storage_link, dryer_v3]
-  events/firmware_update_complete:          [iheater_link, storage_link, dryer_v3]
-  events/firmware_check_update:             [iheater_link, storage_link, dryer_v3]
+  commands/firmware_check_update_response:
+    [iheater_link, storage_link, dryer_v3]
+  events/firmware_update_ack: [iheater_link, storage_link, dryer_v3]
+  events/firmware_update_progress: [iheater_link, storage_link, dryer_v3]
+  events/firmware_update_complete: [iheater_link, storage_link, dryer_v3]
+  events/firmware_check_update: [iheater_link, storage_link, dryer_v3]
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Активные mode-значения per product. backend status.handler читает отсюда
@@ -156,16 +156,16 @@ product_topic_support:
 unit_modes_per_product:
   dryer_v3:
     active: [DRYING, STORAGE, PROFILE]
-    idle:   [IDLE]
-    fault:  [FAULT]
+    idle: [IDLE]
+    fault: [FAULT]
   iheater_link:
     active: [HEATING]
-    idle:   [IDLE]
-    fault:  [FAULT]
+    idle: [IDLE]
+    fault: [FAULT]
   storage_link:
     active: [LIGHT_ANIMATION]
-    idle:   [IDLE]
-    fault:  [FAULT]
+    idle: [IDLE]
+    fault: [FAULT]
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Источники правды
@@ -175,12 +175,12 @@ source_of_truth:
   # независимо от расположения кода. Пути к реализации меняются при
   # рефакторинге — ищите grep'ом по имени топика/поля.
   repositories:
-    idryer-core:        "SDK на ESP32 — MQTT/UART транспорт, action dispatch, интеграции, menu_commands"
-    iHeater-link:       "Прошивка iHeater (single-chip ESP32) — нагрев, Bambu/Moonraker"
-    iDryer-Storage:     "Прошивка Storage (single-chip ESP32) — LED, SHT-сенсоры"
-    idryer-link:        "ESP32-мост для Dryer/Storage поверх UART к контроллеру"
+    idryer-core: "SDK на ESP32 — MQTT/UART транспорт, action dispatch, интеграции, menu_commands"
+    iHeater-link: "Прошивка iHeater (single-chip ESP32) — нагрев, Bambu/Moonraker"
+    iDryer-Storage: "Прошивка Storage (single-chip ESP32) — LED, SHT-сенсоры"
+    idryer-link: "ESP32-мост для Dryer/Storage поверх UART к контроллеру"
     iDryerControllerV2: "RP2040-контроллер сушилки — UART-сторона, владелец меню"
-    iDryerPortal:       "Бэкенд (NestJS) + фронтенд — потребитель MQTT, карточки устройств"
+    iDryerPortal: "Бэкенд (NestJS) + фронтенд — потребитель MQTT, карточки устройств"
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Общие правила
@@ -214,7 +214,7 @@ rules:
   mqtt_session: "clean_session=false; keepalive=60s"
   publish_qos: "Все device→backend publish — QoS 0 (MQTT-клиент прошивки не задаёт publish-QoS). Subscribe (commands/*) — QoS 1. LWT (offline) — broker-side."
   uart_baud: 115200
-  uart_protocol_version: 2  # v2 (2026-06-07): hardwareVersion char[8]→char[16] для читаемых HW-идентификаторов (rp2040-v1, stm32f103-v1)
+  uart_protocol_version: 2 # v2 (2026-06-07): hardwareVersion char[8]→char[16] для читаемых HW-идентификаторов (rp2040-v1, stm32f103-v1)
   uart_max_payload_bytes: 200
   uart_max_retries: 3
   uart_cmd_timeout_ms: 700
@@ -564,7 +564,7 @@ widgets:
 enums:
   UartRfidEvent:
     TagDetected: 0x01
-    TagRemoved:  0x02
+    TagRemoved: 0x02
 
   UartRole:
     Rp2040Controller: 0x01
@@ -585,7 +585,7 @@ enums:
     Storage: 2
     Profile: 3
     Fault: 4
-    Heating: 5        # iHeater-link: активный нагрев камеры (heat_temp/heat_duration)
+    Heating: 5 # iHeater-link: активный нагрев камеры (heat_temp/heat_duration)
     LightAnimation: 6 # Storage Link: активный override LED-ленты (led.pulse animation)
 
   UartStagePhase:
@@ -769,7 +769,11 @@ payloads:
       firmwareVersion:
         { type: uint32, encoding: "MAJOR<<16 | MINOR<<8 | PATCH" }
       workTimeCounter: { type: uint32, unit: "seconds" }
-      hardwareVersion: { type: "char[16]", note: "HW-идентификатор контроллера (rp2040-v1, stm32f103-v1). v2: расширено с char[8]." }
+      hardwareVersion:
+        {
+          type: "char[16]",
+          note: "HW-идентификатор контроллера (rp2040-v1, stm32f103-v1). v2: расширено с char[8].",
+        }
       unitsCount:
         {
           type: uint8,
@@ -796,8 +800,8 @@ payloads:
         type: "UartTelemetryEntry[4]"
         item_fields:
           unitId: { type: uint8, range: "0..3" }
-          temperatureC10: { type: int16,  scaling: { factor: 0.1, unit: "°C" } }
-          humidityPct10:  { type: uint16, scaling: { factor: 0.1, unit: "%RH" } }
+          temperatureC10: { type: int16, scaling: { factor: 0.1, unit: "°C" } }
+          humidityPct10: { type: uint16, scaling: { factor: 0.1, unit: "%RH" } }
           heaterPowerPct: { type: uint8, unit: "0..100 %" }
           fanOn: { type: uint8, encoding: "0/1" }
 
@@ -952,12 +956,7 @@ payloads:
               scaling: { factor: 0.1, unit: "°C" },
               note: "ESP-bridge формирует это поле умножением MQTT-поля params.stages[].temperature (целое °C) на 10; iDryerControllerV2 при потреблении делит на 10. Единая конвенция для всех температур в UART payload-ах — см. также Telemetry.temperatureC10, Telemetry.targetTempC10, Command.arg0.",
             }
-          ramp:
-            {
-              type: uint16,
-              unit: "seconds",
-              note: "wire-level — секунды",
-            }
+          ramp: { type: uint16, unit: "seconds", note: "wire-level — секунды" }
           hold:
             {
               type: uint16,
@@ -1105,13 +1104,30 @@ payloads:
       не проверяет, см. ___OTA_MQTT_DESIGN.md).
     cpp_name: UartOtaAnnounceForMcuPayload
     fields:
-      commandId:    { type: uint32, note: "FNV1a32(MQTT commandId UUID) — для корреляции с последующими OtaChunkForMcu" }
-      totalChunks:  { type: uint16, note: "общее число chunk'ов в этой OTA-сессии" }
-      chunkSize:    { type: uint16, note: "размер chunk'а в байтах (последний может быть короче)" }
-      totalSize:    { type: uint32, note: "полный размер прошивки в байтах" }
-      expectedSha:  { type: "uint8[32]", note: "SHA256 от полной прошивки — RP сверяет после последнего chunk'а" }
-      targetMajor:  { type: uint8,  note: "ожидаемый major новой прошивки RP (для логирования / sanity)" }
-      _pad:         { type: uint8,  note: "padding до 4+2+2+4+32+1+1 = 46 байт" }
+      commandId:
+        {
+          type: uint32,
+          note: "FNV1a32(MQTT commandId UUID) — для корреляции с последующими OtaChunkForMcu",
+        }
+      totalChunks:
+        { type: uint16, note: "общее число chunk'ов в этой OTA-сессии" }
+      chunkSize:
+        {
+          type: uint16,
+          note: "размер chunk'а в байтах (последний может быть короче)",
+        }
+      totalSize: { type: uint32, note: "полный размер прошивки в байтах" }
+      expectedSha:
+        {
+          type: "uint8[32]",
+          note: "SHA256 от полной прошивки — RP сверяет после последнего chunk'а",
+        }
+      targetMajor:
+        {
+          type: uint8,
+          note: "ожидаемый major новой прошивки RP (для логирования / sanity)",
+        }
+      _pad: { type: uint8, note: "padding до 4+2+2+4+32+1+1 = 46 байт" }
 
   OtaChunkForMcu:
     description: |
@@ -1122,11 +1138,27 @@ payloads:
       expectedSha и totalSize см. OtaAnnounceForMcu (приходит до первого chunk'а).
     cpp_name: UartOtaChunkForMcuPayload
     fields:
-      commandId:    { type: uint32, note: "ID OTA-сессии из MQTT announce — для корреляции" }
-      chunkIdx:     { type: uint16, note: "0-based, должен идти sequentially" }
-      totalChunks:  { type: uint16, note: "копия из MQTT announce для контроля целостности" }
-      dataLength:   { type: uint16, note: "фактический размер data[] этого chunk'а (последний может быть короче)" }
-      _pad:         { type: uint16, note: "padding до 4 + 2 + 2 + 2 + 2 = 12 байт заголовка" }
+      commandId:
+        {
+          type: uint32,
+          note: "ID OTA-сессии из MQTT announce — для корреляции",
+        }
+      chunkIdx: { type: uint16, note: "0-based, должен идти sequentially" }
+      totalChunks:
+        {
+          type: uint16,
+          note: "копия из MQTT announce для контроля целостности",
+        }
+      dataLength:
+        {
+          type: uint16,
+          note: "фактический размер data[] этого chunk'а (последний может быть короче)",
+        }
+      _pad:
+        {
+          type: uint16,
+          note: "padding до 4 + 2 + 2 + 2 + 2 = 12 байт заголовка",
+        }
       # data[]: variable-length, до 4096 байт, не описывается в fields — это tail.
       # Wire-форма: заголовок | data[dataLength]
 
@@ -1134,10 +1166,14 @@ payloads:
     description: "Ответ RP на принятый chunk: ok / sha-fail / flash-fail."
     cpp_name: UartOtaChunkAckPayload
     fields:
-      commandId:  { type: uint32 }
-      chunkIdx:   { type: uint16 }
-      status:     { type: uint8,  note: "0=ok, 1=sha_mismatch, 2=flash_failed, 3=out_of_order, 4=retry (chunk пришёл неполным/битым — ESP шлёт тот же chunk заново)" }
-      _pad:       { type: uint8,  note: "padding до 8 байт" }
+      commandId: { type: uint32 }
+      chunkIdx: { type: uint16 }
+      status:
+        {
+          type: uint8,
+          note: "0=ok, 1=sha_mismatch, 2=flash_failed, 3=out_of_order, 4=retry (chunk пришёл неполным/битым — ESP шлёт тот же chunk заново)",
+        }
+      _pad: { type: uint8, note: "padding до 8 байт" }
 
   OtaCommitNow:
     description: |
@@ -1147,8 +1183,16 @@ payloads:
       PicoOTA.commit() + rp2040.reboot().
     cpp_name: UartOtaCommitNowPayload
     fields:
-      targetMajor:  { type: uint8,  note: "ожидаемый major после reboot — для верификации в post-handshake" }
-      _pad:         { type: uint8,  note: "padding до 2 байт (минимум для not-empty payload)" }
+      targetMajor:
+        {
+          type: uint8,
+          note: "ожидаемый major после reboot — для верификации в post-handshake",
+        }
+      _pad:
+        {
+          type: uint8,
+          note: "padding до 2 байт (минимум для not-empty payload)",
+        }
 
   OtaStatus:
     description: |
@@ -1157,9 +1201,14 @@ payloads:
       Альтернатива расширения UartStatusPayload (которое было бы wire-break).
     cpp_name: UartOtaStatusPayload
     fields:
-      espReady:        { type: uint8,  note: "0/1 — ESP свою прошивку скачала и валидировала" }
-      espTargetMajor:  { type: uint8,  note: "major скачанной у ESP прошивки, или 0 если nothing pending" }
-      _pad:            { type: uint16, note: "padding до 4 байт" }
+      espReady:
+        { type: uint8, note: "0/1 — ESP свою прошивку скачала и валидировала" }
+      espTargetMajor:
+        {
+          type: uint8,
+          note: "major скачанной у ESP прошивки, или 0 если nothing pending",
+        }
+      _pad: { type: uint16, note: "padding до 4 байт" }
 
   OtaCheckRequest:
     description: |
@@ -1170,7 +1219,11 @@ payloads:
       готовой прошивки в LittleFS нет — шлёт OtaCheckRequest и ждёт OtaAnnounceForMcu.
     cpp_name: UartOtaCheckRequestPayload
     fields:
-      currentVersion: { type: uint32, note: "текущая версия RP, major:minor:patch упакованы 16:8:8 (как UartHelloPayload.firmwareVersion)" }
+      currentVersion:
+        {
+          type: uint32,
+          note: "текущая версия RP, major:minor:patch упакованы 16:8:8 (как UartHelloPayload.firmwareVersion)",
+        }
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 1. СКВОЗНЫЕ СООБЩЕНИЯ (идут и по UART, и по MQTT)
@@ -1308,11 +1361,7 @@ messages:
                     type: string,
                     note: "activeIntegrationToString(getActive())",
                   }
-                outputMode:
-                  {
-                    type: int,
-                    note: "0 = выключен, 1 = нагрев",
-                  }
+                outputMode: { type: int, note: "0 = выключен, 1 = нагрев" }
                 targetTempC: { type: float, unit: "°C" }
                 chamberTemp:
                   type: float
@@ -1821,12 +1870,7 @@ messages:
                 note: "0..3 — для per-unit полей; для global — отсутствует",
               }
             val: { type: any, required: true, note: "новое значение поля" }
-            timestamp:
-              {
-                type: string,
-                format: ISO8601,
-                note: "опциональное",
-              }
+            timestamp: { type: string, format: ISO8601, note: "опциональное" }
             example:
               {
                 cmd: "set",
@@ -2728,15 +2772,28 @@ mqtt_only:
     status: design_or_partial
     payload:
       fields:
-        commandId:     { type: string, format: uuid, required: true }
-        target:        { type: enum, values: [esp, rp2040], required: true, note: "iheater/storage всегда esp; dryer_v3 — esp или rp2040" }
-        version:       { type: string, format: semver, required: true, example: "1.0.3" }
-        size:          { type: integer, required: true, note: "размер бинаря в байтах" }
-        sha256:        { type: string, format: hex64, required: true }
-        chunkCount:    { type: integer, required: true }
-        chunkSize:     { type: integer, required: true, note: "по умолчанию 4096 (4 КБ)" }
-        minBootSafeMs: { type: integer, optional: true, note: "не начинать update если в активной работе < N ms" }
-        timestamp:     { type: string, format: ISO8601 }
+        commandId: { type: string, format: uuid, required: true }
+        target:
+          {
+            type: enum,
+            values: [esp, rp2040],
+            required: true,
+            note: "iheater/storage всегда esp; dryer_v3 — esp или rp2040",
+          }
+        version:
+          { type: string, format: semver, required: true, example: "1.0.3" }
+        size: { type: integer, required: true, note: "размер бинаря в байтах" }
+        sha256: { type: string, format: hex64, required: true }
+        chunkCount: { type: integer, required: true }
+        chunkSize:
+          { type: integer, required: true, note: "по умолчанию 4096 (4 КБ)" }
+        minBootSafeMs:
+          {
+            type: integer,
+            optional: true,
+            note: "не начинать update если в активной работе < N ms",
+          }
+        timestamp: { type: string, format: ISO8601 }
     notes:
       - "При target=rp2040 ESP-мост ретранслирует chunks через UartBridge новым кадром FirmwareChunk; SHA256 финально проверяет RP2040."
 
@@ -2777,10 +2834,20 @@ mqtt_only:
     status: design_or_partial
     payload:
       fields:
-        hasUpdate:       { type: boolean, required: true }
-        latestVersion:   { type: string, optional: true }
-        requiresLicense: { type: boolean, optional: true, note: "true если update есть, но устройство не entitled (см. Phase 8 Licensing)" }
-        willPushSoon:    { type: boolean, optional: true, note: "true если backend начнёт announce в MAX_PARALLEL_OTA-окне" }
+        hasUpdate: { type: boolean, required: true }
+        latestVersion: { type: string, optional: true }
+        requiresLicense:
+          {
+            type: boolean,
+            optional: true,
+            note: "true если update есть, но устройство не entitled (см. Phase 8 Licensing)",
+          }
+        willPushSoon:
+          {
+            type: boolean,
+            optional: true,
+            note: "true если backend начнёт announce в MAX_PARALLEL_OTA-окне",
+          }
     notes:
       - "Ответ на events/firmware_check_update (pull-механика auto-update раз в ~24h)."
 
@@ -2792,20 +2859,26 @@ mqtt_only:
     status: design_or_partial
     payload:
       fields:
-        commandId: { type: string, format: uuid, required: true, note: "echo из announce" }
+        commandId:
+          {
+            type: string,
+            format: uuid,
+            required: true,
+            note: "echo из announce",
+          }
         status:
           type: enum
           values:
             - accepted
-            - rejected_no_space          # flash или heap
+            - rejected_no_space # flash или heap
             - rejected_same_version
             - rejected_downgrade
-            - rejected_busy              # active session
-            - rejected_unsupported       # format/uart_protocol_mismatch
-        reason:         { type: string, optional: true }
+            - rejected_busy # active session
+            - rejected_unsupported # format/uart_protocol_mismatch
+        reason: { type: string, optional: true }
         freeFlashBytes: { type: integer, optional: true, note: "при no_space" }
-        freeHeapBytes:  { type: integer, optional: true, note: "при no_space" }
-        timestamp:      { type: string, format: ISO8601 }
+        freeHeapBytes: { type: integer, optional: true, note: "при no_space" }
+        timestamp: { type: string, format: ISO8601 }
 
   - suffix: events/firmware_update_progress
     full_topic: "idryer/{serial}/events/firmware_update_progress"
@@ -2815,12 +2888,13 @@ mqtt_only:
     status: design_or_partial
     payload:
       fields:
-        commandId:     { type: string, format: uuid, required: true }
-        received:      { type: integer, required: true, note: "число полученных chunks" }
-        total:         { type: integer, required: true }
-        bytes:         { type: integer, required: true }
+        commandId: { type: string, format: uuid, required: true }
+        received:
+          { type: integer, required: true, note: "число полученных chunks" }
+        total: { type: integer, required: true }
+        bytes: { type: integer, required: true }
         throughputBps: { type: integer, optional: true }
-        timestamp:     { type: string, format: ISO8601 }
+        timestamp: { type: string, format: ISO8601 }
     notes:
       - "QoS 1 КРИТИЧНО: используется backend'ом как gating-сигнал для sequential pumping. QoS 0 сломает pumping."
       - "Шлётся на КАЖДЫЙ полученный chunk (не периодически)."
@@ -2837,16 +2911,28 @@ mqtt_only:
         status:
           type: enum
           values:
-            - verified              # SHA OK, готов ребут
+            - verified # SHA OK, готов ребут
             - sha_mismatch
             - flash_failed
             - timeout
-            - rollback_to_previous  # после ребута, при следующем connect
-        newVersion:     { type: string, optional: true, note: "version из announce, для verified" }
-        errorReason:    { type: string, optional: true }
-        chunksReceived: { type: integer, optional: true, note: "при timeout/incomplete" }
-        chunksMissing:  { type: array, items: integer, optional: true, note: "индексы недополученных chunks для retry" }
-        timestamp:      { type: string, format: ISO8601 }
+            - rollback_to_previous # после ребута, при следующем connect
+        newVersion:
+          {
+            type: string,
+            optional: true,
+            note: "version из announce, для verified",
+          }
+        errorReason: { type: string, optional: true }
+        chunksReceived:
+          { type: integer, optional: true, note: "при timeout/incomplete" }
+        chunksMissing:
+          {
+            type: array,
+            items: integer,
+            optional: true,
+            note: "индексы недополученных chunks для retry",
+          }
+        timestamp: { type: string, format: ISO8601 }
 
   - suffix: events/firmware_check_update
     full_topic: "idryer/{serial}/events/firmware_check_update"
@@ -2858,10 +2944,16 @@ mqtt_only:
     payload:
       fields:
         currentVersion: { type: string, format: semver, required: true }
-        controllerType: { type: enum, values: [ESP32, RP2040], required: true, note: "DRYER шлёт два события — по одному на каждый чип" }
-        productId:      { type: string, required: true }
-        licenseSerial:  { type: string, optional: true }
-        timestamp:      { type: string, format: ISO8601 }
+        controllerType:
+          {
+            type: enum,
+            values: [ESP32, RP2040],
+            required: true,
+            note: "DRYER шлёт два события — по одному на каждый чип",
+          }
+        productId: { type: string, required: true }
+        licenseSerial: { type: string, optional: true }
+        timestamp: { type: string, format: ISO8601 }
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 6. РАСХОЖДЕНИЯ И ОТКРЫТЫЕ ВОПРОСЫ

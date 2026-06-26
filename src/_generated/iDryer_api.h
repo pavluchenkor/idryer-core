@@ -148,7 +148,7 @@ struct Config {
     bool        hasHeater;            ///< Управляемый нагреватель (targetTempC, durationS)
     bool        hasFan;               ///< Вентилятор (on/off)
     bool        hasLed;               ///< Адресная LED-лента
-    bool        hasWeight;            ///< Весовой датчик (граммы филамента)
+    bool        hasWeight;            ///< Датчик веса (граммы филамента)
     bool        hasRfid;              ///< RFID-ридер метки катушки
     bool        hasAirTemp;           ///< Датчик температуры воздуха (SHT/DHT)
     bool        hasAirHumidity;       ///< Датчик влажности воздуха
