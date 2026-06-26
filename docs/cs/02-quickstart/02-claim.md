@@ -37,7 +37,7 @@ pio device monitor -b 115200
 
 Zařízení čeká. PIN je platný 10 minut.
 
-**4. Jděte na [portal.idryer.org](https://portal.idryer.org/)** a přejděte na **Add device**.
+**4. Přejděte na [portal.idryer.org](https://portal.idryer.org/)** a otevřete **Přidat zařízení**.
 
 **5. Zadejte PIN** ze Serial Monitoru (7 číslic, bez mezer).
 

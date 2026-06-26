@@ -7,22 +7,22 @@ description: "添加新 iDryer 设备的检查清单：profile、命令、遥测
 
 当你基于 `idryer-core` 制作新产品时使用本指南：耗材干燥箱、加热模块、照明、传感器或其他设备。它说明哪些内容应留在库中，哪些内容属于具体产品代码。
 
-A practical checklist for building a new device on top of `idryer-core`.
+这是在 `idryer-core` 之上构建设备的实用 checklist。
 
-Two scenarios:
+两种场景：
 
-- **Minimal** — MQTT + cloud only. Sufficient for most simple devices.
-- **Extended** — MQTT + local WS access over LAN. For devices that need local access without the cloud.
+- **Minimal** — 只有 MQTT + 云端。足以覆盖大多数简单设备。
+- **Extended** — MQTT + 局域网本地 WS 访问。适用于需要不经过云端进行本地访问的设备。
 
 ---
 
-## Scenario 1: Minimal MQTT-only device
+## 场景 1：仅 MQTT 的 Minimal 设备
 
-Minimum set: WiFi, MQTT, cloud state machine, one profile.
+最小集合：WiFi、MQTT、云端状态机、一个 profile。
 
-Reference: [`examples/minimal_mqtt_only/`](../../../examples/minimal_mqtt_only/)
+参考：[`examples/minimal_mqtt_only/`](../../../examples/minimal_mqtt_only/)
 
-### 1. Implement IProfile
+### 1. 实现 IProfile
 
 ```cpp
 // src/mydevice/my_profile.h
@@ -38,7 +38,7 @@ public:
 };
 ```
 
-### 2. Assemble the composition root
+### 2. 组装组合根
 
 ```cpp
 #include <idryer_core.h>
@@ -57,7 +57,7 @@ static MyProfile             s_profile;
 static idryer::IdryerRuntime s_runtime(&s_cloud, &s_dispatcher, &s_profile, &s_mqtt);
 ```
 
-### 3. Register the command handler and start
+### 3. 注册命令 handler 并启动
 
 ```cpp
 static void handleCommand(const char* cmd, JsonObjectConst data) {
@@ -89,13 +89,13 @@ void loop() {
 
 ---
 
-## Scenario 2: MQTT + Local WS device
+## 场景 2：MQTT + Local WS 设备
 
-Extends Minimal. Adds `LocalAccess` (LAN WebSocket + mDNS) and `DevicePublisher` — a thin wrapper for publishing to both transports in one call.
+在 Minimal 基础上扩展。添加 `LocalAccess`（LAN WebSocket + mDNS）和 `DevicePublisher`，后者是一个薄封装，可在一次调用中发布到两种传输。
 
-Reference: [`examples/mqtt_with_local_ws/`](../../../examples/mqtt_with_local_ws/)
+参考：[`examples/mqtt_with_local_ws/`](../../../examples/mqtt_with_local_ws/)
 
-### Additional objects
+### 额外对象
 
 ```cpp
 #include <local_access/local_access.h>
@@ -105,7 +105,7 @@ static idryer::LocalAccess     s_local;
 static idryer::DevicePublisher s_pub(&s_mqtt, &s_local);
 ```
 
-### Command handler — one for both transports
+### 命令 handler — 两种传输共用一个
 
 ```cpp
 static void handleCommand(const char* cmd, JsonObjectConst data) {
@@ -123,7 +123,7 @@ static void handleCommand(const char* cmd, JsonObjectConst data) {
 }
 ```
 
-### Initialization in setup()
+### setup() 中的初始化
 
 ```cpp
 s_credentials.seedSerialFromMac();
@@ -157,27 +157,27 @@ void loop() {
 
 ## 遙測
 
-Periodically publish telemetry via `s_pub` (or directly via `s_mqtt` in the minimal scenario):
+通过 `s_pub` 周期性发布遥测（在 minimal 场景中也可以直接通过 `s_mqtt` 发布）：
 
 ```cpp
 s_pub.publishTelemetry(doc);   // → MQTT + WS
 ```
 
-Or wrap it in a dedicated class (example: `StorageTelemetryPublisher` in Storage Link).
+也可以封装到专用类中（例如 Storage Link 中的 `StorageTelemetryPublisher`）。
 
 ## 描述合同
 
-When adding new topics or changing payloads:
+添加新 topic 或修改 payload 时：
 
-1. Update `contracts/mqtt_contract.yaml`.
-2. Add a description in `docs/ru/`.
+1. 更新 `contracts/mqtt_contract.yaml`。
+2. 在 `docs/ru/` 中添加说明。
 
 ## 適用性
 
-The current model works well for:
+当前模型适合：
 
-- Standalone devices with cloud connectivity (WiFi + MQTT)
-- Devices with local WS access over LAN
-- Configurable devices with NVS menu
+- 具备云端连接的独立设备（WiFi + MQTT）
+- 通过 LAN 提供本地 WS 访问的设备
+- 带 NVS 菜单的可配置设备
 
-For dual-MCU devices (ESP32 + RP2040) — connect the UART bridge (`idryer_uart.h`). For devices with printer integrations — `idryer_integrations.h`.
+对于双 MCU 设备（ESP32 + RP2040），连接 UART 桥（`idryer_uart.h`）。对于带打印机集成的设备，使用 `idryer_integrations.h`。

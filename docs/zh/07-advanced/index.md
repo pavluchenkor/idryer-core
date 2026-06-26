@@ -1,11 +1,11 @@
-# 內部結構
+# 内部结构
 
-This section is for those who have gone beyond the facade. If `iDryer::Link` covers your needs — you do not need to come here.
+本节面向已经越过 facade 层的开发者。如果 `iDryer::Link` 已经满足需求，就不需要阅读这里。
 
-It describes the internal library components: the device coordinator, the UART transport layer, platform abstractions, and the profile model.
+这里描述库的内部组件：设备协调器、UART 传输层、平台抽象和 profile 模型。
 
-- [Runtime](01-runtime.md) — `IdryerRuntime`, entry point `begin()` / `loop()`
-- [UART](02-uart.md) — binary frame protocol for dual-MCU devices
-- [Integrations](03-integrations.md) — Home Assistant, Bambu Lab, Moonraker/Klipper
-- [Arduino platform](04-platform-arduino.md) — WiFi, NVS, OTA interfaces
-- [Profiles](05-profiles.md) — `IProfile` model and device behaviour
+- [Runtime](01-runtime.md) — `IdryerRuntime`，入口点 `begin()` / `loop()`
+- [UART](02-uart.md) — 双 MCU 设备的二进制帧协议
+- [Integrations](03-integrations.md) — Home Assistant、Bambu Lab、Moonraker/Klipper
+- [Arduino platform](04-platform-arduino.md) — WiFi、NVS、OTA 接口
+- [Profiles](05-profiles.md) — `IProfile` 模型和设备行为

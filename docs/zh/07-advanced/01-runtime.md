@@ -1,8 +1,8 @@
 # IdryerRuntime
 
-`IdryerRuntime` is the top-level device coordinator. It connects `CloudStateMachine`, `ActionDispatcher`, `IProfile`, and `MqttClient` into a single entry point: `begin()` / `loop()`.
+`IdryerRuntime` 是设备的顶层协调器。它把 `CloudStateMachine`、`ActionDispatcher`、`IProfile` 和 `MqttClient` 连接成一个入口点：`begin()` / `loop()`。
 
-## 構造函數
+## 构造函数
 
 ```cpp
 IdryerRuntime::IdryerRuntime(
@@ -13,37 +13,37 @@ IdryerRuntime::IdryerRuntime(
 );
 ```
 
-All four parameters are required. `profile` may be `nullptr` (the runtime checks before calling its methods).
+四个参数都是必需的。`profile` 可以是 `nullptr`（runtime 会在调用前检查）。
 
-## 啟動
+## 启动
 
 ```cpp
 void begin();
 ```
 
-Performs:
+执行：
 
-1. Registers an internal `CommandCallback` in `MqttClient`.
-2. Calls `cloud->begin()`.
+1. 在 `MqttClient` 中注册内部 `CommandCallback`。
+2. 调用 `cloud->begin()`。
 
-Call once in `setup()`, after `setCommandHandler()`.
+在 `setup()` 中调用一次，位于 `setCommandHandler()` 之后。
 
-## 主循環
+## 主循环
 
 ```cpp
 void loop();
 ```
 
-Each call:
+每次调用：
 
-1. Calls `cloud->loop()` — advances the state machine.
-2. Calls `profile->loop()` — product logic.
-3. On the first transition to Online:
-   - Calls `profile->onOnline()`.
-   - Calls `profile->buildInfoJson()` and publishes the result to `idryer/{serial}/info` (retained).
-4. On loss of Online: resets the flag so the next Online transition fires again.
+1. 调用 `cloud->loop()` — 推进状态机。
+2. 调用 `profile->loop()` — 产品逻辑。
+3. 第一次进入 Online 时：
+   - 调用 `profile->onOnline()`。
+   - 调用 `profile->buildInfoJson()` 并将结果发布到 `idryer/{serial}/info`（retained）。
+4. 丢失 Online 状态时：重置标志，以便下一次进入 Online 时再次触发。
 
-## 內置處理
+## 内置处理
 
 ### ping
 
@@ -51,20 +51,20 @@ Each call:
 commands/ping
 ```
 
-Always handled by the runtime — not passed to `CommandHandler`.
+始终由 runtime 处理，不会传给 `CommandHandler`。
 
-Extracts `data["timestamp"]` (format `"YYYY-MM-DDTHH:MM:SSZ"`), syncs system time via `settimeofday()`, then re-publishes the info payload.
+提取 `data["timestamp"]`（格式 `"YYYY-MM-DDTHH:MM:SSZ"`），通过 `settimeofday()` 同步系统时间，然后重新发布 info payload。
 
-## CommandHandler — the single extension point
+## CommandHandler — 唯一扩展点
 
 ```cpp
 using CommandHandler = std::function<void(const char* command, JsonObjectConst data)>;
 void setCommandHandler(CommandHandler handler);
 ```
 
-All incoming commands except `ping` are directed to the registered `CommandHandler`.
+除 `ping` 以外的所有传入命令都会送到已注册的 `CommandHandler`。
 
-This is the **only official way** to extend command handling. Used so that MQTT and local WS transport converge to a single point:
+这是扩展命令处理的**唯一官方方式**。这样 MQTT 和本地 WS 传输会汇聚到同一个点：
 
 ```cpp
 static void handleCommand(const char* cmd, JsonObjectConst data) {
@@ -85,19 +85,19 @@ runtime.setCommandHandler(handleCommand);   // MQTT
 local.setCommandSink(handleCommand);        // local WS
 ```
 
-!!! note "If no CommandHandler is registered"
-    The runtime uses built-in routing: `invoke` → `ActionDispatcher`, `set` → `ActionDispatcher`, `invoke device.getConfig` → publishes config. This is the default behaviour — kept for compatibility.
+!!! note "如果没有注册 CommandHandler"
+    runtime 使用内置路由：`invoke` → `ActionDispatcher`，`set` → `ActionDispatcher`，`invoke device.getConfig` → 发布 config。这是默认行为，为兼容性保留。
 
-## 在線狀態
+## 在线状态
 
 ```cpp
 bool isOnline() const;
 ```
 
-Returns `true` if `CloudStateMachine` is in the `Online` state.
+如果 `CloudStateMachine` 处于 `Online` 状态，则返回 `true`。
 
-## 運行時不執行的操作
+## runtime 不做的事
 
-- Does not publish telemetry — that is the product's responsibility.
-- Does not manage MQTT reconnection directly — `CloudStateMachine` handles that.
-- Does not know about device-specific configuration parameters.
+- 不发布遥测 — 这是产品的职责。
+- 不直接管理 MQTT 重连 — 由 `CloudStateMachine` 处理。
+- 不知道设备特定的配置参数。

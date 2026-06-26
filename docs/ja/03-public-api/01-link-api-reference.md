@@ -1,4 +1,4 @@
-# Public API: iDryer::Link
+# 公開 API: iDryer::Link
 
 `iDryer::Link` は組込み開発者のための単一の エントリ ポイントです。ファサードはスタック全体を隠しています: WiFi/Improv、クラウド ステート マシン、HTTP クレーム、MQTT、ローカル WebSocket、NVS。プロダクトは `telemetry`/`status` フィールドを埋め、コールバックを登録し、`begin()`/`loop()` を呼び出すだけで済みます。
 

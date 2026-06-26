@@ -42,7 +42,7 @@ pio device monitor -b 115200
 
 Устройство ждёт. PIN действителен 10 минут.
 
-**4. Войти на [portal.idryer.org](https://portal.idryer.org/)** и перейти в раздел **Add device**.
+**4. Войти на [portal.idryer.org](https://portal.idryer.org/)** и перейти в раздел **Добавить устройство**.
 
 **5. Ввести PIN** из Serial Monitor (7 цифр, без пробелов).
 

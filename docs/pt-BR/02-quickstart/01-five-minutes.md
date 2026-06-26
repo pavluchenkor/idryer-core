@@ -20,7 +20,7 @@ Copie [`examples/secrets.h.example`](https://github.com/pavluchenkor/idryer-core
 
 Adicione `include/secrets.h` ao `.gitignore`.
 
-## 2. Configure platformio.ini
+## 2. Configurar platformio.ini
 
 Crie `platformio.ini` na raiz do projeto:
 
@@ -83,7 +83,7 @@ Se o dispositivo parou na mensagem `PIN: ...` — isso é esperado; prossiga par
 
 ## 6. Reivindicar o dispositivo no portal
 
-Abra [portal.idryer.org](https://portal.idryer.org/), vá para **Add device** e digite o PIN do Serial Monitor. Após uma reivindicação bem-sucedida, o dispositivo fará a transição para `Online` e o LED embutido piscará a cada 500 ms.
+Abra [portal.idryer.org](https://portal.idryer.org/), vá para **Adicionar dispositivo** e digite o PIN do Serial Monitor. Após uma associação bem-sucedida, o dispositivo passará para `Online` e o LED integrado piscará a cada 500 ms.
 
 Fluxo de reivindicação detalhado: [Onboarding](02-onboarding.md).
 

@@ -35,7 +35,7 @@ Der Test für Code, der in das Produkt gehört: **Ohne Änderung der Hardware od
 | `MqttClient` | Bibliothek | Jedes Produkt braucht MQTT |
 | `CloudStateMachine` | Bibliothek | Provisioning/Claiming ist gleich für alle |
 | `ArduinoWifiManager` | Bibliothek | WiFi-Verbindung hängt nicht vom Produkt ab |
-| `LedStripProfile` | Produkt | Spezifisch für Storage Link TODO: use consistent Storage name throughout the doc |
+| `LedStripProfile` | Produkt | Spezifisch für Storage Link TODO: Storage-Namen im gesamten Dokument vereinheitlichen |
 | `LedStripExecutor` | Produkt | Steuert FastLED, nicht benötigt von anderen Geräten |
 | `Sht31ClimateSensor` | Produkt | Ein spezifischer Sensor für ein spezifisches Produkt |
 | `StorageTelemetryPublisher` | Produkt | Kennt das Storage Link Telemetrie-Format |

@@ -1,10 +1,10 @@
-# 組合根
+# 组合根
 
-The product creates all library objects in `main.cpp` as static variables and passes dependencies through constructors. No factories, no global registry — only explicit assembly.
+产品在 `main.cpp` 中把所有库对象创建为静态变量，并通过构造函数传递依赖。没有工厂、没有全局 registry，只有显式组装。
 
-## 對象創建順序
+## 对象创建顺序
 
-Dependencies are built bottom-up: platform layer first, then cloud stack, then runtime.
+依赖从底向上构建：先平台层，再云端栈，最后 runtime。
 
 ```cpp
 // 1. Platform layer
@@ -67,21 +67,20 @@ void loop() {
 }
 ```
 
-## 組裝規則
+## 组装规则
 
-- All library objects are static (`static`). No `new` or `malloc` for top-level objects.
-- `runtime.begin()` is called last in `setup()`, after all handlers are registered.
-- `runtime.loop()` is called first in `loop()`.
-- Product objects (sensors, telemetry) are created separately and connected to `s_mqtt` directly — the runtime does not know about them.
+- 所有库对象都是静态的（`static`）。顶层对象不要使用 `new` 或 `malloc`。
+- `runtime.begin()` 在 `setup()` 中最后调用，且应在所有 handler 注册之后。
+- `runtime.loop()` 在 `loop()` 中最先调用。
+- 产品对象（传感器、遥测等）单独创建，并直接连接到 `s_mqtt`；runtime 不需要知道它们。
 
 ## 示例：Storage Link
 
-The full Storage Link composition root is in `src/main.cpp` in the
-iDryer-Storage repository (published separately).
+完整的 Storage Link 组合根位于 iDryer-Storage 仓库中的 `src/main.cpp`（该仓库单独发布）。
 
-Device layers in assembly order:
+按组装顺序划分的设备层：
 
-| Layer | Objects | Source |
+| 层 | 对象 | 来源 |
 |-------|---------|--------|
 | Platform | `s_wifiStore`, `s_wifi`, `s_credentials`, `s_http` | `idryer-core` |
 | Cloud | `s_api`, `s_mqtt`, `s_cloud`, `s_dispatcher` | `idryer-core` |

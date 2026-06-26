@@ -74,7 +74,7 @@ pio device monitor -b 115200
 
 ## Шаг 5. Привязать устройство к аккаунту
 
-Авто-claim уже включён в примере. PIN появляется в логе. Введите его в [portal.idryer.org](https://portal.idryer.org/) → "Add device". После claiming `CloudStateMachine` перейдёт в `Online`.
+Автопривязка уже включена в примере. PIN появляется в логе. Введите его в [portal.idryer.org](https://portal.idryer.org/) → "Добавить устройство". После привязки `CloudStateMachine` перейдёт в `Online`.
 
 ## Что дальше
 

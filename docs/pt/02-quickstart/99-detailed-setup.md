@@ -64,7 +64,7 @@ Sequência de registo esperada:
 ```
 
 
-Auto-claim já está activado no exemplo. O PIN aparece no registo. Introduza-o em [portal.idryer.org](https://portal.idryer.org/) → "Add device". Após claim, `CloudStateMachine` faz a transição para `Online`.
+A associação automática já está activada no exemplo. O PIN aparece no registo. Introduza-o em [portal.idryer.org](https://portal.idryer.org/) → "Adicionar dispositivo". Após a associação, `CloudStateMachine` faz a transição para `Online`.
 
 
 Os exemplos seguintes introduzem cada um um novo nível de complexidade:

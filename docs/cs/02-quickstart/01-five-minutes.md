@@ -83,7 +83,7 @@ Pokud se zařízení zastavilo na zprávě `PIN: ...` — to je očekávané; po
 
 ## 6. Deklarujte zařízení na portálu
 
-Otevřete [portal.idryer.org](https://portal.idryer.org/), přejděte na **Add device** a zadejte PIN z Serial Monitor. Po úspěšné deklaraci se zařízení přepne na `Online` a vestavěná LED bude blikat každých 500 ms.
+Otevřete [portal.idryer.org](https://portal.idryer.org/), přejděte na **Přidat zařízení** a zadejte PIN ze Serial Monitoru. Po úspěšném spárování se zařízení přepne do stavu `Online` a vestavěná LED bude blikat každých 500 ms.
 
 Podrobný tok deklarace: [Onboarding](02-onboarding.md).
 

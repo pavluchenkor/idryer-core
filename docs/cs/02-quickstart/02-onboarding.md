@@ -61,7 +61,7 @@ Přihlašovací údaje jsou zapsány do NVS. Deska okamžitě zavolá `WiFi.begi
 Zařízení se automaticky zřídí a zaregistruje 7místný PIN. PIN je platný 10 minut.
 
 1. Otevřete [portal.idryer.org](https://portal.idryer.org/) (nebo staging).
-2. Jděte na **Add device**.
+2. Přejděte na **Přidat zařízení**.
 3. Zadejte PIN ze Serial Monitoru.
 
 Po úspěšném claimu log ukazuje:

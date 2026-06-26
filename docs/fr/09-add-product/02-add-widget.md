@@ -1,6 +1,6 @@
-> **⚠ Outdated translation (as of 2026-05-27).**
-> The widget concept was redefined: a widget is now a **device card on the portal dashboard** (product-specific React component), not a generated artifact from `contracts/widgets/`. The old `widget-registry`/`contracts/widgets/` layer was removed.
-> The English version at [../en/09-add-product/02-add-widget.md](../../en/09-add-product/02-add-widget.md) is the current source of truth. This translation will be updated separately.
+> **⚠ Traduction obsolète (au 2026-05-27).**
+> Le concept de widget a été redéfini : un widget est désormais une **carte d'appareil sur le tableau de bord du portail** (composant React spécifique au produit), et non un artefact généré depuis `contracts/widgets/`. L'ancienne couche `widget-registry`/`contracts/widgets/` a été supprimée.
+> La version anglaise dans [../en/09-add-product/02-add-widget.md](../../en/09-add-product/02-add-widget.md) est la source de vérité actuelle. Cette traduction sera mise à jour séparément.
 
 ---
 

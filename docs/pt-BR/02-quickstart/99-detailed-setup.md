@@ -64,7 +64,7 @@ Sequência de log esperada:
 ```
 
 
-Auto-claim já está ativado no exemplo. O PIN aparece no log. Insira-o em [portal.idryer.org](https://portal.idryer.org/) → "Add device". Após claim, `CloudStateMachine` faz a transição para `Online`.
+A associação automática já está ativada no exemplo. O PIN aparece no log. Insira-o em [portal.idryer.org](https://portal.idryer.org/) → "Adicionar dispositivo". Após a associação, `CloudStateMachine` faz a transição para `Online`.
 
 
 Os exemplos seguintes introduzem cada um um novo nível de complexidade:

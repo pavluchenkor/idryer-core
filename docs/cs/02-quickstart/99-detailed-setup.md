@@ -64,7 +64,7 @@ Očekávaná posloupnost logu:
 ```
 
 
-Auto-claim je již povoleno v příkladu. PIN se objeví v logu. Zadejte jej na [portal.idryer.org](https://portal.idryer.org/) → "Add device". Po claimu se `CloudStateMachine` přesune do `Online`.
+Automatické spárování je již v příkladu povoleno. PIN se objeví v logu. Zadejte jej na [portal.idryer.org](https://portal.idryer.org/) → "Přidat zařízení". Po spárování se `CloudStateMachine` přesune do stavu `Online`.
 
 
 Následující příklady zavádějí vždy jednu novou úroveň složitosti:

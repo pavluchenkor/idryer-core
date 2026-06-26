@@ -61,7 +61,7 @@ As credenciais são escritas em NVS. A placa chama imediatamente `WiFi.begin()`.
 O dispositivo provisiona-se automaticamente e registra um PIN de 7 dígitos. O PIN é válido por 10 minutos.
 
 1. Abra [portal.idryer.org](https://portal.idryer.org/) (ou staging).
-2. Vá para **Add device**.
+2. Vá para **Adicionar dispositivo**.
 3. Insira o PIN do Serial Monitor.
 
 Após um claim bem-sucedido, o log mostra:

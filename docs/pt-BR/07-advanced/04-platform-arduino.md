@@ -77,7 +77,7 @@ bool load(char* ssid, size_t ssidLen, char* password, size_t passLen);
 void save(const char* ssid, const char* password);
 ```
 
-Typical usage in `setup()`:
+Uso típico em `setup()`:
 
 ```cpp
 ArduinoWifiStore wifiStore;

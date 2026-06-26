@@ -69,7 +69,7 @@ wifi MyHomeWiFi MySecretPass
 Устройство автоматически провизионируется и регистрирует 7-значный PIN. PIN действителен 10 минут.
 
 1. Откройте [portal.idryer.org](https://portal.idryer.org/) (или staging).
-2. Перейдите в раздел **Add device**.
+2. Перейдите в раздел **Добавить устройство**.
 3. Введите PIN из Serial Monitor.
 
 После успешной привязки в логе:

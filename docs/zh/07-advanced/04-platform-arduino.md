@@ -1,16 +1,16 @@
 # Arduino 平台
 
-The library defines three interfaces to abstract the platform:
+库定义了三个接口来抽象平台：
 
-- `IWifiManager` — WiFi management.
-- `ICredentialStore` — device identity storage.
-- `IHttpClient` — HTTP requests.
+- `IWifiManager` — WiFi 管理。
+- `ICredentialStore` — 设备身份存储。
+- `IHttpClient` — HTTP 请求。
 
-Arduino implementations of these interfaces are in `platform/arduino/`. They are compiled only for ESP32/Arduino.
+这些接口的 Arduino 实现位于 `platform/arduino/`。它们只为 ESP32/Arduino 编译。
 
 ## ArduinoWifiManager
 
-Implements `IWifiManager` on top of Arduino `WiFi`.
+在 Arduino `WiFi` 之上实现 `IWifiManager`。
 
 ```cpp
 class ArduinoWifiManager : public IWifiManager {
@@ -26,21 +26,21 @@ class ArduinoWifiManager : public IWifiManager {
 };
 ```
 
-`begin()` stores credentials and initiates connection. Safe to call multiple times (e.g., after Improv provisioning).
+`begin()` 保存凭据并启动连接。可以安全地多次调用（例如 Improv provisioning 之后）。
 
-`loop()` is called inside `CloudStateMachine::loop()`. The product does not need to call it.
+`loop()` 在 `CloudStateMachine::loop()` 内部调用。产品不需要调用它。
 
 ## ArduinoCredentialStore
 
-Implements `ICredentialStore` via ESP32 NVS (`Preferences`), namespace `"idryer"`.
+通过 ESP32 NVS（`Preferences`）实现 `ICredentialStore`，namespace 为 `"idryer"`。
 
-Stores three fields:
+存储三个字段：
 
-| NVS key | Content |
+| NVS key | 内容 |
 |---------|---------|
-| `serial` | device serial number (MQTT username) |
-| `token` | device token (MQTT password) |
-| `deviceId` | backend UUID (after claiming) |
+| `serial` | 设备序列号（MQTT 用户名） |
+| `token` | 设备 token（MQTT 密码） |
+| `deviceId` | 后端 UUID（claim 后） |
 
 ```cpp
 bool load(DeviceIdentity& identity);  // true if token is not empty
@@ -48,17 +48,17 @@ bool save(const DeviceIdentity& identity);
 void clear();
 ```
 
-Additional method:
+额外方法：
 
 ```cpp
 void seedSerialFromMac();
 ```
 
-If NVS has no serial number — generates one from the WiFi MAC address in the format `DEVICE_AABBCCDDEEFF` and saves it. Call in `setup()` before `runtime.begin()`.
+如果 NVS 中没有序列号，会根据 WiFi MAC 地址生成 `DEVICE_AABBCCDDEEFF` 格式的序列号并保存。请在 `setup()` 中、`runtime.begin()` 之前调用。
 
 ## ArduinoHttpClient
 
-Implements `IHttpClient` via `WiFiClientSecure`.
+通过 `WiFiClientSecure` 实现 `IHttpClient`。
 
 ```cpp
 bool postJson(const char* url, const char* body, JsonDocument& response) override;
@@ -66,18 +66,18 @@ bool getJson(const char* url, JsonDocument& response) override;
 void setTimeout(uint32_t timeoutMs) override; // default 10000 ms
 ```
 
-Uses the Let's Encrypt ISRG Root X1 root CA (from `root_ca.h`). Used by `CloudStateMachine` for provisioning and claim polling. The product does not call it directly.
+使用 Let's Encrypt ISRG Root X1 根 CA（来自 `root_ca.h`）。`CloudStateMachine` 用它进行 provisioning 和 claim 轮询。产品不会直接调用它。
 
 ## ArduinoWifiStore
 
-Separate class (does not implement an interface) for storing WiFi credentials in NVS, namespace `"wifi"`. Used together with Improv WiFi.
+独立类（不实现接口），用于在 NVS 的 `"wifi"` namespace 中存储 WiFi 凭据。与 Improv WiFi 一起使用。
 
 ```cpp
 bool load(char* ssid, size_t ssidLen, char* password, size_t passLen);
 void save(const char* ssid, const char* password);
 ```
 
-Typical usage in `setup()`:
+`setup()` 中的典型用法：
 
 ```cpp
 ArduinoWifiStore wifiStore;
@@ -95,15 +95,15 @@ improv.onImprovConnected([&](const char* s, const char* p) {
 });
 ```
 
-## HAL: ArduinoTime and ArduinoLogger
+## HAL: ArduinoTime 和 ArduinoLogger
 
-`hal/hal_arduino.h` contains Arduino implementations of HAL interfaces:
+`hal/hal_arduino.h` 包含 HAL 接口的 Arduino 实现：
 
-- `ArduinoTime` — delegates `millis()`, `micros()`, `delay()`, `delayMicroseconds()`.
-- `ArduinoLogger` — formatted output to `Stream` with levels and ANSI colors.
-- `ArduinoSerial` — wraps `HardwareSerial` for `UartBridge`.
+- `ArduinoTime` — 委托 `millis()`、`micros()`、`delay()`、`delayMicroseconds()`。
+- `ArduinoLogger` — 按级别和 ANSI 颜色向 `Stream` 格式化输出。
+- `ArduinoSerial` — 为 `UartBridge` 封装 `HardwareSerial`。
 
-Initialization:
+初始化：
 
 ```cpp
 // In setup() — logs disabled while Improv owns Serial
@@ -113,14 +113,14 @@ idryer::hal::initArduinoHal(nullptr);
 idryer::hal::initArduinoHal(&Serial);
 ```
 
-`initArduinoHal(nullptr)` is safe to call: all `HAL_LOG_*` macros become no-ops.
+`initArduinoHal(nullptr)` 可以安全调用：所有 `HAL_LOG_*` 宏都会变成 no-op。
 
-## 為什麼需要此抽象
+## 为什么需要此抽象
 
-`CloudStateMachine` accepts `IWifiManager*` and `ICredentialStore*`. This allows:
+`CloudStateMachine` 接收 `IWifiManager*` 和 `ICredentialStore*`。这允许：
 
-- Running tests on a host without real WiFi (replace with mocks).
-- Supporting another platform (non-Arduino) without changing the library core.
-- Testing provisioning logic independently of hardware.
+- 在没有真实 WiFi 的主机上运行测试（替换为 mock）。
+- 支持另一个平台（非 Arduino），而不修改库核心。
+- 独立于硬件测试 provisioning 逻辑。
 
-In practice, only Arduino implementations are used in iDryer products.
+实际中，iDryer 产品只使用 Arduino 实现。

@@ -1,248 +1,80 @@
-> **⚠ Outdated translation (as of 2026-05-27).**
-> The widget concept was redefined: a widget is now a **device card on the portal dashboard** (product-specific React component), not a generated artifact from `contracts/widgets/`. The old `widget-registry`/`contracts/widgets/` layer was removed.
-> The English version at [../en/09-add-product/02-add-widget.md](../../en/09-add-product/02-add-widget.md) is the current source of truth. This translation will be updated separately.
+# 为新设备添加仪表板卡片
+
+iDryer 生态中的“widget”是**门户仪表板上的设备卡片**，也就是面向具体产品的 React 组件，用可复用模块组合出设备界面。这里没有 widget registry，没有生成的 React 文件，也没有 `contracts/widgets/` 目录。
+
+本页说明如何为新的设备类型添加这种卡片。只做固件时请看 [01-add-new-product.md](01-add-new-product.md)。
 
 ---
 
-# 添加小部件和新設備
+## 内容放在哪里
 
-Complete cycle: from forking the repository to a merged PR. Covers firmware, contract, React widget, and portal testing.
-
-If you only need firmware without a new widget — see [01-add-new-product.md](01-add-new-product.md).
-
----
-
-## 先決條件
-
-- Python 3.9+ with `pip install pyyaml jsonschema`
-- Node.js 18+
-- PlatformIO CLI
-- Access to the iDryer portal for UIKit testing
+| 层 | 仓库 | 事实来源 |
+|---|---|---|
+| 合约（deviceType、capabilities、invoke actions、telemetry、menu） | `idryer-core` | `contracts/mqtt_contract.yaml` |
+| 生成的头文件 / TS 类型 / Dart 类型 | `idryer-core` | `contracts/_generated/*` |
+| 固件 | 每个设备自己的仓库（例如 `iHeater-link`、`iDryer-Storage`） | 手写 |
+| 仪表板卡片 | `iDryerPortal/frontend-v2` | `src/components/dashboard/cards/*.tsx` |
+| 可复用卡片模块 | `iDryerPortal/frontend-v2` | `src/components/device/*.tsx` |
+| 卡片注册 | `iDryerPortal/frontend-v2` | `src/components/dashboard/DeviceDashboardCard.tsx` |
+| UIKit 预览 | `iDryerPortal/frontend-v2` | `src/pages/UiKitPage.tsx` |
 
 ---
 
-## Step 1. Fork and Clone
+## 命令通道规则
 
-1. Fork the `idryer-core` repository on GitHub.
-2. Clone your fork locally:
+卡片通过合约中定义的两条 MQTT 路径与设备通信：
 
-    ```bash
-    git clone https://github.com/<your-username>/idryer-core.git
-    cd idryer-core
-    git checkout -b feature/my-new-device
-    ```
+- **Invoke（形式 A）** — 通过菜单动作的 `id` 触发动作，不带参数。适用于动作已经在设备菜单中存在，并且也能从其他客户端触发的情况。
+- **Invoke（形式 B）** — 直接发送 `{action, args}`，绕过菜单。适用于带参数的动作（例如带 `tempC`/`durationMin` 的 `heat.start`，或带 `r/g/b/animation` 的 `led.pulse`）。
+- **Set** — 写入配置值（`set <role> <value>`）。只用于持久设置，不用于有开始和结束的过程。
 
-3. Verify the contract passes validation in the current state:
-
-    ```bash
-    cd contracts
-    ./regen.sh --firmware-only
-    ```
+对于会开始并结束的过程（加热、干燥、动画），始终使用 **invoke**，不要使用 `set heat_active=true` 这种切换式写法。
 
 ---
 
-## Step 2. Edit the Contract
+## 遥测 null 策略
 
-All changes go into `contracts/mqtt_contract.yaml`. Keep everything in a single changeset.
+如果传感器不存在或读数不可用，固件必须从遥测 payload 中省略该字段（不要发送 `null`，不要发送 `0`，不要发送 `NaN`）。卡片必须把缺失字段视为“无数据”，显示占位内容，而不是猜测为零。
 
-!!! warning
-    Do not edit files in `_generated/` — they are overwritten by generators.
-
-### 2a. Capability vocabulary (new peripheral type)
-
-If the device has a new hardware type (e.g., a CO2 sensor), add an entry to the `capability_vocabulary` section:
-
-```yaml
-capability_vocabulary:
-  co2:
-    description: "CO2 sensor (ppm)"
-    config_flag: hasAirCo2
-    telemetry_field: airCo2Ppm
-```
-
-This automatically adds the field `hasAirCo2: bool` to `iDryer::Config` on the next regeneration.
-
-### 2b. Canonical roles (new role + widget)
-
-If the device exposes a new menu item, register the role in `canonical_roles`:
-
-```yaml
-canonical_roles:
-  co2.read:
-    type: float
-    widget: Co2Display
-    unit: ppm
-    labels:
-      ru: "CO₂"
-      en: "CO₂"
-```
-
-The `widget` value is the name of the React component you will write in Step 5.
-
-### 2c. Invoke actions (if the widget sends commands)
-
-If the widget triggers an action on the device, describe it in `invoke_actions`:
-
-```yaml
-invoke_actions:
-  my_device:
-    co2.calibrate:
-      description: "Start CO2 sensor calibration"
-      args:
-        targetPpm:
-          type: uint16
-          description: "Reference CO2 value (ppm)"
-          required: true
-```
-
-### 2d. Device profile (new device type)
-
-Add the profile to `device_profiles`:
-
-```yaml
-device_profiles:
-  my_device:
-    description: "My device"
-    capabilities: [led, co2]
-    invoke_actions: [co2.calibrate]
-```
-
-Capability values come from the `capability_vocabulary` defined in step 2a.
+规范表述见合约中的 `rules.telemetry_null_policy`。
 
 ---
 
-## Step 3. Validate and Regenerate
+## Checklist — 为新设备添加卡片
 
-```bash
-cd contracts
-./regen.sh
-```
+1. **合约** — 在 `contracts/mqtt_contract.yaml` 中添加设备 profile，以及所有新的 capabilities、roles 和 invoke actions。运行 `./regen.sh` 并提交重新生成的 `_generated/*`。
+2. **固件** — 为新动作实现 `onCommand("invoke")`；按 null 策略发送遥测。
+3. **卡片组件** — 创建 `iDryerPortal/frontend-v2/src/components/dashboard/cards/<DeviceType>Card.tsx`。使用 [src/components/device/](https://github.com/iDryer/iDryerPortal/tree/main/frontend-v2/src/components/device) 中的可复用模块组合界面。
+4. **注册** — 在 [DeviceDashboardCard.tsx](https://github.com/iDryer/iDryerPortal/blob/main/frontend-v2/src/components/dashboard/DeviceDashboardCard.tsx) 的 switch 中添加新的 `deviceType`。
+5. **DeviceDetailPage** — 扩展 [DeviceDetailPage.tsx](https://github.com/iDryer/iDryerPortal/blob/main/frontend-v2/src/pages/DeviceDetailPage.tsx) 中的 `controlsOrProgress`，让同一张卡片也显示在设备页面。
+6. **UIKit** — 在 [UiKitPage.tsx](https://github.com/iDryer/iDryerPortal/blob/main/frontend-v2/src/pages/UiKitPage.tsx) 的 “Device Widgets” 分组中添加 Idle + Active 示例和 mock 数据，这样无需真实设备也能在 `/uikit` 检查卡片。
+7. **测试** — 本地运行门户，确认卡片在 Idle 和 Active 状态下渲染正确，会发送预期的 invoke payload，并会响应遥测更新。
+8. **PR** — 在 `idryer-core` 中开一个 PR（合约 + 固件 submodule bump），在 `iDryerPortal` 中开一个 PR（卡片 + 注册 + UIKit）。在描述中互相链接。
 
-Flags:
+---
 
-| Flag | Effect |
+## 可复用卡片模块
+
+这些模块位于 [src/components/device/](https://github.com/iDryer/iDryerPortal/tree/main/frontend-v2/src/components/device)，应该优先使用。先组合它们，再考虑写自定义 JSX。
+
+| 模块 | 用途 |
 |---|---|
-| (none) | Validate + all generators + copy to portal |
-| `--firmware-only` | Firmware generators only, skip portal copy |
-| `--help` | Show help |
+| `DeviceHeader` | 设备名称、状态标签、在线/离线指示 |
+| `DeviceTelemetryBlock` | 渲染遥测行列表，默认隐藏缺失字段 |
+| `ActiveSessionBlock` | 带目标值和剩余时间的过程进度 UI |
+| `NumberInput` | 绑定到菜单元数据中的 min/max/step 的数字输入 |
+| `CardActions` | 底部按钮组（Start / Stop 等） |
 
-On success, `_generated/` is updated with:
-
-- `uart_protocol.h`, `mqtt_topics.h` — C++ headers
-- `iDryer_api.h` — Config/DeviceType facade
-- `mqtt-api.types.ts` — TypeScript types
-- `scaffolds/my_device/` — PlatformIO project skeleton
-- On the portal: files in `src/components/widgets/`
-
-If `regen.sh` exits with an error, fix the problem before continuing.
+如果新模块会被 2 张或更多卡片复用，请把它放到 `src/components/device/`，不要直接内联在某张卡片里。
 
 ---
 
-## Step 4. Implement Firmware
+## 现有卡片（参考）
 
-Use the generated scaffold project:
+| 卡片 | 设备类型 | 说明 |
+|---|---|---|
+| `HeaterCard` | `IHEATER_LINK` | Idle：温度 + 时长输入 + Start。Active：带剩余时间 + Stop 的 ActiveSessionBlock。 |
+| `StorageCard` | `STORAGE_LINK` | SHT31 遥测 + LED 动画/颜色选择器 + Turn On/Off（invoke `led.pulse`）。 |
+| `IDryerCard` | fallback | 没有专用实现的设备使用通用卡片。 |
 
-```bash
-cp -r contracts/_generated/scaffolds/my_device/ ~/my_device_fw/
-cd ~/my_device_fw
-```
-
-Fill in the TODO sections in `src/main.cpp`:
-
-- `onOnline()` — load config from NVS, initialize hardware.
-- `loop()` — poll sensors, call `s_runtime.publishTelemetry(tel)`.
-- `buildInfoJson()` — already populated by the generator from capabilities.
-- `onInvoke()` — handle `co2.calibrate`.
-
-For details, see [01-add-new-product.md](01-add-new-product.md).
-
----
-
-## Step 5. Create the React Widget
-
-Widgets live in `contracts/widgets/` and are copied to the portal by `regen.sh`.
-
-!!! note
-    Do not edit widgets directly in `portal/src/components/widgets/` — they will be overwritten on the next `regen.sh` run. Edit only in `contracts/widgets/`.
-
-### Create the widget file
-
-```tsx
-// contracts/widgets/Co2Display.tsx
-import type { WidgetProps } from "./widget-props";
-
-export function Co2DisplayWidget({ device }: WidgetProps) {
-  const unit = device.units[0];
-  const co2 = unit?.co2Ppm ?? null;
-  return (
-    <div style={{ padding: "8px 16px" }}>
-      {co2 !== null ? `${co2} ppm` : "—"}
-    </div>
-  );
-}
-```
-
-### Register in index.ts
-
-```ts
-// contracts/widgets/index.ts
-export { Co2DisplayWidget } from "./Co2Display";
-```
-
-### Register in widget-registry.tsx (on the portal)
-
-After the next `regen.sh` run the file will appear at `portal/src/components/widgets/Co2Display.tsx`. Add an entry to `widget-registry.tsx` manually:
-
-```tsx
-import { Co2DisplayWidget } from "./Co2Display";
-
-export const WIDGET_REGISTRY: Record<WidgetName, React.ComponentType<WidgetProps>> = {
-  // ...
-  Co2Display: Co2DisplayWidget,
-};
-```
-
----
-
-## Step 6. Test in UIKit
-
-Open `portal/src/pages/UiKitPage.tsx` and add a section with mock data inside the **Device Dashboard Widgets** group:
-
-```tsx
-<KitSection title="Co2Display">
-  <Co2DisplayWidget device={MOCK_DEVICE} item={MOCK_CO2_ITEM} socket={null} />
-</KitSection>
-```
-
-Open the portal locally and navigate to `/uikit` — the widget should render without a login.
-
----
-
-## Step 7. PR Checklist
-
-Before submitting the PR, verify that:
-
-- [ ] `./contracts/regen.sh` completes without errors
-- [ ] `_generated/*` is committed (not in `.gitignore`)
-- [ ] `contracts/widgets/` — new widget file added
-- [ ] `contracts/widgets/index.ts` — widget exported
-- [ ] `widget-registry.tsx` on the portal — widget registered
-- [ ] Widget renders at `/uikit` without console errors
-- [ ] Scaffold in `_generated/scaffolds/my_device/` correctly reflects capabilities
-- [ ] PR description states: device purpose, capabilities, widget name
-
-Submit the PR against the `main` branch of the `idryer-core` repository.
-
----
-
-## 一個 PR 中的所有更改
-
-| File | Change type |
-|---|---|
-| `contracts/mqtt_contract.yaml` | Source of truth |
-| `contracts/_generated/*` | Auto-generated — committed in full |
-| `contracts/widgets/MyWidget.tsx` | New file |
-| `contracts/widgets/index.ts` | +1 export line |
-| *(portal, after `regen.sh`)* | `src/components/widgets/MyWidget.tsx` — copy |
-| *(portal, manual)* | `src/components/widgets/widget-registry.tsx` — +1 entry |
-| *(portal, manual)* | `src/pages/UiKitPage.tsx` — +1 section in KitGroup |
+开始新卡片前，先打开这些现有卡片作为具体示例。

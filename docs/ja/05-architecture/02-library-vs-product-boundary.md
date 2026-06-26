@@ -35,7 +35,7 @@
 | `MqttClient` | ライブラリ | すべてのプロダクトが MQTT を必要とします |
 | `CloudStateMachine` | ライブラリ | プロビジョニング/クレーミングはすべてに対して同じ |
 | `ArduinoWifiManager` | ライブラリ | WiFi接続はプロダクトに依存しません |
-| `LedStripProfile` | プロダクト | Storage Link に固有 TODO: use consistent Storage name throughout the doc |
+| `LedStripProfile` | プロダクト | Storage Link に固有 TODO: ドキュメント全体で Storage 名を統一する |
 | `LedStripExecutor` | プロダクト | FastLED を制御し、他のデバイスでは不要 |
 | `Sht31ClimateSensor` | プロダクト | 特定のプロダクト向けの特定センサー |
 | `StorageTelemetryPublisher` | プロダクト | Storage Link テレメトリフォーマットを知っています |

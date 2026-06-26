@@ -1,14 +1,14 @@
-# 自定義遙測（產品特定有效負載）
+# 自定义遥测（产品特定 payload）
 
-## 何時使用
+## 何时使用
 
-idryer-core's standard telemetry publishes only the fields defined in the common contract (`units[].temperature`, `humidity`, `heaterPower`, etc.). If your product needs to add top-level JSON fields (e.g. `outputMode`, `targetTempC`, `active`) or include data not present in the `Telemetry` struct, use this recipe.
+idryer-core 的标准遥测只发布通用合约中定义的字段（`units[].temperature`、`humidity`、`heaterPower` 等）。如果产品需要添加顶层 JSON 字段（例如 `outputMode`、`targetTempC`、`active`），或包含 `Telemetry` 结构中没有的数据，请使用这个方案。
 
-A typical case: iHeater Link publishes `outputMode` and `targetTempC` alongside the standard `units[]`, so the backend can forward `heaterIntent` to the frontend via the `telemetry:update` WebSocket event.
+典型场景：iHeater Link 会在标准 `units[]` 旁边发布 `outputMode` 和 `targetTempC`，这样后端就能通过 `telemetry:update` WebSocket 事件把 `heaterIntent` 转发给前端。
 
-## Step 1 — Disable auto-publish
+## 步骤 1 — 禁用自动发布
 
-Set `telemetryPeriodMs = 0` in `Config`. This prevents idryer-core from publishing a stripped-down payload on its own:
+在 `Config` 中设置 `telemetryPeriodMs = 0`。这会阻止 idryer-core 自行发布精简版 payload：
 
 ```cpp
 static const iDryer::Config CFG = {
@@ -18,9 +18,9 @@ static const iDryer::Config CFG = {
 };
 ```
 
-## Step 2 — Write the publish function
+## 步骤 2 — 编写发布函数
 
-Use `device().mqttClient()->publishTelemetry(doc)`. Include all fields the backend expects: both product-specific (top-level) and the standard `units[]` block.
+使用 `device().mqttClient()->publishTelemetry(doc)`。包含后端期望的所有字段：产品特定字段（顶层）以及标准 `units[]` 块。
 
 ```cpp
 #include <integrations/common/link_integrations_types.h>  // activeIntegrationToString()
@@ -59,7 +59,7 @@ static void publishCustomTelemetry() {
 }
 ```
 
-## Step 3 — Call from `loop()`
+## 步骤 3 — 从 `loop()` 调用
 
 ```cpp
 void loop() {
@@ -76,13 +76,13 @@ void loop() {
 
 ## 不要做的事
 
-- **Do not publish both** idryer-core auto-telemetry (non-zero `telemetryPeriodMs`) and custom telemetry simultaneously. The backend receives two messages on the same topic and processes both — data gets duplicated.
-- **Do not call `device().publishTelemetryNow()`** when `telemetryPeriodMs = 0` — it publishes the standard stripped payload without your product-specific fields.
+- **不要同时发布两份遥测**：不要在非零 `telemetryPeriodMs` 的 idryer-core 自动遥测之外再发布自定义遥测。后端会在同一个 topic 上收到两条消息并都处理，导致数据重复。
+- **当 `telemetryPeriodMs = 0` 时不要调用 `device().publishTelemetryNow()`** — 它会发布不含产品特定字段的标准精简 payload。
 
-## 為什麼庫不自己做這個
+## 为什么库不自己做这件事
 
-idryer-core already publishes `heaterPower: 1` inside `units[]` — formally enough to know heating is active. The problem is not in the library but in the backend (`telemetry.handler.ts`): it looks specifically for a top-level `outputMode` field and does not derive `heaterIntent` from the standard `heaterPower`. This is technical debt on the backend side.
+idryer-core 已经在 `units[]` 中发布 `heaterPower: 1`，形式上足以判断加热是否处于活动状态。问题不在库，而在后端（`telemetry.handler.ts`）：它专门查找顶层 `outputMode` 字段，而不是从标准 `heaterPower` 推导 `heaterIntent`。这是后端侧的技术债。
 
-The current recipe is a temporary workaround. If the backend is fixed to derive `heaterIntent` from `units[0].heaterPower`, you can revert to `telemetryPeriodMs = 5000` and remove `publishCustomTelemetry()` — the standard library telemetry will work without any changes.
+当前方案是临时 workaround。如果后端改为从 `units[0].heaterPower` 推导 `heaterIntent`，就可以恢复 `telemetryPeriodMs = 5000` 并删除 `publishCustomTelemetry()`，标准库遥测会无需修改地工作。
 
-Watch for updates to `telemetry.handler.ts`: once a fallback on `heaterPower` is added there, this recipe becomes redundant.
+关注 `telemetry.handler.ts` 的更新：一旦那里添加基于 `heaterPower` 的 fallback，此方案就不再需要。

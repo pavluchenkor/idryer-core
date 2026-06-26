@@ -6,7 +6,7 @@
 
 ## 生命週期
 
-Typical `main.cpp` skeleton:
+典型的 `main.cpp` 骨架：
 
 ```cpp
 #include <iDryer.h>
@@ -50,38 +50,38 @@ void loop() {
 
 ## 配置：`iDryer::Config`
 
-Filled once in `main.cpp`, passed to the `Link` constructor. All fields use aggregate init (C++ designated initializers).
+在 `main.cpp` 中填充一次，并传给 `Link` 构造函数。所有字段都使用聚合初始化（C++ 指定初始化器）。
 
-| Field | Type | Purpose | Note |
+| 字段 | 类型 | 用途 | 备注 |
 |-------|------|---------|------|
-| `deviceType` | `DeviceType` | Device type | **required** |
-| `unitsCount` | `uint8_t` | Number of units (chambers), 1..`MAX_UNITS` (4) | **required** |
-| `hasAirTemp` | `bool` | Air temperature sensor present | false = field omitted from JSON |
-| `hasAirHumidity` | `bool` | Humidity sensor present | false = field omitted from JSON |
-| `hasHeaterTemp` | `bool` | Heater temperature sensor present | — |
-| `hasHeaterPower` | `bool` | Heater power sensor present | — |
-| `hasFanStatus` | `bool` | Fan status present | — |
-| `hasScales` | `bool` | Scales present | — |
-| `hasRfid` | `bool` | RFID reader present | — |
-| `allowHa` | `bool` | Allow Home Assistant integration | false = SDK does not create a client |
-| `allowBambu` | `bool` | Allow Bambu Lab LAN integration | — |
-| `allowMoonraker` | `bool` | Allow Moonraker/Klipper integration | — |
-| `telemetryPeriodMs` | `uint32_t` | Auto-publish period for `Telemetry` (ms) | 0 = do not publish |
-| `statusPeriodMs` | `uint32_t` | Auto-publish period for `Status` (ms) | 0 = do not publish |
-| `hardwareVersion` | `const char*` | Hardware version string | **required** |
-| `firmwareVersion` | `const char*` | Firmware version string | **required** |
+| `deviceType` | `DeviceType` | 设备类型 | **必填** |
+| `unitsCount` | `uint8_t` | 单元（腔体）数量，1..`MAX_UNITS` (4) | **必填** |
+| `hasAirTemp` | `bool` | 是否有空气温度传感器 | false = JSON 中省略字段 |
+| `hasAirHumidity` | `bool` | 是否有湿度传感器 | false = JSON 中省略字段 |
+| `hasHeaterTemp` | `bool` | 是否有加热器温度传感器 | — |
+| `hasHeaterPower` | `bool` | 是否有加热功率传感器 | — |
+| `hasFanStatus` | `bool` | 是否有风扇状态 | — |
+| `hasScales` | `bool` | 是否有称重 | — |
+| `hasRfid` | `bool` | 是否有 RFID 读卡器 | — |
+| `allowHa` | `bool` | 允许 Home Assistant 集成 | false = SDK 不创建客户端 |
+| `allowBambu` | `bool` | 允许 Bambu Lab LAN 集成 | — |
+| `allowMoonraker` | `bool` | 允许 Moonraker/Klipper 集成 | — |
+| `telemetryPeriodMs` | `uint32_t` | `Telemetry` 自动发布周期（ms） | 0 = 不发布 |
+| `statusPeriodMs` | `uint32_t` | `Status` 自动发布周期（ms） | 0 = 不发布 |
+| `hardwareVersion` | `const char*` | 硬件版本字符串 | **必填** |
+| `firmwareVersion` | `const char*` | 固件版本字符串 | **必填** |
 
 ---
 
 ## 類 `iDryer::Link`
 
-### Constructor
+### 构造函数
 
 ```cpp
 explicit Link(const Config& cfg);
 ```
 
-Takes the configuration by const reference. `CFG` must exist for the full object lifetime (typically `static const`).
+通过 const 引用接收配置。`CFG` 必须在对象整个生命周期内存在（通常是 `static const`）。
 
 ### 方法
 
@@ -91,9 +91,9 @@ Takes the configuration by const reference. `CFG` must exist for the full object
 bool begin();
 ```
 
-Brings up the entire SDK stack: WiFi/Improv, cloud state machine, HTTP claim, MQTT, local WebSocket, NVS persistence.
+启动整个 SDK 栈：WiFi/Improv、云端状态机、HTTP claim、MQTT、本地 WebSocket、NVS 持久化。
 
-Call once in `setup()`. Returns `true` on successful initialization.
+在 `setup()` 中调用一次。初始化成功时返回 `true`。
 
 ```cpp
 void setup() {
@@ -107,9 +107,9 @@ void setup() {
 void loop();
 ```
 
-The only required tick. Services WiFi/MQTT/LocalAccess, and auto-publishes telemetry and status on their timers.
+唯一必需的 tick。它维护 WiFi/MQTT/LocalAccess，并按定时器自动发布遥测和状态。
 
-Call every iteration of `loop()`. Without this call the connection is not maintained.
+每次 `loop()` 迭代都要调用。不调用它，连接就不会被维护。
 
 ```cpp
 void loop() {
@@ -125,7 +125,7 @@ void loop() {
 void publishTelemetryNow();
 ```
 
-Immediately publishes the current state of `link.telemetry`, regardless of the `telemetryPeriodMs` timer.
+立即发布 `link.telemetry` 的当前状态，不受 `telemetryPeriodMs` 定时器影响。
 
 #### `publishStatusNow()`
 
@@ -133,7 +133,7 @@ Immediately publishes the current state of `link.telemetry`, regardless of the `
 void publishStatusNow();
 ```
 
-Immediately publishes the current state of `link.status`. Use after processing a command when the new state must be reflected in the portal right away.
+立即发布 `link.status` 的当前状态。处理命令后如果新状态必须立刻反映到门户中，请调用它。
 
 ```cpp
 // iHeater-link/src/main.cpp:238
@@ -149,14 +149,14 @@ void raiseEvent(EventKind   severity,
                 uint8_t     unitId = 0xFF);
 ```
 
-Publishes an event to the topic `idryer/{serial}/events`. Sent immediately.
+向 `idryer/{serial}/events` topic 发布事件。会立即发送。
 
-| Parameter | Type | Purpose |
+| 参数 | 类型 | 用途 |
 |-----------|------|---------|
 | `severity` | `EventKind` | `Info` / `Warning` / `Error` |
-| `event` | `const char*` | Event code, e.g. `"OVERHEAT"`, `"SESSION_COMPLETE"` |
-| `message` | `const char*` | Arbitrary debug text |
-| `unitId` | `uint8_t` | Unit index (0..unitsCount-1) or `0xFF` for device-wide |
+| `event` | `const char*` | 事件代码，例如 `"OVERHEAT"`、`"SESSION_COMPLETE"` |
+| `message` | `const char*` | 任意调试文本 |
+| `unitId` | `uint8_t` | 单元索引（0..unitsCount-1），或 `0xFF` 表示整个设备 |
 
 ```cpp
 link.raiseEvent(iDryer::EventKind::Error, "OVERHEAT", "U1 too hot", 0);
@@ -168,7 +168,7 @@ link.raiseEvent(iDryer::EventKind::Error, "OVERHEAT", "U1 too hot", 0);
 void onRequest(RequestCallback cb);
 ```
 
-Registers a callback for business commands (`Start`, `Stop`, `Storage`, `Find`, `ClearErrors`) arriving over MQTT or Local WS. The command source is transparent.
+注册业务命令 callback（`Start`、`Stop`、`Storage`、`Find`、`ClearErrors`），这些命令可来自 MQTT 或 Local WS。命令来源对业务代码透明。
 
 `RequestCallback` = `std::function<void(const iDryer::Request&)>`
 
@@ -182,7 +182,7 @@ link.onRequest([](const iDryer::Request& r) {
 });
 ```
 
-**Important:** if `runtime()->setCommandHandler(...)` is set, this callback is not called — the full dispatcher intercepts all commands.
+**重要：** 如果设置了 `runtime()->setCommandHandler(...)`，此 callback 不会被调用；完整 dispatcher 会拦截所有命令。
 
 #### `onProfile()`
 
@@ -200,7 +200,7 @@ Registers a callback for `commands/profile` — a multi-step drying schedule.
 void onIntegrationStatus(IntegrationStatusCallback cb);
 ```
 
-Called when an integration connection state changes (HA, Bambu, Moonraker). Optional callback.
+集成连接状态变化时调用（HA、Bambu、Moonraker）。这是可选 callback。
 
 `IntegrationStatusCallback` = `std::function<void(const iDryer::IntegrationStatus&)>`
 
@@ -210,7 +210,7 @@ Called when an integration connection state changes (HA, Bambu, Moonraker). Opti
 void onClaimPin(ClaimPinCallback cb);
 ```
 
-Called when the cloud claim flow returns a PIN for entry in the portal.
+云端 claim 流程返回需要在门户中输入的 PIN 时调用。
 
 `ClaimPinCallback` = `std::function<void(const char* pin, uint32_t expiresInSeconds)>`
 
@@ -227,7 +227,7 @@ device().onClaimPin([](const char* pin, uint32_t expiresInSeconds) {
 bool isOnline() const;
 ```
 
-Returns `true` if the device is registered and the MQTT session is active.
+如果设备已注册且 MQTT 会话处于活动状态，则返回 `true`。
 
 ```cpp
 // iHeater-link/src/main.cpp:281
@@ -240,7 +240,7 @@ if (device().isOnline()) { ... }
 const char* serial() const;
 ```
 
-Device serial number (string from NVS, assigned during claim). Empty string before claim completes.
+设备序列号（来自 NVS 的字符串，在 claim 过程中分配）。claim 完成前为空字符串。
 
 #### `seedWifiCredentialsIfEmpty()`
 
@@ -248,7 +248,7 @@ Device serial number (string from NVS, assigned during claim). Empty string befo
 void seedWifiCredentialsIfEmpty(const char* ssid, const char* password);
 ```
 
-Writes WiFi credentials to NVS only if they are not yet set. Call before `begin()`. Used in dev environments with hardcoded credentials.
+仅在 WiFi 凭据尚未设置时写入 NVS。请在 `begin()` 前调用。用于带硬编码凭据的开发环境。
 
 #### `setWifiCredentials()`
 
@@ -256,7 +256,7 @@ Writes WiFi credentials to NVS only if they are not yet set. Call before `begin(
 void setWifiCredentials(const char* ssid, const char* password);
 ```
 
-Always overwrites WiFi credentials in NVS. Dev helper and forced re-provisioning.
+始终覆盖 NVS 中的 WiFi 凭据。用于开发辅助和强制重新 provisioning。
 
 ```cpp
 // iHeater-link/src/main.cpp:313
@@ -269,7 +269,7 @@ device().setWifiCredentials(ssid.c_str(), pass.c_str());
 bool requestClaim();
 ```
 
-Manually starts the cloud claim flow (provision → register → check-claim). On success calls the registered `onClaimPin` callback. Returns `true` if the request was accepted.
+手动启动云端 claim 流程（provision → register → check-claim）。成功时调用已注册的 `onClaimPin` callback。如果请求被接受则返回 `true`。
 
 ```cpp
 // iHeater-link/src/main.cpp:284
@@ -282,7 +282,7 @@ bool ok = device().requestClaim();
 void eraseClaimAndRestart();
 ```
 
-Removes the device token from NVS and reboots the chip. After reboot the device is unclaimed — the auto-claim flow starts again. This function does not return.
+从 NVS 中移除设备 token 并重启芯片。重启后设备处于未 claim 状态，自动 claim 流程会重新开始。此函数不会返回。
 
 ```cpp
 // iHeater-link/src/main.cpp:293
@@ -295,9 +295,9 @@ device().eraseClaimAndRestart();
 idryer::cloud::LinkIntegrationsManager* integrationsManager();
 ```
 
-Outlet to the integrations manager — for product-side wiring (Moonraker chamber target callbacks, Bambu printer status, etc.).
+通向 integrations manager 的出口，用于产品侧接线（Moonraker 腔体目标温度 callback、Bambu 打印机状态等）。
 
-Requires `#include <integrations/common/link_integrations_manager.h>`.
+需要 `#include <integrations/common/link_integrations_manager.h>`。
 
 ```cpp
 // iHeater-link/src/main.cpp:337
@@ -310,9 +310,9 @@ device().integrationsManager()->setVirtualChamberCallback(onVirtualChamberUpdate
 idryer::MqttClient* mqttClient();
 ```
 
-Outlet to the SDK MQTT client — for components that publish their own topics or integrate into command routing (e.g., `MenuBridge`).
+通向 SDK MQTT client 的出口，供需要发布自有 topic 或接入命令路由的组件使用（例如 `MenuBridge`）。
 
-Requires `#include <mqtt/mqtt_client.h>`.
+需要 `#include <mqtt/mqtt_client.h>`。
 
 #### `devicePublisher()`
 
@@ -320,7 +320,7 @@ Requires `#include <mqtt/mqtt_client.h>`.
 idryer::DevicePublisher* devicePublisher();
 ```
 
-Outlet to the dual-publish helper — sends one payload to both MQTT and Local WS simultaneously. Use for product responses that must reach the LAN client the same way auto-published telemetry does.
+通向双发布辅助器的出口，可同时把一个 payload 发送到 MQTT 和 Local WS。用于必须像自动发布遥测一样到达 LAN 客户端的产品响应。
 
 ```cpp
 // iDryer-Storage/src/main.cpp:175
@@ -333,9 +333,9 @@ link.devicePublisher()->publishConfigRaw(buf, len);
 idryer::IdryerRuntime* runtime();
 ```
 
-Outlet to the SDK runtime — used to set a full command handler instead of the facade dispatcher. After `setCommandHandler(...)` the facade's `onRequest`/`onProfile` are no longer called via the MQTT path.
+通向 SDK runtime 的出口，用于设置完整命令 handler，以替代 facade dispatcher。设置 `setCommandHandler(...)` 后，facade 的 `onRequest`/`onProfile` 不再通过 MQTT 路径调用。
 
-**Important:** call strictly after `begin()` — `begin()` installs its own dispatcher, which must be overwritten.
+**重要：** 必须严格在 `begin()` 之后调用；`begin()` 会安装自己的 dispatcher，需要被覆盖。
 
 ```cpp
 // iDryer-Storage/src/main.cpp:249
@@ -345,22 +345,22 @@ link.runtime()->setCommandHandler(handleCommand);
 // void handleCommand(const char* cmd, JsonObjectConst data);
 ```
 
-Requires `#include <runtime/idryer_runtime.h>`.
+需要 `#include <runtime/idryer_runtime.h>`。
 
 ---
 
 ### Telemetry fields {#telemetry-fields}
 
-Filled by the product in `loop()`. The SDK reads them on the `telemetryPeriodMs` timer and publishes to MQTT and Local WS.
+由产品在 `loop()` 中填充。SDK 按 `telemetryPeriodMs` 定时器读取它们，并发布到 MQTT 和 Local WS。
 
-| Field | Type | Config flag | Purpose |
+| 字段 | 类型 | 配置标志 | 用途 |
 |-------|------|-------------|---------|
-| `telemetry.airTempC[unitId]` | `float` | `hasAirTemp` | Air temperature, °C |
-| `telemetry.airHumidityPct[unitId]` | `float` | `hasAirHumidity` | Humidity, % |
-| `telemetry.heaterTempC[unitId]` | `float` | `hasHeaterTemp` | Heater temperature, °C |
-| `telemetry.heaterPower01[unitId]` | `float` | `hasHeaterPower` | Heater power, 0.0..1.0 |
-| `telemetry.fanOn[unitId]` | `bool` | `hasFanStatus` | Fan status |
-| `telemetry.weightG[unitId]` | `uint16_t` | `hasScales` | Weight, grams |
+| `telemetry.airTempC[unitId]` | `float` | `hasAirTemp` | 空气温度，°C |
+| `telemetry.airHumidityPct[unitId]` | `float` | `hasAirHumidity` | 湿度，% |
+| `telemetry.heaterTempC[unitId]` | `float` | `hasHeaterTemp` | 加热器温度，°C |
+| `telemetry.heaterPower01[unitId]` | `float` | `hasHeaterPower` | 加热功率，0.0..1.0 |
+| `telemetry.fanOn[unitId]` | `bool` | `hasFanStatus` | 风扇状态 |
+| `telemetry.weightG[unitId]` | `uint16_t` | `hasScales` | 重量，克 |
 
 ```cpp
 // iDryer-Storage/src/main.cpp:267
@@ -368,16 +368,16 @@ link.telemetry.airTempC[0]       = r.temperature;
 link.telemetry.airHumidityPct[0] = r.humidity;
 ```
 
-`unitId` = 0 for the first (or only) unit. The index must be < `Config.unitsCount`.
+第一个（或唯一）单元的 `unitId` = 0。索引必须小于 `Config.unitsCount`。
 
-`Status` fields — same structure, but for operational state:
+`Status` 字段结构相同，但表示运行状态：
 
-| Field | Type | Purpose |
+| 字段 | 类型 | 用途 |
 |-------|------|---------|
-| `status.mode[unitId]` | `UnitMode` | Current unit mode |
-| `status.targetTempC[unitId]` | `float` | Target temperature |
-| `status.durationS[unitId]` | `uint32_t` | Requested duration, s (0 = indefinite) |
-| `status.elapsedS[unitId]` | `uint32_t` | Time elapsed since session start, s |
+| `status.mode[unitId]` | `UnitMode` | 当前单元模式 |
+| `status.targetTempC[unitId]` | `float` | 目标温度 |
+| `status.durationS[unitId]` | `uint32_t` | 请求时长，秒（0 = 无限期） |
+| `status.elapsedS[unitId]` | `uint32_t` | 会话开始后经过的时间，秒 |
 
 ```cpp
 // iHeater-link/src/main.cpp:229
@@ -388,7 +388,7 @@ device().publishStatusNow();
 
 ### 通過運行時的回調註冊
 
-If full control over incoming commands is needed (e.g., the product handles `get_config`, `set`, non-standard `invoke`):
+如果需要完全控制传入命令（例如产品自己处理 `get_config`、`set`、非标准 `invoke`）：
 
 ```cpp
 // Signature — from idryer_runtime.h
@@ -401,7 +401,7 @@ link.runtime()->setCommandHandler(handleCommand);
 `cmd` — command string (`"set"`, `"invoke"`, `"ping"`, `"get_config"`).
 `data` — ArduinoJson `JsonObjectConst` with payload.
 
-With this approach, `onRequest()` and `onProfile()` are not called from the MQTT path — the product handles commands directly.
+使用这种方式时，`onRequest()` 和 `onProfile()` 不会从 MQTT 路径调用；产品会直接处理命令。
 
 ---
 
@@ -441,4 +441,4 @@ With this approach, `onRequest()` and `onProfile()` are not called from the MQTT
 
 ## 何時深入
 
-The facade is sufficient for most tasks. If you need to work below the facade level — with `idryer::IdryerRuntime`, `idryer::MqttClient`, `idryer::cloud::LinkIntegrationsManager` — see the Architecture section.
+对于大多数任务，facade 已经足够。如果需要在 facade 之下工作，例如直接使用 `idryer::IdryerRuntime`、`idryer::MqttClient`、`idryer::cloud::LinkIntegrationsManager`，请参阅架构章节。

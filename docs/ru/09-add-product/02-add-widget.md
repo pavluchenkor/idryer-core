@@ -1,6 +1,6 @@
-> **⚠ Outdated translation (as of 2026-05-27).**
-> The widget concept was redefined: a widget is now a **device card on the portal dashboard** (product-specific React component), not a generated artifact from `contracts/widgets/`. The old `widget-registry`/`contracts/widgets/` layer was removed.
-> The English version at [../en/09-add-product/02-add-widget.md](../../en/09-add-product/02-add-widget.md) is the current source of truth. This translation will be updated separately.
+> **⚠ Устаревший перевод (на 2026-05-27).**
+> Концепция виджета изменилась: теперь виджет — это **карточка устройства на дашборде портала** (React-компонент конкретного продукта), а не сгенерированный артефакт из `contracts/widgets/`. Старый слой `widget-registry`/`contracts/widgets/` удалён.
+> Актуальным источником истины является английская версия в [../en/09-add-product/02-add-widget.md](../../en/09-add-product/02-add-widget.md). Этот перевод будет обновлён отдельно.
 
 ---
 
