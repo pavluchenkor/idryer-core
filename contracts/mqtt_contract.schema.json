@@ -210,7 +210,8 @@
       "properties": {
         "factor": { "type": "number" },
         "offset": { "type": "number" },
-        "unit":   { "type": "string" }
+        "unit":   { "type": "string" },
+        "nodata": { "type": "boolean", "description": "true → accessors sentinel-aware: raw == максимум типа означает «нет данных» (NaN). Для датчиковых полей (temperature/humidity/weight)." }
       }
     },
 

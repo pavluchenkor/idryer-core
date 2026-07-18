@@ -222,6 +222,12 @@ _RAW_TYPE_MAP = {
     "int8":   "int8_t",   "int16":  "int16_t",  "int32":  "int32_t",
 }
 
+# Максимум типа поля — sentinel «нет данных» (NaN) для scaling-полей с nodata: true.
+_TYPE_MAX = {
+    "uint8":  "UINT8_MAX",  "uint16": "UINT16_MAX", "uint32": "UINT32_MAX",
+    "int8":   "INT8_MAX",   "int16":  "INT16_MAX",  "int32":  "INT32_MAX",
+}
+
 
 def _strip_scaling_suffix(name: str) -> str:
     """Убирает суффикс масштаба ('C10', 'Pct10') из имени поля для accessor-имени."""
@@ -243,7 +249,9 @@ def render_scaling_accessors(field_name: str, raw_yaml_type: str, scaling: dict)
     factor = scaling.get("factor")
     offset = scaling.get("offset")
     unit = scaling.get("unit", "")
+    nodata = bool(scaling.get("nodata"))
     raw_c_type = _RAW_TYPE_MAP.get(raw_yaml_type, raw_yaml_type)
+    type_max = _TYPE_MAX.get(raw_yaml_type)
     base = _capitalize_first(_strip_scaling_suffix(field_name))
     get_name = f"get{base}"
     set_name = f"set{base}"
@@ -254,9 +262,16 @@ def render_scaling_accessors(field_name: str, raw_yaml_type: str, scaling: dict)
         get_expr = f"{field_name} * {factor}f"
         set_expr = f"({raw_c_type})(v / {factor}f)"
     unit_doc = f"  ///< {unit}" if unit else ""
+    if nodata and type_max:
+        # sentinel = максимум типа поля означает «нет данных» (NaN).
+        get_body = f"return {field_name} == {type_max} ? NAN : {get_expr};"
+        set_body = f"{field_name} = isnan(v) ? {type_max} : {set_expr};"
+    else:
+        get_body = f"return {get_expr};"
+        set_body = f"{field_name} = {set_expr};"
     return [
-        f"    inline float {get_name}() const {{ return {get_expr}; }}{unit_doc}".rstrip(),
-        f"    inline void  {set_name}(float v) {{ {field_name} = {set_expr}; }}",
+        f"    inline float {get_name}() const {{ {get_body} }}{unit_doc}".rstrip(),
+        f"    inline void  {set_name}(float v) {{ {set_body} }}",
     ]
 
 
@@ -275,6 +290,9 @@ def render_entry_struct(name: str, item_fields: dict, per_size: int | None,
             n = fspec.get("note")
             if n:
                 note = "  ///< " + str(n).split('.')[0][:80]
+            sc = fspec.get("scaling")
+            if isinstance(sc, dict) and sc.get("nodata"):
+                note = "  ///< RAW — доступ только через get/set (хранит NaN-sentinel = максимум типа)"
         out.append(f"    {decl};{note}")
         if isinstance(fspec, dict) and isinstance(fspec.get("scaling"), dict):
             accessors_block.extend(
@@ -316,6 +334,9 @@ def render_payload(yaml_key: str, definition: dict, enums: dict, payloads: dict,
             n = fspec.get("note")
             if n:
                 note = "  ///< " + str(n).split('.')[0][:80]
+            sc = fspec.get("scaling")
+            if isinstance(sc, dict) and sc.get("nodata"):
+                note = "  ///< RAW — доступ только через get/set (хранит NaN-sentinel = максимум типа)"
         out.append(f"    {decl};{note}")
         if isinstance(fspec, dict) and isinstance(fspec.get("scaling"), dict):
             accessors_block.extend(
@@ -468,6 +489,7 @@ def render_header(doc: dict) -> str:
     out.append("#pragma once")
     out.append("")
     out.append("#include <stdint.h>")
+    out.append("#include <math.h>   // isnan, NAN — для nodata-sentinel accessors")
     out.append("")
     out.append("namespace idryer {")
     out.append("")

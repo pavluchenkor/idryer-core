@@ -230,6 +230,13 @@ rules:
 
   telemetry_null_policy:
     rule: "Отсутствие поля = нет данных."
+    transport: |
+      UART: scaled-поля с `nodata: true` (см. Telemetry.temperatureC10 /
+      humidityPct10, Weights.weightGramsC10) кодируют «нет данных» sentinel'ом =
+      максимум типа поля (INT16_MAX для int16, UINT16_MAX для uint16). RP
+      записывает sentinel при NaN, ESP декодирует sentinel обратно в NaN и
+      опускает поле в MQTT JSON (правило выше). Setpoint-поля (targetTempC10)
+      флага nodata НЕ имеют — там 0 = реальное значение (см. not_applies_to).
     description: |
       Float-поля telemetry (temperature, humidity, heaterTemp и т.п.) есть
       в JSON только когда у устройства есть валидное значение от датчика.
@@ -800,8 +807,8 @@ payloads:
         type: "UartTelemetryEntry[4]"
         item_fields:
           unitId: { type: uint8, range: "0..3" }
-          temperatureC10: { type: int16, scaling: { factor: 0.1, unit: "°C" } }
-          humidityPct10: { type: uint16, scaling: { factor: 0.1, unit: "%RH" } }
+          temperatureC10: { type: int16, scaling: { factor: 0.1, unit: "°C", nodata: true } }
+          humidityPct10: { type: uint16, scaling: { factor: 0.1, unit: "%RH", nodata: true } }
           heaterPowerPct: { type: uint8, unit: "0..100 %" }
           fanOn: { type: uint8, encoding: "0/1" }
 
@@ -858,7 +865,7 @@ payloads:
         item_fields:
           sensorId: { type: uint8 }
           unitId: { type: uint8 }
-          weightGramsC10: { type: uint16, scaling: { factor: 0.1, unit: "g" } }
+          weightGramsC10: { type: uint16, scaling: { factor: 0.1, unit: "g", nodata: true } }
 
   Rfid:
     cpp_name: UartRfidPayload
@@ -2456,6 +2463,27 @@ uart_only:
 # 4. MQTT-only сообщения (нет UART-формы)
 # ─────────────────────────────────────────────────────────────────────────────
 mqtt_only:
+  - suffix: commands/bind_ack
+    full_topic: "idryer/{serial}/commands/bind_ack"
+    direction: backend_to_device
+    qos: 1
+    retained: false
+    status: implemented
+    routing: |
+      Обрабатывается напрямую в IdryerRuntime (handleBindAck): переключение
+      MQTT-идентичности устройства на присвоенный mqttTopicKey.
+      CommandHandler не вызывается.
+    payload:
+      example:
+        mqttTopicKey: "IDR-000123"
+        mcuSerial: "MCU-000123"
+      fields:
+        mqttTopicKey: "string — постоянный ключ топика, на который устройство переключается после привязки"
+        mcuSerial: "string — серийник MCU, подтверждаемый порталом"
+    notes:
+      - "Подтверждение привязки в claiming-хендшейке. Портал публикует после bind (CLAIMED_PENDING_BIND → ACTIVE) и при retry, если устройство снова прислало info по временному DEVICE_-топику."
+      - "Device SDK (idryer-core, src/runtime/idryer_runtime.cpp): читает mqttTopicKey и mcuSerial, вызывает cloud_->handleBindAck() — устройство переходит с временного топика на постоянный."
+      - "Портал: backend/src/mqtt-telemetry/mqtt-telemetry.service.ts sendBindAck() → publish QoS 1; вызовы из handlers/info.handler.ts."
   - suffix: events
     full_topic: "idryer/{serial}/events"
     direction: device_to_backend
@@ -3291,12 +3319,37 @@ moonraker_websocket:
 # ─────────────────────────────────────────────────────────────────────────────
 # 12. LOCAL WEBSOCKET (приложение → устройство, локальный режим без интернета)
 # ─────────────────────────────────────────────────────────────────────────────
-# Устройство — WebSocket-сервер. Мобильное приложение подключается к
-# ws://<serial>.local:81/ (mDNS) и общается через JSON-конверт.
-# Single-client policy: одновременно только один авторизованный клиент.
-# Все incoming команды форвардятся в общий CommandSink — те же имена,
-# что и в MQTT (см. секцию messages). Outgoing — те же payload, что в MQTT
-# (publishConfig/Telemetry/Status и т.п.).
+#
+# LAN-режим: прямой WebSocket-канал приложение → устройство, без интернета,
+# без MQTT и без портала. Устройство поднимает WebSocket-сервер на порту 81
+# и объявляет себя через mDNS (_idryer._tcp, hostname <serial>.local); mDNS
+# стартует сразу после WiFi-connect, до поднятия WS-сервера, чтобы приложение
+# могло обнаружить устройство как можно раньше. Подключение:
+# ws://<serial>.local:81/ , обмен — text-фреймы с JSON-конвертом.
+#
+# Реализация на стороне устройства:
+#   idryer-core/src/local_access/local_access.h + local_access.cpp
+# Включается по UART-команде WsEnable (kind 0x73) от iDryerControllerV2;
+# состояние сервера возвращается через WsStatus (0x74) / WsStatusRequest (0x76)
+# — см. uart_only.
+#
+# Авторизация: первое сообщение клиента после connect обязано быть auth-фреймом
+# {"type":"auth","token":"<device_token>"} (тот же JWT, что устройство получает
+# от портала при регистрации). Успех → {"type":"auth_ok","deviceName":"<serial>"}
+# и сервер сразу дёргает get_config для bootstrap UI. Ошибка →
+# {"type":"auth_fail","reason":"invalid_token|not_authorized"}. До auth любые
+# command-сообщения отклоняются.
+#
+# Single-client policy: одновременно только один клиент. При занятом слоте новое
+# подключение ОТКЛОНЯЕТСЯ (второй клиент получает disconnect); активный клиент
+# остаётся. Все incoming команды форвардятся в общий CommandSink — те же имена,
+# что и в MQTT (get_config, set, invoke, ping, ...; см. секцию messages).
+# Outgoing — те же payload, что в MQTT (publishConfig/Telemetry/Status и т.п.),
+# при необходимости фрагментируются (envelope_fragmented) для больших config.
+#
+# Команды write_rfid и firmware_update_* через Local WS не поддерживаются —
+# они требуют binary-фрагментации и идут только через MQTT.
+#
 local_websocket:
   role: "server (устройство)"
   transport: "WebSocket (text frames, JSON)"
@@ -3501,62 +3554,3 @@ wifi_provisioning:
 
   notes:
     - "Improv-протокол поверх Serial использует binary-фреймы — клиент должен поддерживать Improv (Chrome/Edge через improv-wifi.com или соответствующее мобильное приложение)."
-
-# =============================================================================
-# LOCAL WS PROTOCOL (LAN-режим, без участия портала)
-# =============================================================================
-#
-# Устройство поднимает WebSocket-сервер на порту 81 и объявляет себя через mDNS.
-# Приложение может подключиться напрямую по LAN — без интернета, без MQTT, без портала.
-# Реализация на стороне устройства: idryer-core/src/local_access/local_access.h
-#
-# Команды и события ИДЕНТИЧНЫ MQTT-контракту выше — тот же набор (get_config,
-# set, invoke, clear_errors и т.д.), те же payload'ы. Отличается только транспорт.
-#
-local_ws_protocol:
-  description: >
-    Прямой WebSocket-канал приложение → устройство по LAN.
-    Работает без интернета и без портала. Команды и события полностью идентичны
-    MQTT-контракту — только транспорт другой.
-
-  discovery:
-    mechanism: mDNS
-    service: _idryer._tcp
-    port: 81
-    hostname: "<serialNumber>.local"
-    note: "mDNS стартует сразу после WiFi-connect, до поднятия WS-сервера — чтобы приложение могло обнаружить устройство как можно раньше."
-
-  connection:
-    max_clients: 1
-    note: "Только один клиент одновременно. Новое подключение вытесняет предыдущее."
-
-  auth:
-    description: "Первое сообщение от клиента после connect — обязательно auth-фрейм."
-    incoming: '{"type":"auth","token":"<device_token>"}'
-    on_success: "Устройство начинает принимать команды от этого клиента."
-    on_failure: '{"type":"invalid_token"} — клиент должен запросить свежий токен у портала.'
-    note: "device_token — тот же JWT, что устройство получает от портала при регистрации."
-
-  incoming_envelope:
-    description: "Формат входящих сообщений (команды от приложения к устройству)."
-    format: '{"type":"command","command":"<name>","data":{...}}'
-    fields:
-      type: 'всегда "command"'
-      command: "имя команды — то же что суффикс MQTT-топика (get_config / set / invoke / clear_errors / ...)"
-      data: "payload команды — идентичен MQTT payload для данной команды"
-
-  outgoing_envelope:
-    description: "Формат исходящих сообщений (события и данные от устройства к приложению)."
-    format: '{"type":"<type>","data":{...}}'
-    fields:
-      type: "тип события — те же типы что в MQTT events (status / telemetry / event / config / ...)"
-      data: "payload события — идентичен MQTT payload"
-
-  commands:
-    note: >
-      Полный список доступных команд и их payload'ов — см. секцию commands выше
-      (get_config, set, invoke, clear_errors, find и т.д.).
-      Команды write_rfid и firmware_update_* через Local WS не поддерживаются —
-      они требуют binary-фрагментации и идут только через MQTT.
-
-  sdk_impl: "idryer-core/src/local_access/local_access.h + local_access.cpp"
