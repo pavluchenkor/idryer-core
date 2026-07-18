@@ -243,6 +243,7 @@ struct UartTelemetryEntry {
     uint8_t    unitId;
     int16_t    temperatureC10;  ///< RAW — доступ только через get/set (хранит NaN-sentinel = максимум типа)
     uint16_t    humidityPct10;  ///< RAW — доступ только через get/set (хранит NaN-sentinel = максимум типа)
+    int16_t    heaterTempC10;  ///< RAW — доступ только через get/set (хранит NaN-sentinel = максимум типа)
     uint8_t    heaterPowerPct;
     uint8_t    fanOn;
 
@@ -251,8 +252,10 @@ struct UartTelemetryEntry {
     inline void  setTemperature(float v) { temperatureC10 = isnan(v) ? INT16_MAX : (int16_t)(v / 0.1f); }
     inline float getHumidity() const { return humidityPct10 == UINT16_MAX ? NAN : humidityPct10 * 0.1f; }  ///< %RH
     inline void  setHumidity(float v) { humidityPct10 = isnan(v) ? UINT16_MAX : (uint16_t)(v / 0.1f); }
+    inline float getHeaterTemp() const { return heaterTempC10 == INT16_MAX ? NAN : heaterTempC10 * 0.1f; }  ///< °C
+    inline void  setHeaterTemp(float v) { heaterTempC10 = isnan(v) ? INT16_MAX : (int16_t)(v / 0.1f); }
 } __attribute__((packed));
-static_assert(sizeof(UartTelemetryEntry) == 7, "UartTelemetryEntry must be 7 bytes (yaml-computed)");
+static_assert(sizeof(UartTelemetryEntry) == 9, "UartTelemetryEntry must be 9 bytes (yaml-computed)");
 
 /// Entry-record для inline-массивов в payload'ах.
 struct UartStatusEntry {
@@ -337,7 +340,7 @@ struct UartTelemetryPayload {
     uint8_t    count;
     UartTelemetryEntry units[4];
 } __attribute__((packed));
-static_assert(sizeof(UartTelemetryPayload) == 29, "UartTelemetryPayload must be 29 bytes (yaml-computed)");
+static_assert(sizeof(UartTelemetryPayload) == 37, "UartTelemetryPayload must be 37 bytes (yaml-computed)");
 
 /// Полное состояние юнитов: режим, цели, прогресс, этапы профиля.
 struct UartStatusPayload {

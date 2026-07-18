@@ -809,6 +809,7 @@ payloads:
           unitId: { type: uint8, range: "0..3" }
           temperatureC10: { type: int16, scaling: { factor: 0.1, unit: "°C", nodata: true } }
           humidityPct10: { type: uint16, scaling: { factor: 0.1, unit: "%RH", nodata: true } }
+          heaterTempC10: { type: int16, scaling: { factor: 0.1, unit: "°C", nodata: true } }
           heaterPowerPct: { type: uint8, unit: "0..100 %" }
           fanOn: { type: uint8, encoding: "0/1" }
 
