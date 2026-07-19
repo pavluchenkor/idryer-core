@@ -214,6 +214,12 @@ rules:
   mqtt_session: "clean_session=false; keepalive=60s"
   publish_qos: "Все device→backend publish — QoS 0 (MQTT-клиент прошивки не задаёт publish-QoS). Subscribe (commands/*) — QoS 1. LWT (offline) — broker-side."
   uart_baud: 115200
+  # uart_protocol_version — версия WIRE-формата UART (структуры payload + фрейм).
+  # Пишется в каждый фрейм (header.version), проверяется при приёме → несовместимый
+  # формат отвергается сразу. Поднимать при изменении размера/полей любой
+  # payload-структуры. РАБОТАЕТ НЕЗАВИСИМО от firmware VERSION_MAJOR: та отвечает за
+  # OTA-совместимость прошивок (handleUartHello: major mismatch → paired-OTA
+  # self-healing, CRITICAL не постится). Два разных версионных механизма.
   uart_protocol_version: 2 # v2 (2026-06-07): hardwareVersion char[8]→char[16] для читаемых HW-идентификаторов (rp2040-v1, stm32f103-v1)
   uart_max_payload_bytes: 200
   uart_max_retries: 3
