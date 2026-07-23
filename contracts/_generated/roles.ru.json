@@ -24,5 +24,6 @@
   "common.clear_errors": "Сбросить ошибки",
   "system.active_unit": "Активный юнит",
   "system.language": "Язык",
+  "system.air_max_temp": "system.air_max_temp",
   "system.ignore_external_cmd": "Игнор. внеш. команды"
 }

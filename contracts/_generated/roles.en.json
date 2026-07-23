@@ -24,5 +24,6 @@
   "common.clear_errors": "Clear errors",
   "system.active_unit": "Active unit",
   "system.language": "Language",
+  "system.air_max_temp": "system.air_max_temp",
   "system.ignore_external_cmd": "Ignor ext cmd"
 }

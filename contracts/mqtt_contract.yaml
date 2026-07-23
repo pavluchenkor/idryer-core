@@ -278,7 +278,13 @@ rules:
 
     device_to_portal:
       coverage: "ВСЕ publish-сообщения (info, telemetry, status, weights, rfid, config, config/delta, events, integrations/status)."
-      added_by: "SDK generic publish-wrapper добавляет timestamp если отсутствует."
+      added_by: >
+        SDK generic publish-wrapper (MqttClient::publishJson) добавляет timestamp
+        если отсутствует, НО только когда включён флаг MqttClient::setAddTimestamp
+        (по умолчанию true). Link-прошивки (idryer-link, iHeater-link, iDryer-Storage)
+        выключают его — setAddTimestamp(false) — т.к. портал хранит собственное
+        серверное время приёма, а device-timestamp избыточен (экономия трафика).
+        Явно проставленные timestamp (OTA, интеграции) флаг не трогает.
 
     device_incoming_parsing:
       effect: "Устройство синхронизирует системные часы по timestamp из portal-команды."
@@ -450,6 +456,17 @@ canonical_roles:
     type: uint
     widget: select
     labels: { ru: "Язык", en: "Language" }
+
+  system.air_max_temp:
+    type: uint
+    unit: "°C"
+    widget: number
+    # labels намеренно НЕ заданы: подпись пункта берётся из 'n' устройства
+    # (roleLabel.ts fallback), чтобы не дублировать название в контракте.
+    # Портал использует эту роль как per-unit потолок воздуха для валидации
+    # ввода целевой температуры режимов (сушка/хранение/профиль-стадии):
+    # значения выше val[unitIndex] блокируются с предупреждением.
+    # Подробнее — messages.config_full → notes.
 
   system.ignore_external_cmd:
     type: bool
@@ -1618,6 +1635,16 @@ messages:
             - "Schema продукт-зависимая (генерируется прошивкой при публикации меню)."
             - "publishConfigRaw поддерживает chunked transmission > MQTT_CONFIG_CHUNK_SIZE (16000 B)."
             - "Portal распознаёт обе формы: chunked (по наличию 'tid') vs full (по наличию 'v' и 'menu')."
+            - >
+              ВАЛИДАЦИЯ ТЕМПЕРАТУРЫ (сушилка): портал ограничивает ввод целевой температуры
+              режимов (сушка/хранение/профиль-стадии) по пункту меню с r='system.air_max_temp' —
+              это per-unit потолок воздуха, значение берётся как val[unitIndex]
+              (unitIndex = parseInt(unitId.slice(1))-1, 'U1'→0). Ввод выше этого значения
+              блокируется на портале с предупреждением. Роль зарегистрирована в canonical_roles
+              (system.air_max_temp). Примечание: генератор сушилки gen_menu_v2.py роли пока
+              НЕ валидирует при сборке, поэтому переименование в её menu.yaml не поймается на
+              её сборке (валидируется только генераторами iHeater/Storage) — до добавления
+              validate_roles в gen_menu_v2.py держать имя роли в синхроне вручную.
       uart:
         kind: ConfigPush
         kind_id: 0x30

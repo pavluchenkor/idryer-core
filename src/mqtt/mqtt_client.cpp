@@ -300,7 +300,9 @@ const char* MqttClient::makeTopic(const char* suffix) {
 bool MqttClient::publishJson(const char* suffix, JsonDocument& json, bool retained) {
     if (!mqttClient_.connected()) return false;
 
-    if (!json.containsKey("timestamp")) {
+    // Авто-добавление timestamp можно отключить (setAddTimestamp) — портал хранит
+    // собственное серверное время приёма, device-timestamp избыточен (экономия трафика).
+    if (addTimestamp_ && !json.containsKey("timestamp")) {
         char ts[32];
         json["timestamp"] = getIsoTimestamp(ts);
     }

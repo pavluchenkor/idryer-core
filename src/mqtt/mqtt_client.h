@@ -170,6 +170,16 @@ public:
     /// @brief Generates a random UUID v4 into @p buffer (must be ≥ 37 bytes).
     static char* generateUuid(char* buffer);
 
+    /**
+     * @brief Включить/выключить авто-добавление поля `timestamp` в publish-сообщения.
+     *
+     * По умолчанию включено (обратная совместимость). Портал хранит собственное
+     * серверное время приёма, поэтому device-timestamp избыточен — его можно
+     * отключить ради экономии трафика. Затрагивает только авто-добавление в
+     * publishJson; явно проставленные timestamp (OTA/интеграции) не трогает.
+     */
+    void setAddTimestamp(bool enabled) { addTimestamp_ = enabled; }
+
 private:
 #if MQTT_USE_TLS
     WiFiClientSecure wifiClient_;
@@ -187,6 +197,7 @@ private:
 
     uint16_t configTransferId_ = 0;
     bool initialized_ = false;
+    bool addTimestamp_ = true; // авто-добавлять timestamp в publish (см. setAddTimestamp)
 
     static void mqttCallback(char* topic, byte* payload, unsigned int length);
     void handleMessage(const char* topic, const char* payload, size_t length);
