@@ -72,14 +72,14 @@ bool UartBridge::sendRfid(const UartRfidPayload& p, bool ackRequired) {
                     ackRequired ? UART_FLAG_ACK_REQ : 0);
 }
 
-bool UartBridge::sendCommand(const UartCmdPayload& p, bool ackRequired) {
+bool UartBridge::sendCommand(const UartCmdPayload& p, bool ackRequired, uint8_t extraFlags) {
     return transmit(UartMsgKind::Command, reinterpret_cast<const uint8_t*>(&p), sizeof(p),
-                    ackRequired ? UART_FLAG_ACK_REQ : 0);
+                    (ackRequired ? UART_FLAG_ACK_REQ : 0) | extraFlags);
 }
 
-bool UartBridge::sendProfileCommand(const UartProfilePayload& p, bool ackRequired) {
+bool UartBridge::sendProfileCommand(const UartProfilePayload& p, bool ackRequired, uint8_t extraFlags) {
     return transmit(UartMsgKind::Command, reinterpret_cast<const uint8_t*>(&p), sizeof(p),
-                    ackRequired ? UART_FLAG_ACK_REQ : 0);
+                    (ackRequired ? UART_FLAG_ACK_REQ : 0) | extraFlags);
 }
 
 bool UartBridge::sendConfigPushChunk(const UartConfigChunkPayload& p, uint8_t payloadLen, uint8_t flags) {

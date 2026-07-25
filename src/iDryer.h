@@ -125,6 +125,12 @@ public:
     void setIgnoreExternalCmd(bool flag);
     bool isIgnoreExternalCmd() const;
 
+    /// Origin команды, обрабатываемой ПРЯМО СЕЙЧАС в onCommand-хендлере:
+    /// true — пришла с локального WS (LAN). Валидно только внутри хендлера.
+    /// Используется, напр., чтобы пометить UART-форвард флагом UART_FLAG_LOCAL,
+    /// и RP2040-гейт ignore_external_cmd пропустил локальную команду.
+    bool currentCommandFromLocal() const;
+
     // ─── Events — fire-and-forget, sent immediately ──────────────────
     /// Publishes to `idryer/{serial}/events`. Payload shape per contract:
     /// `{ severity, event, message, unitId, timestamp }`.
@@ -282,7 +288,11 @@ private:
     /// File-scope pointer for non-capturing Improv callback.
     static Impl* s_currentImpl;
 
-    void dispatchCommand(const char* command, JsonObjectConst data);
+    // fromLocal=true → команда пришла с локального WS (LAN, под токеном) и НЕ
+    // гейтится флагом ignoreExternalCmd. fromLocal=false (дефолт) → облачный
+    // MQTT-путь, гейтится. Источник проставляет вызывающий (проводка sink'ов),
+    // из payload не берётся — облако не может подделать «я локальный».
+    void dispatchCommand(const char* command, JsonObjectConst data, bool fromLocal = false);
 };
 
 /// Returns the wire-format string for a DeviceType (e.g. "iheater_link").

@@ -402,6 +402,14 @@ canonical_roles:
     widget: toggle
     labels: { ru: "Home Assistant", en: "Home Assistant" }
 
+  iheater.heat_temp:
+    type: float
+    unit: "°C"
+    widget: number
+    # labels НЕ заданы: подпись из 'n' устройства. Роль-идентификатор целевого
+    # поля нагрева (heat_temp). Портал использует .max этого пункта как потолок
+    # heat.start, когда у устройства нет отдельного system.air_max_temp.
+
   iheater.heat_start:
     type: action
     widget: button
@@ -679,6 +687,11 @@ enums:
     ERROR: 0x04
     FRAGMENT: 0x08
     LAST_FRAGMENT: 0x10
+    # LOCAL: команда пришла с локального WS (LAN, под токеном), а не из облака.
+    # ESP-мост ставит бит при форварде action-команд на RP2040; гейт RP2040
+    # (ignore_external_cmd) пропускает команды с этим флагом. Смысл флага меню —
+    # «облако/портал мной не управляет, локальная мобилка в сети — да».
+    LOCAL: 0x20
 
   # Используется в MQTT-payload (status.units[].mode и в handlers портала).
   # Канон 2026-05-01: portal приведён к firmware-семантике (ERROR удалён, UNKNOWN добавлен).

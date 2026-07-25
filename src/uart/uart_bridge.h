@@ -87,8 +87,10 @@ public:
     /// @name ESP32 → RP2040 transmit methods
     /// @{
     bool sendHelloAck(const UartHelloAckPayload& p);
-    bool sendCommand(const UartCmdPayload& p, bool ackRequired = true);
-    bool sendProfileCommand(const UartProfilePayload& p, bool ackRequired = true);
+    // extraFlags — доп. биты кадра (напр. UART_FLAG_LOCAL для локальных команд,
+    // чтобы RP2040-гейт ignore_external_cmd их пропустил).
+    bool sendCommand(const UartCmdPayload& p, bool ackRequired = true, uint8_t extraFlags = 0);
+    bool sendProfileCommand(const UartProfilePayload& p, bool ackRequired = true, uint8_t extraFlags = 0);
     bool sendConfigPushChunk(const UartConfigChunkPayload& p, uint8_t payloadLen, uint8_t flags);
     bool sendHeartbeat(const UartHeartbeatPayload& p);
     bool sendClaimStatus(const UartClaimStatusPayload& p);

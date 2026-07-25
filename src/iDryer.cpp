@@ -249,6 +249,12 @@ struct Link::Impl {
     // при загрузке и при изменении из локального меню.
     bool ignoreExternalCmd = false;
 
+    // Origin текущей команды: true — пришла с локального WS (LAN). Ставится в
+    // dispatchCommand перед вызовом product-хендлера, читается им через
+    // Link::currentCommandFromLocal() (чтобы не менять сигнатуру всех onCommand).
+    // На ESP dispatch синхронный и однопоточный — гонок нет.
+    bool currentCmdFromLocal = false;
+
 };
 
 // ──────────────────────────────────────────────────────────────────────
@@ -328,7 +334,8 @@ bool Link::begin() {
     // mDNS / LAN WS server start lazily after WiFi connects (lwIP needs
     // network stack ready). See Link::loop() — `localStarted_` gate.
     impl_->local.setCommandSink([](void* ctx, const char* command, JsonObjectConst data) {
-        static_cast<Link*>(ctx)->dispatchCommand(command, data);
+        // Локальный WS (LAN) — не гейтится ignoreExternalCmd.
+        static_cast<Link*>(ctx)->dispatchCommand(command, data, /*fromLocal=*/true);
     }, this);
     impl_->local.setTokenRefreshCallback([](void* ctx) {
         auto* self = static_cast<Link*>(ctx);
@@ -380,7 +387,8 @@ bool Link::begin() {
 
     // Runtime command handler — same dispatch as local-WS, single user callback.
     impl_->runtime.setCommandHandler([](void* ctx, const char* command, JsonObjectConst data) {
-        static_cast<Link*>(ctx)->dispatchCommand(command, data);
+        // Облачный MQTT-путь — гейтится ignoreExternalCmd.
+        static_cast<Link*>(ctx)->dispatchCommand(command, data, /*fromLocal=*/false);
     }, this);
 
     // Auto-claim for standalone devices — отключён: claim только по START_CLAIM от flasher.
@@ -674,7 +682,12 @@ void Link::publishStatusNow() {
 
     doc["uptime"] = millis() / 1000u;
     doc["rssi"]   = WiFi.RSSI();   // bonus: free signal info on every status
-    doc["ignoreExternalCmd"] = impl_->ignoreExternalCmd;
+    // ignoreExternalCmd больше НЕ шлём в status: значение — это пункт меню с
+    // canonical role system.ignore_external_cmd, и оно доставляется через
+    // config (на connect) и config/delta (на изменение). Дублировать его в
+    // каждом status (~каждые 10с) незачем. Портал читает флаг из config-пути;
+    // legacy-приём из status оставлен на портале только для старых прошивок.
+    // Внутренний guard команд по-прежнему использует impl_->ignoreExternalCmd.
 
     if (impl_->onStatusPublish) {
         impl_->onStatusPublish(doc.as<JsonObject>());
@@ -723,12 +736,21 @@ bool Link::onCommand(const char* name, CommandCallback cb) {
     return true;
 }
 
-void Link::dispatchCommand(const char* command, JsonObjectConst data) {
+void Link::dispatchCommand(const char* command, JsonObjectConst data, bool fromLocal) {
     if (!command || !command[0]) return;
 
+    // Origin виден product-хендлеру через currentCommandFromLocal() — например
+    // idryer-link ставит UART_FLAG_LOCAL при форварде action-команды на RP2040.
+    impl_->currentCmdFromLocal = fromLocal;
+
     // ─── Gate: ignoreExternalCmd ─────────────────────────────────────────
-    // Защищает от внешних команд-ДЕЙСТВИЙ (запуск нагрева, включение ленты,
-    // запись RFID и т.п.). Не блокирует read/config: пользователь должен
+    // Гейтит только ОБЛАЧНЫЙ путь (MQTT). Локальные команды (fromLocal=true —
+    // WS в LAN, под токеном) проходят ВСЕГДА: смысл флага — «портал/облако мной
+    // не управляет, а локальная мобилка в сети — да». Источник задаёт вызывающий
+    // (проводка sink'ов), из payload не берётся — облако не подделает fromLocal.
+    //
+    // Для облака: защищает от внешних команд-ДЕЙСТВИЙ (запуск нагрева, включение
+    // ленты, запись RFID и т.п.). Не блокирует read/config: пользователь должен
     // иметь возможность читать состояние и менять параметры даже когда
     // действия запрещены.
     //
@@ -743,7 +765,7 @@ void Link::dispatchCommand(const char* command, JsonObjectConst data) {
     // security-patches не доедут до устройств с ign_ext_cmd=true. Защита
     // OTA — это право push'а в admin/firmware/push (роль SUPERUSER в
     // backend), не флаг в меню устройства.
-    if (impl_->ignoreExternalCmd) {
+    if (impl_->ignoreExternalCmd && !fromLocal) {
         const bool isExempt =
             (strcmp(command, "set") == 0) ||
             (strcmp(command, "get_config") == 0) ||
@@ -906,6 +928,10 @@ void Link::setIgnoreExternalCmd(bool flag) {
 
 bool Link::isIgnoreExternalCmd() const {
     return impl_->ignoreExternalCmd;
+}
+
+bool Link::currentCommandFromLocal() const {
+    return impl_->currentCmdFromLocal;
 }
 
 void Link::publishInfoNow() {

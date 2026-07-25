@@ -409,6 +409,7 @@ def render_rules(rules: dict) -> str:
         "constexpr uint8_t  UART_FLAG_ERROR         = 0x04;  ///< Payload carries error.",
         "constexpr uint8_t  UART_FLAG_FRAGMENT      = 0x08;  ///< Part of fragmented transfer.",
         "constexpr uint8_t  UART_FLAG_LAST_FRAGMENT = 0x10;  ///< Last fragment of transfer.",
+        "constexpr uint8_t  UART_FLAG_LOCAL         = 0x20;  ///< Command from local WS (LAN), not cloud; bypasses ignore_external_cmd gate.",
         "/// @}",
         "constexpr uint8_t  UART_SOF               = 0xAA;  ///< Start-of-frame byte.",
     ]
