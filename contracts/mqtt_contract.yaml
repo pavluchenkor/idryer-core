@@ -1283,7 +1283,7 @@ messages:
       mqtt:
         suffix: info
         full_topic: "idryer/{serial}/info"
-        qos: 0
+        qos: 1
         retained: true
         interval: "once after Online; republish on commands/ping"
         payload:
@@ -1382,7 +1382,7 @@ messages:
         full_topic: "idryer/{serial}/telemetry"
         qos: 0
         retained: false
-        interval: "product-defined; default 5000 ms (5 сек)."
+        interval: "active 30s / idle 60s (Config.telemetryPeriodMs / telemetryPeriodIdleMs; idle = ни один юнит не в активном режиме)."
         payload:
           json_shape:
             "units[i].unitId": '"U1".."U4"'
@@ -1435,9 +1435,9 @@ messages:
       mqtt:
         suffix: status
         full_topic: "idryer/{serial}/status"
-        qos: 0
+        qos: 1
         retained: true
-        interval: "on change"
+        interval: "on change (SDK сравнивает mode/target/duration; volatile elapsed/rssi/uptime изменением не считаются) + сверка active 60s / idle 300s (Config.statusPeriodMs / statusPeriodIdleMs)."
         payload:
           json_shape:
             "uptime": "data.uptime"
@@ -1480,7 +1480,7 @@ messages:
       mqtt:
         suffix: weights
         full_topic: "idryer/{serial}/weights"
-        qos: 0
+        qos: 1
         retained: false
         interval: "~10s, on change"
         payload:
@@ -1517,7 +1517,7 @@ messages:
         full_topic: "idryer/{serial}/rfid"
         producer: "TelemetryPublisher::publishRfid() (idryer-link)"
         consumer: "portal/backend (rfid.handler.ts)"
-        qos: 0
+        qos: 1
         retained: true
         interval: "on event"
         payload:
@@ -1555,7 +1555,7 @@ messages:
         full_topic: "idryer/{serial}/rfid"
         producer: "TelemetryPublisher::publishRfidData() — idryer-link/.../telemetry_publisher.cpp:296-307"
         consumer: "portal/backend rfid-data.handler.ts (диспетчеризация: rfid.handler.ts:27 — `if (data.format) → rfid-data.handler`)"
-        qos: 0
+        qos: 1
         retained: true
         payload:
           json_shape:
@@ -1676,7 +1676,7 @@ messages:
       mqtt:
         suffix: config/delta
         full_topic: "idryer/{serial}/config/delta"
-        qos: 0
+        qos: 1
         retained: false
         interval: "on change"
         payload:
@@ -2534,7 +2534,7 @@ mqtt_only:
   - suffix: events
     full_topic: "idryer/{serial}/events"
     direction: device_to_backend
-    qos: 0
+    qos: 1
     retained: false
     interval: "on event"
     status: implemented
@@ -2572,9 +2572,9 @@ mqtt_only:
   - suffix: integrations/status
     full_topic: "idryer/{serial}/integrations/status"
     direction: device_to_backend
-    qos: 0
+    qos: 1
     retained: true
-    interval: "on change; periodic republish every 30s ONLY when active != None"
+    interval: "on change only (смена state/config интеграции, включая boot-снапшот после MQTT-connect); периодики НЕТ — retained snapshot хранит последнее состояние для портала."
     status: implemented
     reason: "Состояние интеграций (HA/Bambu/Moonraker) живёт на ESP32, в MCU не уходит."
     payload:
@@ -2675,13 +2675,13 @@ mqtt_only:
       notes:
         - "Реальный payload сильно богаче минимального примера; портал устойчив к extra полям."
         - "Schema определяется сериализатором integrations-status в SDK."
-        - "Periodic republish (~30s) — ТОЛЬКО когда active != None. При active=None — только retained snapshot, без периодики."
+        - "Периодики НЕТ (убрана 2026-07): публикация только по событию. Портал держит последний снапшот в памяти (НЕ в БД) и отдаёт его клиенту при device:subscribe; после рестарта бэка память наполняется retained-сообщением."
 
   - suffix: rfid/write_result
     full_topic: "idryer/{serial}/rfid/write_result"
     direction: device_to_backend
     consumer: "portal/backend (rfid/write-orchestrator.service.ts:280)"
-    qos: 0
+    qos: 1
     retained: false
     status: design_or_partial
     reason: "Подтверждение результата записи RFID; firmware-сторона ещё в разработке (NI Phase 3)."
