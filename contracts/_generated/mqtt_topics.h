@@ -61,15 +61,15 @@ constexpr const char* TOPIC_EVENTS_FIRMWARE_CHECK_UPDATE = "events/firmware_chec
 
 // ── QoS и retained-флаги (из yaml.bindings.mqtt / mqtt_only) ─────
 
-constexpr uint8_t QOS_INFO                         = 0;
+constexpr uint8_t QOS_INFO                         = 1;
 constexpr uint8_t QOS_TELEMETRY                    = 0;
-constexpr uint8_t QOS_STATUS                       = 0;
-constexpr uint8_t QOS_WEIGHTS                      = 0;
-constexpr uint8_t QOS_RFID_EVENT                   = 0;
-constexpr uint8_t QOS_RFID_READ_DATA               = 0;
+constexpr uint8_t QOS_STATUS                       = 1;
+constexpr uint8_t QOS_WEIGHTS                      = 1;
+constexpr uint8_t QOS_RFID_EVENT                   = 1;
+constexpr uint8_t QOS_RFID_READ_DATA               = 1;
 constexpr uint8_t QOS_RFID_WRITE_DATA              = 1;
 constexpr uint8_t QOS_CONFIG_FULL                  = 0;
-constexpr uint8_t QOS_CONFIG_DELTA                 = 0;
+constexpr uint8_t QOS_CONFIG_DELTA                 = 1;
 constexpr uint8_t QOS_COMMAND_DRYING               = 1;
 constexpr uint8_t QOS_COMMAND_STORAGE              = 1;
 constexpr uint8_t QOS_COMMAND_PROFILE              = 1;
@@ -80,9 +80,9 @@ constexpr uint8_t QOS_COMMAND_SET                  = 1;
 constexpr uint8_t QOS_COMMAND_READ_RFID            = 1;
 constexpr uint8_t QOS_COMMAND_CLEAR_ERRORS         = 1;
 constexpr uint8_t QOS_BIND_ACK                     = 1;
-constexpr uint8_t QOS_EVENTS                       = 0;
-constexpr uint8_t QOS_INTEGRATIONS_STATUS          = 0;
-constexpr uint8_t QOS_RFID_WRITE_RESULT            = 0;
+constexpr uint8_t QOS_EVENTS                       = 1;
+constexpr uint8_t QOS_INTEGRATIONS_STATUS          = 1;
+constexpr uint8_t QOS_RFID_WRITE_RESULT            = 1;
 constexpr uint8_t QOS_OFFLINE                      = 1;
 constexpr uint8_t QOS_PING                         = 0;
 constexpr uint8_t QOS_INVOKE                       = 1;
