@@ -56,6 +56,8 @@ struct CloudConfig {
     uint32_t provisionRetryMs      = IDRYER_PROVISION_RETRY_MS;
     uint32_t claimPollIntervalMs   = IDRYER_CLAIM_POLL_INTERVAL_MS;
     uint32_t mqttRetryIntervalMs   = IDRYER_MQTT_RETRY_INTERVAL_MS;
+    /// Потолок экспоненциального backoff'а MQTT-реконнекта.
+    uint32_t mqttRetryMaxMs        = IDRYER_MQTT_RETRY_MAX_MS;
     /// Set to @c true for two-MCU devices (ESP32 + RP2040). Default is @c false.
     bool waitForMcuSerial = false;
 };
@@ -208,6 +210,9 @@ private:
     uint32_t lastTokenRefreshMs_   = 0;
     uint32_t lastClaimPoll_        = 0;
     uint32_t lastMqttAttempt_      = 0;
+    // Текущий интервал MQTT-ретрая: base × 2 на каждую неудачу, потолок
+    // mqttRetryMaxMs; сброс к base при успешном подключении.
+    uint32_t mqttRetryCurrentMs_   = 0;
 
     bool awaitingClaim_      = false;
     bool mqttInitialized_    = false;

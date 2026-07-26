@@ -55,6 +55,13 @@
 #define IDRYER_MQTT_RETRY_INTERVAL_MS 5000
 #endif
 
+// Потолок экспоненциального backoff'а MQTT-реконнекта (5с→10с→…→5мин).
+// Каждая попытка = DNS-резолв + TCP/TLS handshake; без backoff'а недоступный
+// брокер даёт ~720 DNS-запросов/час и греет сеть пользователя впустую.
+#ifndef IDRYER_MQTT_RETRY_MAX_MS
+#define IDRYER_MQTT_RETRY_MAX_MS 300000
+#endif
+
 static_assert(IDRYER_MAX_SERIAL_NUMBER_LEN >= 16, "Serial number buffer too small");
 static_assert(IDRYER_MAX_TOKEN_LEN >= 128, "Token buffer too small for JWT");
 static_assert(IDRYER_MAX_DEVICE_ID_LEN >= 36, "Device ID buffer too small for UUID");

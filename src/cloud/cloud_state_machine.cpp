@@ -170,13 +170,31 @@ void CloudStateMachine::handleReady() {
 
 void CloudStateMachine::handleMqttConnecting() {
     if (!wifi_->isConnected()) { setState(CloudState::WifiConnecting); return; }
-    if (mqtt_->isConnected()) { HAL_LOG_INFO("CLOUD", "MQTT connected!"); setState(CloudState::Online); return; }
+
+    // espMqttClient асинхронный: connect() лишь инициирует, а TCP/TLS/MQTT
+    // handshake продвигается внутри mqtt_->loop() — качаем его каждый тик.
+    if (mqttInitialized_) mqtt_->loop();
+
+    if (mqtt_->isConnected()) {
+        HAL_LOG_INFO("CLOUD", "MQTT connected!");
+        mqttRetryCurrentMs_ = config_.mqttRetryIntervalMs; // сброс backoff
+        setState(CloudState::Online);
+        return;
+    }
 
     const uint32_t now = HAL_MILLIS();
-    if (now - lastMqttAttempt_ < config_.mqttRetryIntervalMs) return;
+    if (mqttRetryCurrentMs_ == 0) mqttRetryCurrentMs_ = config_.mqttRetryIntervalMs;
+    if (now - lastMqttAttempt_ < mqttRetryCurrentMs_) return;
     lastMqttAttempt_ = now;
 
-    HAL_LOG_INFO("CLOUD", "Connecting to MQTT...");
+    HAL_LOG_INFO("CLOUD", "Connecting to MQTT (retry in %us)...",
+                 (unsigned)(mqttRetryCurrentMs_ / 1000));
+
+    // Экспоненциальный backoff: каждая попытка = DNS + TCP/TLS handshake.
+    // Недоступный брокер / auth-отказ (в т.ч. ACL-бан) не должен давать
+    // молотилку раз в 5с часами — удваиваем паузу до потолка mqttRetryMaxMs.
+    mqttRetryCurrentMs_ *= 2;
+    if (mqttRetryCurrentMs_ > config_.mqttRetryMaxMs) mqttRetryCurrentMs_ = config_.mqttRetryMaxMs;
 
     if (!mqttInitialized_) {
         const char* key = (mqttKey_[0] != '\0') ? mqttKey_ : identity_.serialNumber;
@@ -366,6 +384,7 @@ bool CloudStateMachine::handleBindAck(const char* mqttTopicKey, const char* mcuS
 
     if (mqtt_->isConnected()) mqtt_->disconnect();
     mqttInitialized_ = false;
+    mqttRetryCurrentMs_ = 0; // смена identity — backoff с чистого листа
     setState(CloudState::MqttConnecting);
     return true;
 }
