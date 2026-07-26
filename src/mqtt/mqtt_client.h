@@ -1,18 +1,14 @@
 #pragma once
 
 #include <Arduino.h>
-#if MQTT_USE_TLS
-#include <WiFiClientSecure.h>
-#else
-#include <WiFi.h>
-#endif
-#include <PubSubClient.h>
+#include <espMqttClient.h>
 #include <ArduinoJson.h>
 #include "idryer_topics.h"
 #include "core/callback.h"
 
-#define IDRYER_MQTT_KEEPALIVE   60
-#define MQTT_BUFFER_SIZE        16384
+// 30с → брокер объявляет тихую смерть (LWT) через 1.5×30 = 45с.
+// Нижняя граница AWS IoT (30-1200с); PINGREQ шлётся только в паузах трафика.
+#define IDRYER_MQTT_KEEPALIVE   30
 #define TOPIC_BUFFER_SIZE       128
 #define MQTT_CONFIG_CHUNK_SIZE  16000
 
@@ -21,18 +17,19 @@ namespace idryer {
 /**
  * @brief MQTT client for iDryer devices.
  *
- * Wraps @c PubSubClient and manages connection, reconnection, and message routing.
- * All topic names are built from the device serial number automatically.
+ * Wraps @c espMqttClient (loop-режим, без внутренней FreeRTOS-задачи — вся
+ * работа в главном цикле, как раньше с PubSubClient) and manages connection
+ * and message routing. All topic names are built from the device serial
+ * number automatically.
  *
- * Typical usage — the runtime handles everything after @c begin():
- * @code
- * mqtt.begin(serialNumber, deviceToken);
- * mqtt.setCommandCallback(...); // wired by IdryerRuntime
- * // IdryerRuntime calls connect() and loop() for you
- * @endcode
+ * QoS публикаций: state-critical сообщения (status, events, info, rfid,
+ * weights, OTA-события) идут QoS 1 — с подтверждением брокера и ретраем.
+ * Телеметрия — QoS 0 (частая, потеря единичной точки не важна).
  *
- * @note @c PubSubClient always publishes at QoS 0, regardless of topic QoS constants.
- *       Subscribe uses QoS 1 (IDRYER_QOS_COMMANDS).
+ * @note @c connect() асинхронный: инициирует подключение и возвращается.
+ *       TCP+TLS handshake выполняется внутри @c loop(). Реконнект-политика
+ *       (backoff) живёт в CloudStateMachine, НЕ здесь — loop() сам не
+ *       переподключается.
  *
  * @note The MQTT session is persistent (@c clean_session = false). This ensures
  *       commands aren't lost if the device reconnects briefly.
@@ -45,8 +42,7 @@ public:
     /// @brief Callback для бинарных OTA-chunks. Срабатывает на топиках вида
     /// @c commands/firmware_update_chunk/{commandId}/{chunkIdx}, payload идёт
     /// как сырой бинарь (см. ___OTA_MQTT_DESIGN.md, format: raw_binary).
-    /// Не парсится как JSON и не копируется в локальный s_payload_buf — raw
-    /// pointer передаётся в callback напрямую (живёт только время вызова).
+    /// Raw pointer передаётся в callback напрямую (живёт только время вызова).
     /// Сигнатура: (topic, payload, length).
     using OtaChunkCallback = Callback<void(const char*, const uint8_t*, size_t)>;
 
@@ -56,7 +52,7 @@ public:
      * @param serialNumber Device serial number — used as the MQTT client ID and username.
      * @param token        Device token — used as the MQTT password.
      *
-     * Does not connect immediately. @c connect() (or @c loop()) does the actual connection.
+     * Does not connect immediately. @c connect() does the actual connection.
      */
     void begin(const char* serialNumber, const char* token);
 
@@ -77,10 +73,13 @@ public:
     void setOtaChunkCallback(OtaChunkCallback::FnPtr fn, void* ctx = nullptr);
 
     /**
-     * @brief Connects to the broker and subscribes to @c commands/#.
+     * @brief Инициирует подключение к брокеру (асинхронно).
      *
-     * Retries the SUBSCRIBE up to 3 times and disconnects if all fail.
-     * @return @c true if connected and subscribed successfully.
+     * Handshake идёт в @c loop(); готовность проверять через @c isConnected().
+     * Подписка на @c commands/# выполняется автоматически в onConnect.
+     * Повторный вызов во время подключения безвреден (no-op).
+     *
+     * @return @c true если попытка запущена, @c false если уже идёт/нет данных.
      */
     bool connect();
 
@@ -91,46 +90,51 @@ public:
     bool isConnected();
 
     /**
-     * @brief Must be called every loop iteration.
+     * @brief Must be called every loop iteration — и при подключении, и после.
      *
-     * Reconnects if disconnected, then calls @c PubSubClient::loop() to
-     * receive incoming messages.
+     * Продвигает handshake (TCP/TLS/MQTT), принимает входящие, шлёт keepalive
+     * и ретраит QoS 1-пакеты. Сам НЕ переподключается — это делает
+     * CloudStateMachine с backoff'ом.
      */
     void loop();
 
+    /// @brief Код последнего разрыва (espMqttClientTypes::DisconnectReason).
+    /// 5 = MQTT_NOT_AUTHORIZED (в т.ч. ACL-бан), 7 = TCP_DISCONNECTED.
+    uint8_t lastDisconnectReason() const { return lastDisconnectReason_; }
+
     /**
-     * @brief Publishes a pre-serialized JSON string to @c idryer/{serial}/info (retained).
+     * @brief Publishes a pre-serialized JSON string to @c idryer/{serial}/info (retained, QoS 1).
      * @return @c true on success.
      */
     bool publishInfoJson(const char* json);
 
-    /// @brief Publishes to @c idryer/{serial}/telemetry.
+    /// @brief Publishes to @c idryer/{serial}/telemetry (QoS 0).
     bool publishTelemetry(JsonDocument& json);
 
-    /// @brief Publishes to @c idryer/{serial}/status (retained).
+    /// @brief Publishes to @c idryer/{serial}/status (retained, QoS 1).
     bool publishStatus(JsonDocument& json);
 
-    /// @brief Publishes to @c idryer/{serial}/config.
+    /// @brief Publishes to @c idryer/{serial}/config (retained, QoS 0 — крупный payload, retained сам по себе страхует).
     bool publishConfig(JsonDocument& json);
 
-    /// @brief Publishes to @c idryer/{serial}/events.
+    /// @brief Publishes to @c idryer/{serial}/events (QoS 1).
     bool publishEvent(JsonDocument& json);
 
-    /// @brief Publishes to @c idryer/{serial}/integrations/status (retained).
+    /// @brief Publishes to @c idryer/{serial}/integrations/status (retained, QoS 1).
     bool publishIntegrationsStatus(JsonDocument& json);
 
-    /// @brief Publishes to @c idryer/{serial}/rfid (retained).
+    /// @brief Publishes to @c idryer/{serial}/rfid (retained, QoS 1).
     bool publishRfid(JsonDocument& json);
 
-    /// @brief Publishes to @c idryer/{serial}/weights (non-retained).
+    /// @brief Publishes to @c idryer/{serial}/weights (non-retained, QoS 1).
     bool publishWeights(JsonDocument& json);
 
-    /// @brief Publishes to @c idryer/{serial}/rfid/write_result (non-retained).
+    /// @brief Publishes to @c idryer/{serial}/rfid/write_result (non-retained, QoS 1).
     /// Используется bridge для ответа порталу на commands/write_rfid (Variant B).
     /// Payload: {commandId, status: "ok"|"failed", error?}.
     bool publishRfidWriteResult(JsonDocument& json);
 
-    // ─── Phase 6 OTA event publishers ──────────────────────────────────
+    // ─── Phase 6 OTA event publishers (все QoS 1) ──────────────────────
     /// @brief Publishes to @c idryer/{serial}/events/firmware_update_ack.
     /// Используется OtaReceiver в ответ на commands/firmware_update_announce.
     bool publishFirmwareUpdateAck(JsonDocument& json);
@@ -182,11 +186,10 @@ public:
 
 private:
 #if MQTT_USE_TLS
-    WiFiClientSecure wifiClient_;
+    espMqttClientSecure mqttClient_{espMqttClientTypes::UseInternalTask::NO};
 #else
-    WiFiClient wifiClient_;
+    espMqttClient mqttClient_{espMqttClientTypes::UseInternalTask::NO};
 #endif
-    PubSubClient mqttClient_;
     CommandCallback commandCallback_;
     OtaChunkCallback otaChunkCallback_;
 
@@ -194,18 +197,22 @@ private:
     char token_[512];
     char clientId_[32];
     char topicBuffer_[TOPIC_BUFFER_SIZE];
+    // setWill/subscribe хранят указатель — топики должны жить всё время клиента.
+    char lwtTopic_[TOPIC_BUFFER_SIZE];
+    char cmdTopic_[TOPIC_BUFFER_SIZE];
 
     uint16_t configTransferId_ = 0;
     bool initialized_ = false;
     bool addTimestamp_ = true; // авто-добавлять timestamp в publish (см. setAddTimestamp)
+    uint8_t lastDisconnectReason_ = 0;
 
-    static void mqttCallback(char* topic, byte* payload, unsigned int length);
+    void onMqttConnect(bool sessionPresent);
+    void onMqttMessage(const espMqttClientTypes::MessageProperties& props,
+                       const char* topic, const uint8_t* payload,
+                       size_t len, size_t index, size_t total);
     void handleMessage(const char* topic, const char* payload, size_t length);
     const char* makeTopic(const char* suffix);
-    // PubSubClient publishes at QoS 0 regardless of topic QoS constants.
-    bool publishJson(const char* suffix, JsonDocument& json, bool retained = false);
-
-    static MqttClient* instance_;
+    bool publishJson(const char* suffix, JsonDocument& json, uint8_t qos, bool retained);
 };
 
 } // namespace idryer

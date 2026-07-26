@@ -9,8 +9,6 @@
 
 namespace idryer {
 
-MqttClient* MqttClient::instance_ = nullptr;
-
 void MqttClient::begin(const char* serialNumber, const char* token) {
     memset(serialNumber_, 0, sizeof(serialNumber_));
     memset(token_,        0, sizeof(token_));
@@ -24,18 +22,42 @@ void MqttClient::begin(const char* serialNumber, const char* token) {
         strncpy(token_, token, sizeof(token_) - 1);
     }
 
+    // Персистентные топики: setWill хранит указатель, поэтому members.
+    idryer_make_topic(lwtTopic_, sizeof(lwtTopic_), serialNumber_, IDRYER_TOPIC_OFFLINE);
+    idryer_make_topic(cmdTopic_, sizeof(cmdTopic_), serialNumber_, IDRYER_TOPIC_CMD_WILDCARD);
+
 #if MQTT_USE_TLS
-    wifiClient_.setCACert(ROOT_CA_LETSENCRYPT);
-    wifiClient_.setTimeout(10);
+    mqttClient_.setCACert(ROOT_CA_LETSENCRYPT);
 #endif
 
-    mqttClient_.setClient(wifiClient_);
     mqttClient_.setServer(MQTT_BROKER, MQTT_PORT);
-    mqttClient_.setBufferSize(MQTT_BUFFER_SIZE);
+    mqttClient_.setClientId(clientId_);
+    mqttClient_.setCredentials(serialNumber_, token_);
     mqttClient_.setKeepAlive(IDRYER_MQTT_KEEPALIVE);
-    mqttClient_.setCallback(MqttClient::mqttCallback);
+    // =========================================================================
+    // DO NOT CHANGE cleanSession — MUST stay false.
+    // Persistent session (clean_session=0) is required for reliable command
+    // delivery. With clean_session=1 the broker discards the subscription on
+    // reconnect; if the SUBSCRIBE packet is lost the device stops receiving
+    // commands silently. Verified on live hardware (2026-04-20).
+    // =========================================================================
+    mqttClient_.setCleanSession(false);
+    mqttClient_.setWill(lwtTopic_, /*qos=*/1, /*retain=*/false, "{}");
 
-    instance_    = this;
+    mqttClient_.onConnect([this](bool sessionPresent) {
+        onMqttConnect(sessionPresent);
+    });
+    mqttClient_.onDisconnect([this](espMqttClientTypes::DisconnectReason reason) {
+        lastDisconnectReason_ = static_cast<uint8_t>(reason);
+        HAL_LOG_WARN("MQTT", "Disconnected: %s",
+                     espMqttClientTypes::disconnectReasonToString(reason));
+    });
+    mqttClient_.onMessage([this](const espMqttClientTypes::MessageProperties& props,
+                                 const char* topic, const uint8_t* payload,
+                                 size_t len, size_t index, size_t total) {
+        onMqttMessage(props, topic, payload, len, index, total);
+    });
+
     initialized_ = true;
 
     HAL_LOG_INFO("MQTT", "Init: broker=%s:%d serial=%s", MQTT_BROKER, MQTT_PORT, serialNumber_);
@@ -51,16 +73,16 @@ void MqttClient::setOtaChunkCallback(OtaChunkCallback::FnPtr fn, void* ctx) {
 
 // ─── Phase 6 OTA event publishers ────────────────────────────────────────
 bool MqttClient::publishFirmwareUpdateAck(JsonDocument& json) {
-    return publishJson(IDRYER_TOPIC_FW_UPDATE_ACK, json, /*retained=*/false);
+    return publishJson(IDRYER_TOPIC_FW_UPDATE_ACK, json, /*qos=*/1, /*retained=*/false);
 }
 bool MqttClient::publishFirmwareUpdateProgress(JsonDocument& json) {
-    return publishJson(IDRYER_TOPIC_FW_UPDATE_PROGRESS, json, /*retained=*/false);
+    return publishJson(IDRYER_TOPIC_FW_UPDATE_PROGRESS, json, /*qos=*/1, /*retained=*/false);
 }
 bool MqttClient::publishFirmwareUpdateComplete(JsonDocument& json) {
-    return publishJson(IDRYER_TOPIC_FW_UPDATE_COMPLETE, json, /*retained=*/false);
+    return publishJson(IDRYER_TOPIC_FW_UPDATE_COMPLETE, json, /*qos=*/1, /*retained=*/false);
 }
 bool MqttClient::publishFirmwareCheckUpdate(JsonDocument& json) {
-    return publishJson(IDRYER_TOPIC_FW_CHECK_UPDATE, json, /*retained=*/false);
+    return publishJson(IDRYER_TOPIC_FW_CHECK_UPDATE, json, /*qos=*/1, /*retained=*/false);
 }
 
 void MqttClient::disconnect() {
@@ -77,59 +99,36 @@ bool MqttClient::connect() {
         return false;
     }
 
-    HAL_LOG_INFO("MQTT", "Connecting as %s...", clientId_);
-
-    char lwtTopic[128];
-    idryer_make_topic(lwtTopic, sizeof(lwtTopic), serialNumber_, IDRYER_TOPIC_OFFLINE);
-
-    // =========================================================================
-    // DO NOT CHANGE kMqttCleanSession — MUST stay false.
-    // Persistent session (clean_session=0) is required for reliable command
-    // delivery. With clean_session=1 the broker discards the subscription on
-    // reconnect; if the SUBSCRIBE packet is lost the device stops receiving
-    // commands silently. Verified on live hardware (2026-04-20).
-    // =========================================================================
-    static constexpr bool kMqttCleanSession = false;
-
-    bool connected = mqttClient_.connect(
-        clientId_, serialNumber_, token_,
-        lwtTopic, 1, false, "{}",
-        kMqttCleanSession
-    );
-
-    if (!connected) {
-        HAL_LOG_ERROR("MQTT", "Connection failed: state=%d", mqttClient_.state());
-        return false;
+    // Асинхронно: ставит CONNECT в очередь и возвращается. TCP+TLS handshake
+    // выполняется в loop(). Если подключение уже идёт — no-op (false).
+    if (mqttClient_.connect()) {
+        HAL_LOG_INFO("MQTT", "Connecting as %s...", clientId_);
+        return true;
     }
-
-    HAL_LOG_INFO("MQTT", "Connected!");
-
-    const char* cmdTopic = makeTopic(IDRYER_TOPIC_CMD_WILDCARD);
-    bool subscribeOk = false;
-    for (uint8_t attempt = 0; attempt < 3 && !subscribeOk; ++attempt) {
-        subscribeOk = mqttClient_.subscribe(cmdTopic, IDRYER_QOS_COMMANDS);
-        if (!subscribeOk) {
-            HAL_LOG_WARN("MQTT", "SUBSCRIBE failed (attempt %u): %s", attempt + 1, cmdTopic);
-            delay(50);
-        }
-    }
-
-    if (!subscribeOk) {
-        HAL_LOG_ERROR("MQTT", "SUBSCRIBE could not be sent — disconnecting to force reconnect");
-        mqttClient_.disconnect();
-        return false;
-    }
-
-    HAL_LOG_INFO("MQTT", "Subscribed: %s OK", cmdTopic);
-    return true;
+    return false;
 }
 
 bool MqttClient::isConnected() { return mqttClient_.connected(); }
 
 void MqttClient::loop() {
     if (!initialized_) return;
-    if (!mqttClient_.connected()) connect();
+    // Продвигает handshake/приём/keepalive/QoS1-ретраи. Реконнект НЕ здесь:
+    // политика повторов (backoff) — в CloudStateMachine.
     mqttClient_.loop();
+}
+
+void MqttClient::onMqttConnect(bool sessionPresent) {
+    HAL_LOG_INFO("MQTT", "Connected! (session present=%d)", (int)sessionPresent);
+
+    // Persistent session: при sessionPresent=true подписка уже жива на брокере,
+    // но повторный SUBSCRIBE безвреден и защищает от рассинхрона.
+    uint16_t packetId = mqttClient_.subscribe(cmdTopic_, IDRYER_QOS_COMMANDS);
+    if (packetId == 0) {
+        HAL_LOG_ERROR("MQTT", "SUBSCRIBE could not be queued — disconnecting to force reconnect");
+        mqttClient_.disconnect();
+        return;
+    }
+    HAL_LOG_INFO("MQTT", "Subscribed: %s OK", cmdTopic_);
 }
 
 // ============================================================================
@@ -140,39 +139,41 @@ bool MqttClient::publishInfoJson(const char* json) {
     if (!mqttClient_.connected() || !json) return false;
     const char* topic = makeTopic(IDRYER_TOPIC_INFO);
     HAL_LOG_INFO("MQTT", "→ info: %s", json);
-    return mqttClient_.publish(topic, json, IDRYER_RETAINED_INFO);
+    return mqttClient_.publish(topic, /*qos=*/1, IDRYER_RETAINED_INFO, json) != 0;
 }
 
 bool MqttClient::publishTelemetry(JsonDocument& json) {
-    return publishJson(IDRYER_TOPIC_TELEMETRY, json, IDRYER_RETAINED_TELEMETRY);
+    // QoS 0: телеметрия частая, потеря единичной точки не критична —
+    // не копим её в outbox при плохой связи.
+    return publishJson(IDRYER_TOPIC_TELEMETRY, json, /*qos=*/0, IDRYER_RETAINED_TELEMETRY);
 }
 
 bool MqttClient::publishStatus(JsonDocument& json) {
-    return publishJson(IDRYER_TOPIC_STATUS, json, IDRYER_RETAINED_STATUS);
+    return publishJson(IDRYER_TOPIC_STATUS, json, /*qos=*/1, IDRYER_RETAINED_STATUS);
 }
 
 bool MqttClient::publishConfig(JsonDocument& json) {
-    return publishJson(IDRYER_TOPIC_CONFIG, json, IDRYER_RETAINED_CONFIG);
+    return publishJson(IDRYER_TOPIC_CONFIG, json, /*qos=*/0, IDRYER_RETAINED_CONFIG);
 }
 
 bool MqttClient::publishEvent(JsonDocument& json) {
-    return publishJson(IDRYER_TOPIC_EVENTS, json, IDRYER_RETAINED_EVENTS);
+    return publishJson(IDRYER_TOPIC_EVENTS, json, /*qos=*/1, IDRYER_RETAINED_EVENTS);
 }
 
 bool MqttClient::publishIntegrationsStatus(JsonDocument& json) {
-    return publishJson(IDRYER_TOPIC_INTEGRATIONS_STATUS, json, /*retained=*/true);
+    return publishJson(IDRYER_TOPIC_INTEGRATIONS_STATUS, json, /*qos=*/1, /*retained=*/true);
 }
 
 bool MqttClient::publishRfid(JsonDocument& json) {
-    return publishJson(IDRYER_TOPIC_RFID, json, IDRYER_RETAINED_RFID);
+    return publishJson(IDRYER_TOPIC_RFID, json, /*qos=*/1, IDRYER_RETAINED_RFID);
 }
 
 bool MqttClient::publishWeights(JsonDocument& json) {
-    return publishJson(IDRYER_TOPIC_WEIGHTS, json, IDRYER_RETAINED_WEIGHTS);
+    return publishJson(IDRYER_TOPIC_WEIGHTS, json, /*qos=*/1, IDRYER_RETAINED_WEIGHTS);
 }
 
 bool MqttClient::publishRfidWriteResult(JsonDocument& json) {
-    return publishJson(IDRYER_TOPIC_RFID_WRITE_RESULT, json, IDRYER_RETAINED_RFID_WRITE_RESULT);
+    return publishJson(IDRYER_TOPIC_RFID_WRITE_RESULT, json, /*qos=*/1, IDRYER_RETAINED_RFID_WRITE_RESULT);
 }
 
 uint16_t MqttClient::publishConfigRaw(const char* json, size_t length) {
@@ -180,9 +181,12 @@ uint16_t MqttClient::publishConfigRaw(const char* json, size_t length) {
 
     const char* topic = makeTopic(IDRYER_TOPIC_CONFIG);
 
+    // QoS 0: чанки до 16КБ — не копим их в outbox (heap). Retained-снэпшот
+    // на брокере сам по себе страхует доставку последней версии.
     if (length <= MQTT_CONFIG_CHUNK_SIZE) {
         HAL_LOG_INFO("MQTT", "→ config (full): %u bytes", length);
-        return mqttClient_.publish(topic, json, IDRYER_RETAINED_CONFIG) ? 1 : 0;
+        return mqttClient_.publish(topic, /*qos=*/0, IDRYER_RETAINED_CONFIG,
+                                   reinterpret_cast<const uint8_t*>(json), length) != 0 ? 1 : 0;
     }
 
     uint16_t tid = ++configTransferId_;
@@ -215,8 +219,12 @@ uint16_t MqttClient::publishConfigRaw(const char* json, size_t length) {
         size_t written = serializeJson(chunkDoc, chunkBuf, MQTT_CONFIG_CHUNK_SIZE + 100);
         free(dataBuf);
 
-        bool ok = mqttClient_.publish(topic, chunkBuf, IDRYER_RETAINED_CONFIG);
+        bool ok = mqttClient_.publish(topic, /*qos=*/0, IDRYER_RETAINED_CONFIG,
+                                      reinterpret_cast<const uint8_t*>(chunkBuf), written) != 0;
         if (!ok) { HAL_LOG_ERROR("MQTT", "Failed to publish chunk %u", idx); free(chunkBuf); return 0; }
+
+        // Прокачиваем отправку: QoS 0-пакет уходит из outbox в сеть в loop().
+        mqttClient_.loop();
 
         offset += chunkDataLen;
         idx++;
@@ -232,15 +240,27 @@ uint16_t MqttClient::publishConfigRaw(const char* json, size_t length) {
 bool MqttClient::publishConfigDelta(const char* json, size_t length) {
     if (!mqttClient_.connected() || !json || length == 0) return false;
     const char* topic = makeTopic(IDRYER_TOPIC_CONFIG_DELTA);
-    return mqttClient_.publish(topic, json, IDRYER_RETAINED_CONFIG_DELTA);
+    return mqttClient_.publish(topic, /*qos=*/1, IDRYER_RETAINED_CONFIG_DELTA,
+                               reinterpret_cast<const uint8_t*>(json), length) != 0;
 }
 
 // ============================================================================
 // Message handling
 // ============================================================================
 
-void MqttClient::mqttCallback(char* topic, byte* payload, unsigned int length) {
-    if (!instance_) return;
+void MqttClient::onMqttMessage(const espMqttClientTypes::MessageProperties& props,
+                               const char* topic, const uint8_t* payload,
+                               size_t len, size_t index, size_t total) {
+    (void)props;
+
+    // EMC_RX_BUFFER_SIZE=16384 гарантирует, что все наши payload'ы (команды
+    // ≤1КБ, OTA-chunks ≤4КБ) приходят одним куском. Частичная доставка =
+    // сообщение больше буфера — дропаем, как раньше дропал PubSubClient.
+    if (index != 0 || len != total) {
+        HAL_LOG_ERROR("MQTT", "← chunked payload on %s (%u/%u) — dropped, raise EMC_RX_BUFFER_SIZE",
+                      topic, (unsigned)(index + len), (unsigned)total);
+        return;
+    }
 
     // OTA-chunks (commands/firmware_update_chunk/{commandId}/{chunkIdx}) — это
     // сырой бинарь до 4 КБ (см. ___OTA_MQTT_DESIGN.md, format: raw_binary).
@@ -249,24 +269,21 @@ void MqttClient::mqttCallback(char* topic, byte* payload, unsigned int length) {
     // делать (Update.write + mbedtls_sha256_update). Pointer живёт только
     // время этого вызова — OtaReceiver обязан скопировать или записать сразу.
     if (strstr(topic, "/commands/firmware_update_chunk/")) {
-        if (instance_->otaChunkCallback_) {
-            instance_->otaChunkCallback_(
-                topic,
-                reinterpret_cast<const uint8_t*>(payload),
-                static_cast<size_t>(length));
+        if (otaChunkCallback_) {
+            otaChunkCallback_(topic, payload, len);
         }
         return;
     }
 
     // profile-команда с 10 стадиями занимает ~540 байт.
     static char s_payload_buf[1024];
-    if (length >= sizeof(s_payload_buf)) {
-        HAL_LOG_ERROR("MQTT", "← payload too large: %u bytes, dropped", length);
+    if (len >= sizeof(s_payload_buf)) {
+        HAL_LOG_ERROR("MQTT", "← payload too large: %u bytes, dropped", (unsigned)len);
         return;
     }
-    memcpy(s_payload_buf, payload, length);
-    s_payload_buf[length] = '\0';
-    instance_->handleMessage(topic, s_payload_buf, length);
+    memcpy(s_payload_buf, payload, len);
+    s_payload_buf[len] = '\0';
+    handleMessage(topic, s_payload_buf, len);
 }
 
 void MqttClient::handleMessage(const char* topic, const char* payload, size_t length) {
@@ -297,7 +314,7 @@ const char* MqttClient::makeTopic(const char* suffix) {
     return topicBuffer_;
 }
 
-bool MqttClient::publishJson(const char* suffix, JsonDocument& json, bool retained) {
+bool MqttClient::publishJson(const char* suffix, JsonDocument& json, uint8_t qos, bool retained) {
     if (!mqttClient_.connected()) return false;
 
     // Авто-добавление timestamp можно отключить (setAddTimestamp) — портал хранит
@@ -316,11 +333,14 @@ bool MqttClient::publishJson(const char* suffix, JsonDocument& json, bool retain
         HAL_LOG_ERROR("MQTT", "→ %s: payload too large (%u bytes)", suffix, (unsigned)needed);
         return false;
     }
-    serializeJson(json, s_buf, sizeof(s_buf));
+    size_t written = serializeJson(json, s_buf, sizeof(s_buf));
 
     const char* topic = makeTopic(suffix);
-    HAL_LOG_DEBUG("MQTT", "→ %s (%u bytes)", topic, (unsigned)needed);
-    return mqttClient_.publish(topic, s_buf, retained);
+    HAL_LOG_DEBUG("MQTT", "→ %s (%u bytes, qos%u)", topic, (unsigned)needed, qos);
+    // QoS 1: пакет уходит в outbox и ретраится до PUBACK (espMqttClient
+    // копирует payload — s_buf можно переиспользовать сразу).
+    return mqttClient_.publish(topic, qos, retained,
+                               reinterpret_cast<const uint8_t*>(s_buf), written) != 0;
 }
 
 char* MqttClient::getIsoTimestamp(char* buffer) {

@@ -211,8 +211,8 @@ rules:
   config_chunk_threshold_bytes: 16000
   unit_id_format: "В MQTT-JSON — строка U1..U4 (telemetry, status, weights, rfid, команды). Исключение: info.units[].unitId — число 0..3 (единственное сообщение с числовым unitId). Внутри MCU и на UART — uint8_t 0..3."
 
-  mqtt_session: "clean_session=false; keepalive=60s"
-  publish_qos: "Все device→backend publish — QoS 0 (MQTT-клиент прошивки не задаёт publish-QoS). Subscribe (commands/*) — QoS 1. LWT (offline) — broker-side."
+  mqtt_session: "clean_session=false; keepalive=30s (обнаружение обрыва брокером ≤45s → LWT)"
+  publish_qos: "Device→backend: state-critical (status, events, info, rfid, weights, config/delta, events/firmware_*) — QoS 1 с подтверждением и ретраем (espMqttClient). Telemetry и config (chunked, retained) — QoS 0. Subscribe (commands/*) — QoS 1. LWT (offline) — broker-side, QoS 1."
   uart_baud: 115200
   # uart_protocol_version — версия WIRE-формата UART (структуры payload + фрейм).
   # Пишется в каждый фрейм (header.version), проверяется при приёме → несовместимый
