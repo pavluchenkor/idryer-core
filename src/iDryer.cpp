@@ -239,6 +239,13 @@ struct Link::Impl {
     // sessionNum tracker: backend status.handler.ts requires sessionNum > 0
     // for active modes (DRYING/STORAGE/PROFILE). Increment on transition
     // IDLE/FAULT → active.
+    // Снапшот значимых полей последнего опубликованного status — для
+    // событийной публикации (loop сравнивает и шлёт сразу при изменении).
+    UnitMode lastPubMode[MAX_UNITS]      = { UnitMode::Idle, UnitMode::Idle,
+                                             UnitMode::Idle, UnitMode::Idle };
+    float    lastPubTargetC[MAX_UNITS]   = {0, 0, 0, 0};
+    uint32_t lastPubDurationS[MAX_UNITS] = {0, 0, 0, 0};
+
     uint32_t sessionNum[MAX_UNITS]   = {0, 0, 0, 0};
     UnitMode lastModeForSn[MAX_UNITS]= { UnitMode::Idle, UnitMode::Idle,
                                          UnitMode::Idle, UnitMode::Idle };
@@ -412,6 +419,16 @@ bool Link::begin() {
     return true;
 }
 
+namespace {
+
+// «Активный» режим юнита = всё, что не Idle/Fault/Unknown. Единый критерий
+// для session-tracking (publishStatusNow) и выбора периода телеметрии (loop).
+inline bool isActiveUnitMode(UnitMode m) {
+    return m != UnitMode::Idle && m != UnitMode::Fault && m != UnitMode::Unknown;
+}
+
+}  // namespace
+
 void Link::loop() {
     // Throttled NVS-persist для накопительного workTimeCounter — каждые 5 мин.
     // No-op в большинстве итераций (внутренний interval check).
@@ -507,15 +524,48 @@ void Link::loop() {
     const uint32_t now = millis();
     const bool anyTransport = impl_->pub.isMqttConnected() || impl_->pub.isLocalConnected();
     if (anyTransport) {
-        if (impl_->cfg.telemetryPeriodMs > 0 &&
-            now - impl_->lastTelemetryMs >= impl_->cfg.telemetryPeriodMs) {
+        // Idle-периоды: когда ни один юнит не активен, публикуем реже
+        // (*PeriodIdleMs; 0 = не различать active/idle).
+        bool anyActive = false;
+        for (uint8_t i = 0; i < impl_->cfg.unitsCount && i < MAX_UNITS; ++i) {
+            if (isActiveUnitMode(status.mode[i])) { anyActive = true; break; }
+        }
+
+        uint32_t telemetryPeriod = impl_->cfg.telemetryPeriodMs;
+        if (!anyActive && impl_->cfg.telemetryPeriodIdleMs > 0) {
+            telemetryPeriod = impl_->cfg.telemetryPeriodIdleMs;
+        }
+        if (telemetryPeriod > 0 &&
+            now - impl_->lastTelemetryMs >= telemetryPeriod) {
             impl_->lastTelemetryMs = now;
             publishTelemetryNow();
         }
-        if (impl_->cfg.statusPeriodMs > 0 &&
-            now - impl_->lastStatusMs >= impl_->cfg.statusPeriodMs) {
-            impl_->lastStatusMs = now;
-            publishStatusNow();
+
+        // Status: событийно (изменение значимых полей — mode/target/duration)
+        // + периодика-сверка. Volatile-поля (elapsed/rssi/uptime) изменением
+        // НЕ считаются — иначе каждый снапшот «новый» и событийность теряет
+        // смысл. Кастомные поля продуктов (onStatusPublish hook) SDK не видит —
+        // их события продукт публикует сам через publishStatusNow().
+        if (impl_->cfg.statusPeriodMs > 0) {
+            bool statusChanged = false;
+            for (uint8_t i = 0; i < impl_->cfg.unitsCount && i < MAX_UNITS; ++i) {
+                if (status.mode[i]        != impl_->lastPubMode[i] ||
+                    status.targetTempC[i] != impl_->lastPubTargetC[i] ||
+                    status.durationS[i]   != impl_->lastPubDurationS[i]) {
+                    statusChanged = true;
+                    break;
+                }
+            }
+
+            uint32_t statusPeriod = impl_->cfg.statusPeriodMs;
+            if (!anyActive && impl_->cfg.statusPeriodIdleMs > 0) {
+                statusPeriod = impl_->cfg.statusPeriodIdleMs;
+            }
+
+            if (statusChanged || now - impl_->lastStatusMs >= statusPeriod) {
+                impl_->lastStatusMs = now;
+                publishStatusNow();
+            }
         }
     }
 
@@ -650,17 +700,18 @@ void Link::publishStatusNow() {
         u["unitId"] = uid;
         u["mode"]   = unitModeString(status.mode[i]);
 
+        // Снапшот для событийной публикации (см. loop).
+        impl_->lastPubMode[i]      = status.mode[i];
+        impl_->lastPubTargetC[i]   = status.targetTempC[i];
+        impl_->lastPubDurationS[i] = status.durationS[i];
+
         // sessionNum: backend requires > 0 for DRYING/STORAGE/PROFILE.
         // Increment on transition from non-active to active.
-        // «Активный» режим = всё, что не Idle/Fault/Unknown. Phase 5: добавили
-        // Heating, LightAnimation, Profile. Generic-проверка вместо whitelist,
-        // чтобы новые mode'ы автоматически попадали в session-tracking без
-        // правки SDK.
-        auto isActiveMode = [](UnitMode m) {
-            return m != UnitMode::Idle && m != UnitMode::Fault && m != UnitMode::Unknown;
-        };
-        const bool wasActive = isActiveMode(impl_->lastModeForSn[i]);
-        const bool isActive  = isActiveMode(status.mode[i]);
+        // Phase 5: добавили Heating, LightAnimation, Profile. Generic-проверка
+        // (isActiveUnitMode) вместо whitelist, чтобы новые mode'ы автоматически
+        // попадали в session-tracking без правки SDK.
+        const bool wasActive = isActiveUnitMode(impl_->lastModeForSn[i]);
+        const bool isActive  = isActiveUnitMode(status.mode[i]);
         if (isActive && !wasActive) impl_->sessionNum[i]++;
         impl_->lastModeForSn[i] = status.mode[i];
 
