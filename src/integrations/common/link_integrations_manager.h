@@ -246,8 +246,10 @@ private:
     char bambuLastError_[96]     = {0};
     char moonrakerLastError_[96] = {0};
 
-    static constexpr uint32_t kPeriodicStatusIntervalMs = 30000;
-    uint32_t lastStatusPublishMs_ = 0;
+    // integrations/status — событийный: публикуется при изменении состояния/
+    // конфига интеграций (retained+QoS1 хранят снапшот). Флаг — дошив
+    // публикации, если событие случилось до MQTT-коннекта.
+    bool statusPublishPending_ = false;
 
     bool    bambuHasLastApply_         = false;
     char    bambuLastApplyAt_[24]      = {0};

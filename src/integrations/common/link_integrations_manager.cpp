@@ -260,13 +260,11 @@ void LinkIntegrationsManager::loop()
     moonrakerClient_.loop();
     haClient_.loop();
 
-    if (mqtt_ && mqtt_->isConnected()
-        && selection_.active != ActiveIntegration::None)
-    {
-        uint32_t now = millis();
-        if (now - lastStatusPublishMs_ >= kPeriodicStatusIntervalMs) {
-            publishStatus();
-        }
+    // integrations/status — событийный (изменение состояния/конфига интеграции
+    // публикует сразу; retained + QoS 1 хранят снапшот для портала). Здесь
+    // только дошив отложенной публикации, если событие случилось до коннекта.
+    if (statusPublishPending_ && mqtt_ && mqtt_->isConnected()) {
+        publishStatus();
     }
 }
 
@@ -374,6 +372,9 @@ void LinkIntegrationsManager::publishStatus()
 {
     if (!mqtt_) return;
     if (!mqtt_->isConnected()) {
+        // Событие случилось до коннекта (например, статус интеграций при
+        // загрузке) — отложим: loop() опубликует, как только MQTT поднимется.
+        statusPublishPending_ = true;
         return;
     }
 
@@ -395,7 +396,7 @@ void LinkIntegrationsManager::publishStatus()
     doc["updatedAt"] = ts;
 
     mqtt_->publishIntegrationsStatus(doc);
-    lastStatusPublishMs_ = millis();
+    statusPublishPending_ = false;
     HAL_LOG_DEBUG("LINK_MGR", "integrations/status published");
 }
 
