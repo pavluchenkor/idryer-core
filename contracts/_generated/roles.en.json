@@ -14,6 +14,7 @@
   "iheater.bambu_enabled": "Bambu Lab",
   "iheater.moonraker_enabled": "Moonraker",
   "iheater.ha_enabled": "Home Assistant",
+  "iheater.heat_temp": "iheater.heat_temp",
   "iheater.heat_start": "Heating",
   "iheater.heat_stop": "Stop heating",
   "storage.led_count": "LED count",

@@ -1,6 +1,6 @@
 // ============================================================================
 // SCAFFOLD: dryer_v3
-// Generated 2026-07-26 by contracts/gen_scaffold.py from mqtt_contract.yaml
+// Generated 2026-07-27 by contracts/gen_scaffold.py from mqtt_contract.yaml
 //
 // HOW TO START:
 //   1. Copy this directory to your PlatformIO project root.
@@ -9,7 +9,7 @@
 //   4. Run: pio run -e dryer_v3-prod
 //   5. Flash, connect Improv (or use hardcoded SSID), claim on portal.idryer.org.
 //
-// Capabilities: heater, fan, weight, rfid
+// Capabilities: heater, fan, weight, rfid, air_temp, air_humidity, heater_temp, servo
 // ============================================================================
 
 #include <Arduino.h>
@@ -29,10 +29,11 @@ static const idryer::Config CFG = {
     .hasFan                 = true,   // Вентилятор (on/off)
     .hasWeight              = true,   // Датчик веса (граммы филамента)
     .hasRfid                = true,   // RFID-ридер метки катушки
+    .hasAirTemp             = true,   // Датчик температуры воздуха (SHT/DHT)
+    .hasAirHumidity         = true,   // Датчик влажности воздуха
+    .hasHeaterTemp          = true,   // Датчик температуры корпуса нагревателя
+    .hasServo               = true,   // Сервопривод заслонки (открыта/закрыта)
     .hasLed                 = false,  // (not in this profile)
-    .hasAirTemp             = false,  // (not in this profile)
-    .hasAirHumidity         = false,  // (not in this profile)
-    .hasHeaterTemp          = false,  // (not in this profile)
     // Basic air sensors (set true if your hardware has them):
     .hasAirTemp        = false,  // TODO: SHT31, DHT22, etc.
     .hasAirHumidity    = false,
@@ -96,6 +97,10 @@ public:
         caps["fan"] = true;
         caps["weight"] = true;
         caps["rfid"] = true;
+        caps["air_temp"] = true;
+        caps["air_humidity"] = true;
+        caps["heater_temp"] = true;
+        caps["servo"] = true;
         char ts[32];
         idryer::MqttClient::getIsoTimestamp(ts);
         doc["timestamp"] = ts;

@@ -1,6 +1,6 @@
 # dryer_v3
 
-Auto-generated scaffold. Capabilities: **heater, fan, weight, rfid**.
+Auto-generated scaffold. Capabilities: **heater, fan, weight, rfid, air_temp, air_humidity, heater_temp, servo**.
 
 ## Quick start
 

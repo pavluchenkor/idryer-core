@@ -86,6 +86,10 @@ capability_vocabulary:
     telemetry_type: "float"
     description: "Датчик температуры корпуса нагревателя"
 
+  servo:
+    json_key: "servo"
+    description: "Сервопривод заслонки (открыта/закрыта)"
+
 device_profiles:
   iheater_link:
     device_type: "iheater_link"
@@ -95,7 +99,7 @@ device_profiles:
     capabilities: ["led", "air_temp", "air_humidity"]
   dryer_v3:
     device_type: "dryer"
-    capabilities: ["heater", "fan", "weight", "rfid"]
+    capabilities: ["heater", "fan", "weight", "rfid", "air_temp", "air_humidity", "heater_temp", "servo"]
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Поддержка топиков по продуктам

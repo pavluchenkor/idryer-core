@@ -101,19 +101,25 @@ public:
             doc["model"] = cfg_.model;
         }
 
-        // units[] with per-unit capabilities (legacy field names).
+        // units[] with per-unit capabilities (canonical vocabulary json_keys).
         JsonArray units = doc.createNestedArray("units");
         for (uint8_t i = 0; i < cfg_.unitsCount && i < MAX_UNITS; ++i) {
             JsonObject u = units.createNestedObject();
             u["unitId"] = i;        // integer per legacy
 
+            // Ключи = json_key из capability_vocabulary (mqtt_contract.yaml).
+            // Legacy-имена (RhAirSensor/TempAirSensor/TempHeaterSensor) убраны:
+            // портал capabilities не валидирует, потребители читают оба нейминга.
             JsonObject caps = u.createNestedObject("capabilities");
-            caps["heater"]           = cfg_.hasHeater;
-            caps["fan"]              = cfg_.hasFan;
-            caps["servo"]            = false;     // not in Config
-            caps["RhAirSensor"]      = cfg_.hasAirHumidity;
-            caps["TempAirSensor"]    = cfg_.hasAirTemp;
-            caps["TempHeaterSensor"] = cfg_.hasHeaterTemp;
+            caps["heater"]       = cfg_.hasHeater;
+            caps["fan"]          = cfg_.hasFan;
+            caps["servo"]        = cfg_.hasServo;
+            caps["led"]          = cfg_.hasLed;
+            caps["weight"]       = cfg_.hasWeight;
+            caps["rfid"]         = cfg_.hasRfid;
+            caps["air_temp"]     = cfg_.hasAirTemp;
+            caps["air_humidity"] = cfg_.hasAirHumidity;
+            caps["heater_temp"]  = cfg_.hasHeaterTemp;
 
             u.createNestedArray("scales");   // empty array
             u.createNestedArray("rfid");     // empty array
