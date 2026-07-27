@@ -88,6 +88,8 @@ capability_vocabulary:
 
   servo:
     json_key: "servo"
+    telemetry_field: "servoOpen"
+    telemetry_type: "bool"
     description: "Сервопривод заслонки (открыта/закрыта)"
 
 device_profiles:
@@ -224,7 +226,7 @@ rules:
   # payload-структуры. РАБОТАЕТ НЕЗАВИСИМО от firmware VERSION_MAJOR: та отвечает за
   # OTA-совместимость прошивок (handleUartHello: major mismatch → paired-OTA
   # self-healing, CRITICAL не постится). Два разных версионных механизма.
-  uart_protocol_version: 2 # v2 (2026-06-07): hardwareVersion char[8]→char[16] для читаемых HW-идентификаторов (rp2040-v1, stm32f103-v1)
+  uart_protocol_version: 3 # v3 (2026-07-27): +servoOpen в UartTelemetryEntry (wire-break, прошивать контроллер и линк парой). v2 (2026-06-07): hardwareVersion char[8]→char[16]
   uart_max_payload_bytes: 200
   uart_max_retries: 3
   uart_cmd_timeout_ms: 700
@@ -852,6 +854,7 @@ payloads:
           heaterTempC10: { type: int16, scaling: { factor: 0.1, unit: "°C", nodata: true } }
           heaterPowerPct: { type: uint8, unit: "0..100 %" }
           fanOn: { type: uint8, encoding: "0/1" }
+          servoOpen: { type: uint8, encoding: "0/1" }
 
   Status:
     description: "Полное состояние юнитов: режим, цели, прогресс, этапы профиля."
@@ -1395,6 +1398,7 @@ messages:
             "units[i].heaterTemp": "float, °C — температура корпуса нагревателя (при наличии датчика)"
             "units[i].heaterPower": "int, 0..100 % — мощность нагрева"
             "units[i].fanStatus": "bool — вентилятор вкл/выкл"
+            "units[i].servoOpen": "bool — заслонка открыта (при hasServo)"
             "rssi": "int, dBm — уровень WiFi (top-level, шлётся всегда)"
             "uptime": "uint32, секунды с момента включения (top-level, шлётся всегда)"
           example_climate:

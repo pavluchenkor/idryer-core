@@ -1,10 +1,29 @@
 #pragma once
 
 #include <Arduino.h>
-#include <espMqttClient.h>
 #include <ArduinoJson.h>
 #include "idryer_topics.h"
 #include "core/callback.h"
+
+#if defined(ESP32) || defined(ESP_PLATFORM)
+#include <espMqttClient.h>
+#else
+// Не-ESP платформы (RP2040/ControllerV2) компилируют core целиком через LDF
+// deep+, но MQTT-часть не используют (mqtt_client.cpp под guard'ом). Заглушки
+// типов espMqttClient держат заголовок компилируемым вне ESP.
+namespace espMqttClientTypes {
+enum class UseInternalTask { NO, YES };
+struct MessageProperties {};
+} // namespace espMqttClientTypes
+class espMqttClient {
+public:
+    explicit espMqttClient(espMqttClientTypes::UseInternalTask) {}
+};
+class espMqttClientSecure {
+public:
+    explicit espMqttClientSecure(espMqttClientTypes::UseInternalTask) {}
+};
+#endif
 
 // 30с → брокер объявляет тихую смерть (LWT) через 1.5×30 = 45с.
 // Нижняя граница AWS IoT (30-1200с); PINGREQ шлётся только в паузах трафика.

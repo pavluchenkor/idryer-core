@@ -136,6 +136,7 @@ export interface UartTelemetryEntry {
   heaterTempC10: number;
   heaterPowerPct: number;
   fanOn: number;
+  servoOpen: number;
 }
 
 /** Entry-record для inline-массивов в payload'ах. */

@@ -16,7 +16,7 @@ namespace idryer {
 
 // ── UART transport constants + frame flags (из rules.*) ────────────
 constexpr uint32_t  UART_BAUD                = 115200;
-constexpr uint8_t   UART_PROTOCOL_VER        = 2;
+constexpr uint8_t   UART_PROTOCOL_VER        = 3;
 
 /// @name UART frame flags
 /// @{
@@ -248,6 +248,7 @@ struct UartTelemetryEntry {
     int16_t    heaterTempC10;  ///< RAW — доступ только через get/set (хранит NaN-sentinel = максимум типа)
     uint8_t    heaterPowerPct;
     uint8_t    fanOn;
+    uint8_t    servoOpen;
 
     // ── Scaling accessors (auto-generated) ──
     inline float getTemperature() const { return temperatureC10 == INT16_MAX ? NAN : temperatureC10 * 0.1f; }  ///< °C
@@ -257,7 +258,7 @@ struct UartTelemetryEntry {
     inline float getHeaterTemp() const { return heaterTempC10 == INT16_MAX ? NAN : heaterTempC10 * 0.1f; }  ///< °C
     inline void  setHeaterTemp(float v) { heaterTempC10 = isnan(v) ? INT16_MAX : (int16_t)(v / 0.1f); }
 } __attribute__((packed));
-static_assert(sizeof(UartTelemetryEntry) == 9, "UartTelemetryEntry must be 9 bytes (yaml-computed)");
+static_assert(sizeof(UartTelemetryEntry) == 10, "UartTelemetryEntry must be 10 bytes (yaml-computed)");
 
 /// Entry-record для inline-массивов в payload'ах.
 struct UartStatusEntry {
@@ -342,7 +343,7 @@ struct UartTelemetryPayload {
     uint8_t    count;
     UartTelemetryEntry units[4];
 } __attribute__((packed));
-static_assert(sizeof(UartTelemetryPayload) == 37, "UartTelemetryPayload must be 37 bytes (yaml-computed)");
+static_assert(sizeof(UartTelemetryPayload) == 41, "UartTelemetryPayload must be 41 bytes (yaml-computed)");
 
 /// Полное состояние юнитов: режим, цели, прогресс, этапы профиля.
 struct UartStatusPayload {

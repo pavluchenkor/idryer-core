@@ -252,6 +252,11 @@ struct Link::Impl {
     float    lastPubTargetC[MAX_UNITS]   = {0, 0, 0, 0};
     uint32_t lastPubDurationS[MAX_UNITS] = {0, 0, 0, 0};
 
+    // Снапшот булевых полей последней опубликованной телеметрии (fan/servo) —
+    // смена состояния публикует телеметрию сразу, периодика остаётся сверкой.
+    bool lastPubFanOn[MAX_UNITS]     = {false, false, false, false};
+    bool lastPubServoOpen[MAX_UNITS] = {false, false, false, false};
+
     uint32_t sessionNum[MAX_UNITS]   = {0, 0, 0, 0};
     UnitMode lastModeForSn[MAX_UNITS]= { UnitMode::Idle, UnitMode::Idle,
                                          UnitMode::Idle, UnitMode::Idle };
@@ -541,8 +546,19 @@ void Link::loop() {
         if (!anyActive && impl_->cfg.telemetryPeriodIdleMs > 0) {
             telemetryPeriod = impl_->cfg.telemetryPeriodIdleMs;
         }
+        // Событийно по булевым полям (fan/servo): смена состояния публикует
+        // телеметрию сразу; дебаунс 2с защищает от дребезга. Периодика — сверка.
+        bool binaryChanged = false;
+        for (uint8_t i = 0; i < impl_->cfg.unitsCount && i < MAX_UNITS; ++i) {
+            if ((impl_->cfg.hasFan   && telemetry.fanOn[i]     != impl_->lastPubFanOn[i]) ||
+                (impl_->cfg.hasServo && telemetry.servoOpen[i] != impl_->lastPubServoOpen[i])) {
+                binaryChanged = true;
+                break;
+            }
+        }
         if (telemetryPeriod > 0 &&
-            now - impl_->lastTelemetryMs >= telemetryPeriod) {
+            ((binaryChanged && now - impl_->lastTelemetryMs >= 2000) ||
+             now - impl_->lastTelemetryMs >= telemetryPeriod)) {
             impl_->lastTelemetryMs = now;
             publishTelemetryNow();
         }
@@ -651,7 +667,8 @@ const char* eventSeverityString(EventKind k) {
 
 void Link::publishTelemetryNow() {
     const Config& cfg = impl_->cfg;
-    StaticJsonDocument<512> doc;
+    // 640: 4 юнита × ~7 полей (включая servoOpen) с запасом; 512 было впритык.
+    StaticJsonDocument<640> doc;
 
     JsonArray units = doc.createNestedArray("units");
     // CONTRACT (mqtt_contract.yaml §telemetry.units): итерируем только по
@@ -681,6 +698,11 @@ void Link::publishTelemetryNow() {
         }
         if (cfg.hasHeater) u["heaterPower"] = (int)roundf(telemetry.heaterPower01[i] * 100.0f);
         if (cfg.hasFan)    u["fanStatus"]   = telemetry.fanOn[i];
+        if (cfg.hasServo)  u["servoOpen"]   = telemetry.servoOpen[i];
+
+        // Снапшот булевых полей — для событийной публикации в loop().
+        impl_->lastPubFanOn[i]     = telemetry.fanOn[i];
+        impl_->lastPubServoOpen[i] = telemetry.servoOpen[i];
     }
 
     doc["rssi"]   = WiFi.RSSI();
