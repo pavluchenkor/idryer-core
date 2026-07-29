@@ -142,6 +142,12 @@ bool MqttClient::publishInfoJson(const char* json) {
     return mqttClient_.publish(topic, /*qos=*/1, IDRYER_RETAINED_INFO, json) != 0;
 }
 
+bool MqttClient::publishCard(JsonDocument& json) {
+    // Манифест сущностей карточки: retained + QoS 1 — «оглавление» устройства,
+    // новый подписчик должен получить его сразу.
+    return publishJson(IDRYER_TOPIC_CARD, json, /*qos=*/1, IDRYER_RETAINED_CARD);
+}
+
 bool MqttClient::publishTelemetry(JsonDocument& json) {
     // QoS 0: телеметрия частая, потеря единичной точки не критична —
     // не копим её в outbox при плохой связи.

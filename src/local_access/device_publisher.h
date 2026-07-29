@@ -53,6 +53,9 @@ public:
     /** info topic (retained). Raw pre-serialized JSON string. */
     bool publishInfo(const char* json);
 
+    /** card topic (retained) — entity manifest карточки. */
+    bool publishCard(JsonDocument& doc);
+
     /** telemetry topic. */
     bool publishTelemetry(JsonDocument& doc);
 

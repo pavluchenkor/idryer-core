@@ -14,6 +14,7 @@ extern "C" {
 
 // Device -> Backend
 #define IDRYER_TOPIC_INFO               "info"
+#define IDRYER_TOPIC_CARD               "card"
 #define IDRYER_TOPIC_TELEMETRY          "telemetry"
 #define IDRYER_TOPIC_STATUS             "status"
 #define IDRYER_TOPIC_EVENTS             "events"
@@ -44,6 +45,7 @@ extern "C" {
 
 // Retained flags
 #define IDRYER_RETAINED_INFO            1
+#define IDRYER_RETAINED_CARD            1
 #define IDRYER_RETAINED_TELEMETRY       0
 #define IDRYER_RETAINED_STATUS          1
 #define IDRYER_RETAINED_EVENTS          0

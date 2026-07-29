@@ -127,6 +127,9 @@ public:
      */
     bool publishInfoJson(const char* json);
 
+    /// @brief Publishes to @c idryer/{serial}/card (retained, QoS 1) — entity manifest.
+    bool publishCard(JsonDocument& json);
+
     /// @brief Publishes to @c idryer/{serial}/telemetry (QoS 0).
     bool publishTelemetry(JsonDocument& json);
 

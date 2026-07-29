@@ -236,6 +236,10 @@ struct Link::Impl {
     bool logsEnabled = false;
     bool localStarted = false;       ///< mDNS+WS lazily started after WiFi connect
 
+    // Entity manifest карточки (топик card, retained).
+    idryer::CardBuilder card;
+    bool cardPublished = false;      ///< опубликован ли манифест в этом коннекте
+
     // Auto-publish throttling (millis).
     uint32_t lastTelemetryMs = 0;
     uint32_t lastStatusMs    = 0;
@@ -534,6 +538,15 @@ void Link::loop() {
     // does not publish status). Skipped when both transports are offline.
     const uint32_t now = millis();
     const bool anyTransport = impl_->pub.isMqttConnected() || impl_->pub.isLocalConnected();
+
+    // Entity manifest (retained): публикуем после MQTT-коннекта и
+    // перепубликуем, если продукт изменил декларацию (card().dirty()).
+    if (impl_->pub.isMqttConnected()) {
+        if (!impl_->cardPublished || impl_->card.dirty()) publishCardNow();
+    } else {
+        impl_->cardPublished = false;
+    }
+
     if (anyTransport) {
         // Idle-периоды: когда ни один юнит не активен, публикуем реже
         // (*PeriodIdleMs; 0 = не различать active/idle).
@@ -664,6 +677,20 @@ const char* eventSeverityString(EventKind k) {
 }
 
 } // anonymous namespace
+
+idryer::CardBuilder& Link::card() {
+    return impl_->card;
+}
+
+void Link::publishCardNow() {
+    // 2048: до 16 объявленных сущностей + авто-сенсоры + layout с запасом.
+    DynamicJsonDocument doc(2048);
+    impl_->card.buildJson(doc, impl_->cfg);
+    if (impl_->pub.publishCard(doc)) {
+        impl_->cardPublished = true;
+        impl_->card.clearDirty();
+    }
+}
 
 void Link::publishTelemetryNow() {
     const Config& cfg = impl_->cfg;
@@ -883,6 +910,19 @@ void Link::dispatchCommand(const char* command, JsonObjectConst data, bool fromL
     } else if (strcmp(command, "ping") == 0) {
         // Time-sync делает runtime через `timestamp` в payload — здесь no-op.
         builtinHandled = true;
+    }
+
+    // ─── Card-контролы: invoke card.{id} → колбэк CardBuilder ─────────────
+    // Перехватываем ДО продуктового registry: продуктовый onCommand("invoke")
+    // не обязан знать про card.* actions.
+    if (strcmp(command, "invoke") == 0) {
+        const char* action = data["action"].as<const char*>();
+        if (action && strncmp(action, "card.", 5) == 0) {
+            if (!impl_->card.handleInvokeAction(action, data["args"])) {
+                HAL_LOG_WARN("LINK", "unknown card action: %s", action);
+            }
+            return;
+        }
     }
 
     // ─── Registry — продуктовые имена через onCommand(name, cb) ───────────

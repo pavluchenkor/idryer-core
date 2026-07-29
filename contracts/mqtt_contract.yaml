@@ -2518,6 +2518,57 @@ uart_only:
 # 4. MQTT-only сообщения (нет UART-формы)
 # ─────────────────────────────────────────────────────────────────────────────
 mqtt_only:
+  - suffix: card
+    full_topic: "idryer/{serial}/card"
+    direction: device_to_backend
+    qos: 1
+    retained: true
+    interval: "once after MQTT connect; republish on change (CardBuilder)"
+    status: implemented
+    purpose: |
+      Манифест сущностей карточки устройства (entity manifest) — самоописание
+      «что показать и чем управлять» для авто-карточки портала/приложения
+      (слой 1) и опциональная заводская разметка (слой 2). Позволяет стороннему
+      устройству получить рабочую карточку без правок портала.
+      Сенсоры из capability_vocabulary SDK генерирует сам из Config.has*;
+      кастомные сенсоры и контролы продукт объявляет через Link::card()
+      (CardBuilder). Значения кастомных сенсоров продукт кладёт в telemetry
+      через onTelemetryPublish; путь к значению — поле path (JSON-путь
+      внутри telemetry payload).
+    payload:
+      example:
+        v: 1
+        entities:
+          - { id: "temp", type: "sensor", device_class: "temperature", unit: "°C", source: "telemetry", path: "units[0].temperature" }
+          - { id: "co2", type: "sensor", label: "CO2", unit: "ppm", source: "telemetry", path: "units[0].co2ppm" }
+          - { id: "calibrate", type: "button", label: "Calibrate", action: "card.calibrate" }
+          - { id: "set_temp", type: "number", label: "Target", unit: "°C", min: 20, max: 80, step: 1, action: "card.set_temp", arg: "value" }
+        layout:
+          - ["temp", "co2"]
+          - ["set_temp", "calibrate"]
+      fields:
+        v: "uint — версия схемы манифеста (сейчас 1)"
+        entities: "array — сущности карточки, порядок = порядок авто-рендера (слой 1)"
+        "entities[].id": "string [a-z0-9_]{1..24}, уникален в манифесте"
+        "entities[].type": '"sensor" | "binary_sensor" | "number" | "select" | "button"'
+        "entities[].device_class": "string, опционально — семантика в стиле HA (temperature/humidity/weight/power_factor/…); задаёт иконку/формат на портале"
+        "entities[].label": "string, printable ASCII ≤32 — подпись; для словарных device_class может отсутствовать (портал берёт свой перевод)"
+        "entities[].unit": "string ≤8 — единица измерения (для sensor/number)"
+        "entities[].source": '"telemetry" | "status" — откуда читать значение (sensor/binary_sensor)'
+        "entities[].path": "string — JSON-путь к значению внутри source-payload, например units[0].co2ppm"
+        "entities[].action": "string — invoke-action контрола (number/select/button); SDK генерирует card.{id}"
+        "entities[].arg": "string — имя аргумента в args для number/select (значение контрола)"
+        "entities[].min/max/step": "number — границы для type=number"
+        "entities[].options": "string[] — варианты для type=select"
+        layout: "array of string[] , опционально — заводская разметка (слой 2): ряды из id сущностей; не упомянутые id рендерятся ниже авто-списком"
+      limits:
+        - "entities ≤ 32; layout ≤ 16 рядов по ≤ 4 id; портал обрезает сверх лимита"
+        - "label/unit: printable ASCII; портал экранирует при рендере"
+        - "команды контролов идут ТОЛЬКО в commands/invoke этого же устройства (payload {action, args, unitId, timestamp}) — чужие топики недостижимы by design"
+    notes:
+      - "Потребители: портал (EntityDeviceCard), мобильное приложение; позже — генератор HA discovery (value_template из path, command_template из action)."
+      - "Устройства без манифеста: портал строит карточку fallback'ом из units[].capabilities (/info) + deviceType."
+      - "Retained: новый подписчик получает манифест сразу; SDK перепубликует при изменении декларации."
   - suffix: commands/bind_ack
     full_topic: "idryer/{serial}/commands/bind_ack"
     direction: backend_to_device

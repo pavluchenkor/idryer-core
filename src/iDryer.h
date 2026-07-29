@@ -65,6 +65,7 @@
 // Auto-generated from mqtt_contract.yaml — enums, data structs, Config.
 // See contracts/gen_idryer_api_h.py.
 #include "_generated/iDryer_api.h"
+#include "card/card_builder.h"
 
 // Core SDK types (DeviceIdentity, McuSerialResult) — needed for the public API.
 #include "core/types.h"
@@ -111,6 +112,18 @@ public:
     void publishTelemetryNow();
     void publishStatusNow();
     void publishInfoNow();
+
+    // ─── Entity manifest (карточка устройства) ───────────────────────
+    /// Декларация сущностей карточки (слой 1) и заводской разметки (слой 2).
+    /// Сенсоры из Config.has* добавляются автоматически; здесь продукт
+    /// объявляет кастомные сенсоры и контролы:
+    ///   link.card().sensor("co2", "CO2", "ppm", "units[0].co2ppm");
+    ///   link.card().button("calibrate", "Calibrate", [](){ ... });
+    /// SDK публикует retained-манифест в топик `card` после коннекта и
+    /// перепубликует при изменении декларации. Команды контролов приходят
+    /// как invoke `card.{id}` и роутятся в колбэки автоматически.
+    idryer::CardBuilder& card();
+    void publishCardNow();
 
     /// Update the unit count at runtime (e.g. after receiving MCU Hello).
     /// Triggers a fresh info publish so the backend sees the correct count.
