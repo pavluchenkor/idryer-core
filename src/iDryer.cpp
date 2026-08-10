@@ -910,6 +910,11 @@ void Link::dispatchCommand(const char* command, JsonObjectConst data, bool fromL
     } else if (strcmp(command, "ping") == 0) {
         // Time-sync делает runtime через `timestamp` в payload — здесь no-op.
         builtinHandled = true;
+    } else if (strcmp(command, "get_info") == 0) {
+        // Пуш info (несёт mcuSerial). Используется локальным WS при auth_ok,
+        // чтобы клиент получил идентичность RP2040 сразу, не дожидаясь события.
+        publishInfoNow();
+        builtinHandled = true;
     }
 
     // ─── Card-контролы: invoke card.{id} → колбэк CardBuilder ─────────────

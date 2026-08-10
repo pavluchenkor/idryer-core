@@ -191,10 +191,14 @@ void LocalAccess::handleMessage(uint8_t num, const char* json, size_t length)
 
             HAL_LOG_INFO("WS", "Auth OK — client #%d", num);
 
-            // Immediately push current config so the app has a full picture.
+            // Immediately push current config + info so the app has a full
+            // picture. info несёт mcuSerial (серийник RP2040 = идентичность на
+            // портале) — без этого пуша поздно подключившийся LAN-клиент его не
+            // получит (info шлётся только по событию, локальный WS не retained).
             if (commandSink_) {
                 StaticJsonDocument<1> empty;
                 commandSink_("get_config", empty.as<JsonObjectConst>());
+                commandSink_("get_info", empty.as<JsonObjectConst>());
             }
         } else {
             StaticJsonDocument<64> resp;
