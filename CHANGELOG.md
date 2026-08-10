@@ -38,3 +38,4 @@
 - Удалён мёртвый legacy binary-путь `ConfigPush`.
 - Буферы payload/JSON увеличены до 1024 для profile-команд.
 - OTA: отложенный `set_boot_partition` до commit; drop устаревших chunks по `commandId`.
+- Локальный WS: при `auth_ok` пушится не только `config`, но и `info` (built-in команда `get_info` → `publishInfoNow`). Поздно подключившийся LAN-клиент получает `mcuSerial`/`deviceType` сразу, а не ждёт события (info не retained на локальном WS).
