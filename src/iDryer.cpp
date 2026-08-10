@@ -761,7 +761,10 @@ void Link::publishStatusNow() {
         impl_->lastPubDurationS[i] = status.durationS[i];
 
         // sessionNum: backend requires > 0 for DRYING/STORAGE/PROFILE.
-        // Increment on transition from non-active to active.
+        // Источник истины — MCU: у него счётчик пер-юнитовый и лежит в EEPROM,
+        // поэтому номер переживает перезагрузку Link (OTA, eraseClaimAndRestart)
+        // и не рвёт живую сессию в БД. Локальный счётчик остаётся фолбэком для
+        // продуктов, которые status.sessionNum не заполняют (шлют 0).
         // Phase 5: добавили Heating, LightAnimation, Profile. Generic-проверка
         // (isActiveUnitMode) вместо whitelist, чтобы новые mode'ы автоматически
         // попадали в session-tracking без правки SDK.
@@ -770,7 +773,8 @@ void Link::publishStatusNow() {
         if (isActive && !wasActive) impl_->sessionNum[i]++;
         impl_->lastModeForSn[i] = status.mode[i];
 
-        u["sessionNum"] = isActive ? impl_->sessionNum[i] : 0;
+        const uint32_t mcuSessionNum = status.sessionNum[i];
+        u["sessionNum"] = isActive ? (mcuSessionNum ? mcuSessionNum : impl_->sessionNum[i]) : 0;
 
         // target: nested object per backend StatusPayload (mqtt-api.types.ts:154).
         // Emit only when meaningful (non-zero) to reduce noise on IDLE.

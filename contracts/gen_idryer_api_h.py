@@ -218,6 +218,8 @@ def render_status_struct() -> list[str]:
         "    float    targetTempC[MAX_UNITS];",
         "    uint32_t durationS[MAX_UNITS];   ///< requested duration in seconds; 0 = infinite",
         "    uint32_t elapsedS[MAX_UNITS];    ///< since session started",
+        "    uint32_t sessionNum[MAX_UNITS];  ///< session number from MCU (persistent, per-unit);",
+        "                                     ///< 0 = not provided, SDK falls back to its own counter",
         "};",
     ]
     return out
