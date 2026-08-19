@@ -4,6 +4,7 @@
 #include "root_ca.h"
 #include "../hal/hal_types.h"
 #include <esp_system.h>
+#include <esp_heap_caps.h>
 #include <time.h>
 #include <string.h>
 
@@ -124,7 +125,14 @@ void MqttClient::onMqttConnect(bool sessionPresent) {
     // но повторный SUBSCRIBE безвреден и защищает от рассинхрона.
     uint16_t packetId = mqttClient_.subscribe(cmdTopic_, IDRYER_QOS_COMMANDS);
     if (packetId == 0) {
-        HAL_LOG_ERROR("MQTT", "SUBSCRIBE could not be queued — disconnecting to force reconnect");
+        // 0 = espMqttClient не смог поставить пакет в outbox: либо не хватило
+        // heap (на платах с дисплеем LVGL его фрагментирует), либо клиент уже
+        // не connected. Цифры heap в логе различают эти случаи.
+        HAL_LOG_ERROR("MQTT",
+                      "SUBSCRIBE could not be queued — disconnecting to force "
+                      "reconnect (heap free=%u largest=%u)",
+                      (unsigned)heap_caps_get_free_size(MALLOC_CAP_DEFAULT),
+                      (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_DEFAULT));
         mqttClient_.disconnect();
         return;
     }

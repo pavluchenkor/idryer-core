@@ -336,6 +336,16 @@ bool Link::begin() {
     Link::s_currentImpl = impl_;
 #endif
 
+    // Pre-warm esp_wifi_init() here, before any UI/LVGL allocation on
+    // products with a display (touch): esp_wifi_init needs a large
+    // contiguous heap block, and on a fresh device (no stored credentials
+    // below) the driver would otherwise only init later from the cloud
+    // state machine's reconnect loop, by which point LVGL has fragmented
+    // the heap enough that esp_wifi_init fails permanently (observed on
+    // idryer-touch: free_heap=25KB but max_alloc=7.6KB at that point).
+    // No-op for products without a display — just runs a bit earlier.
+    impl_->wifi.begin(nullptr, nullptr);
+
     // Restore saved WiFi credentials if any.
     // WiFi.begin() called directly so the non-DEV_REPL loop (which returns early
     // before runtime.loop()) can observe WL_CONNECTED without cloud state machine.
@@ -1008,6 +1018,11 @@ void Link::seedWifiCredentialsIfEmpty(const char* ssid, const char* password) {
 void Link::setWifiCredentials(const char* ssid, const char* password) {
     if (!ssid || !password) return;
     impl_->wifiStore.save(ssid, password);
+    // Отдаём креды и работающему менеджеру, а не только в NVS: он стартовал в
+    // begin() с тем, что было в памяти на тот момент, и без этого продолжит
+    // переподключаться со старыми (или пустыми) значениями до перезагрузки.
+    // Тот же порядок, что в пути Improv выше.
+    impl_->wifi.begin(ssid, password);
 }
 
 bool Link::requestClaim() {

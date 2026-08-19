@@ -252,7 +252,9 @@ public:
     /// No-op if NVS already has creds. Call before begin().
     void seedWifiCredentialsIfEmpty(const char* ssid, const char* password);
 
-    /// Always overwrites WiFi credentials in NVS. Dev / forced re-provisioning.
+    /// Always overwrites WiFi credentials in NVS and applies them to the
+    /// running WiFi manager, so the device connects without a reboot.
+    /// Dev / forced re-provisioning, ESPTouch, Improv.
     void setWifiCredentials(const char* ssid, const char* password);
 
     /// Manually start the cloud claim flow (provision → register → check-claim).
