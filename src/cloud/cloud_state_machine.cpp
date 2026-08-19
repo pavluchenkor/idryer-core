@@ -273,13 +273,22 @@ idryer::ClaimRequestResult CloudStateMachine::requestClaimDetailed() {
     }
 
     if (awaitingClaim_) {
-        HAL_LOG_INFO("CLOUD", "Claim already in progress, PIN=%s", pendingPin_);
-        if (claimPinCallback_ && pendingPin_[0] != '\0') {
-            uint32_t elapsedSec = (HAL_MILLIS() - pinCreatedAtMs_) / 1000;
-            uint32_t remaining  = (elapsedSec < pinTotalSeconds_) ? (pinTotalSeconds_ - elapsedSec) : 0;
-            claimPinCallback_(pendingPin_, remaining, claimPinCtx_);
+        const uint32_t elapsedSec = (HAL_MILLIS() - pinCreatedAtMs_) / 1000;
+        const bool     pinAlive   = elapsedSec < pinTotalSeconds_;
+        // Пока код жив — повторяем его же с актуальным остатком. Когда истёк,
+        // проваливаемся ниже на register: бэкенд отдаёт тот же PIN, пока он
+        // действителен, и выпускает новый только после истечения — то есть
+        // повторный запрос безопасен, а без него на экране устройства висит
+        // мёртвый код до перезагрузки.
+        if (pinAlive) {
+            HAL_LOG_INFO("CLOUD", "Claim already in progress, PIN=%s", pendingPin_);
+            if (claimPinCallback_ && pendingPin_[0] != '\0') {
+                claimPinCallback_(pendingPin_, pinTotalSeconds_ - elapsedSec, claimPinCtx_);
+            }
+            return idryer::ClaimRequestResult::Started;
         }
-        return idryer::ClaimRequestResult::Started;
+        HAL_LOG_INFO("CLOUD", "PIN expired (%us), requesting a new one", (unsigned)elapsedSec);
+        awaitingClaim_ = false;
     }
 
     HAL_LOG_INFO("CLOUD", "Registering device for claim...");

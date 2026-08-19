@@ -164,6 +164,9 @@ public:
     using CommandCallback           = void (*)(JsonObjectConst data);
     using IntegrationStatusCallback = void (*)(const IntegrationStatus&);
     using ClaimPinCallback          = void (*)(const char* pin, uint32_t expiresInSeconds);
+    /// Бэкенд подтвердил привязку. Приходит раньше, чем поднимется MQTT, —
+    /// продукту этого достаточно, чтобы убрать с экрана PIN.
+    using ClaimCompleteCallback     = void (*)(const char* deviceId);
     using DiagnosticCallback        = void (*)(const char* message);
     using PublishHookCallback       = void (*)(JsonObject root);
 
@@ -209,6 +212,8 @@ public:
 
     /// Called when the cloud claim flow produces a PIN.
     void onClaimPin(ClaimPinCallback cb);
+    /// Called once the backend confirms the claim (before MQTT is up).
+    void onClaimComplete(ClaimCompleteCallback cb);
     void onDiagnostic(DiagnosticCallback cb);
 
     // ─── Two-chip (ESP32 + RP2040) API ───────────────────────────────

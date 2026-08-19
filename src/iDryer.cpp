@@ -228,6 +228,7 @@ struct Link::Impl {
     // User callbacks.
     Link::IntegrationStatusCallback onIntegrationStatus;
     Link::ClaimPinCallback          onClaimPin;
+    Link::ClaimCompleteCallback     onClaimComplete;
     Link::DiagnosticCallback        onDiagnostic;
     Link::PublishHookCallback       onTelemetryPublish;
     Link::PublishHookCallback       onStatusPublish;
@@ -432,6 +433,13 @@ bool Link::begin() {
     impl_->cloud.setClaimPinCallback([](const char* pin, uint32_t expires, void* ctx) {
         auto* self = static_cast<Link::Impl*>(ctx);
         if (self->onClaimPin) self->onClaimPin(pin, expires);
+    }, impl_);
+    // Привязка подтверждена бэкендом. Событие приходит до подъёма MQTT,
+    // поэтому продукт может сразу убрать PIN с экрана: ждать соединения
+    // незачем, а на слабой связи это ожидание затягивалось на минуты.
+    impl_->cloud.setClaimCompleteCallback([](const char* deviceId, void* ctx) {
+        auto* self = static_cast<Link::Impl*>(ctx);
+        if (self->onClaimComplete) self->onClaimComplete(deviceId);
     }, impl_);
     impl_->cloud.setDiagnosticCallback([](const char* message, void* ctx) {
         auto* self = static_cast<Link::Impl*>(ctx);
@@ -959,6 +967,10 @@ void Link::dispatchCommand(const char* command, JsonObjectConst data, bool fromL
 
 void Link::onClaimPin(ClaimPinCallback cb) {
     impl_->onClaimPin = std::move(cb);
+}
+
+void Link::onClaimComplete(ClaimCompleteCallback cb) {
+    impl_->onClaimComplete = std::move(cb);
 }
 
 void Link::onDiagnostic(DiagnosticCallback cb) {
