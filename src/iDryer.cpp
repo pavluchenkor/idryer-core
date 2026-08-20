@@ -507,6 +507,25 @@ const char* Link::resetReasonName(int reason) {
     }
 }
 
+// Полное имя причины — только для лога. Штатные причины сюда попадают тоже:
+// при разборе сбоя важно отличать «выдернули питание» от «сами перезагрузились
+// после OTA», а resetReasonName() их намеренно не различает.
+static const char* resetReasonFullName(esp_reset_reason_t r) {
+    switch (r) {
+        case ESP_RST_POWERON:  return "POWERON";
+        case ESP_RST_EXT:      return "EXT";
+        case ESP_RST_SW:       return "SW";
+        case ESP_RST_DEEPSLEEP:return "DEEPSLEEP";
+        case ESP_RST_SDIO:     return "SDIO";
+        case ESP_RST_PANIC:    return "PANIC";
+        case ESP_RST_INT_WDT:  return "INT_WDT";
+        case ESP_RST_TASK_WDT: return "TASK_WDT";
+        case ESP_RST_WDT:      return "WDT";
+        case ESP_RST_BROWNOUT: return "BROWNOUT";
+        default:               return "UNKNOWN";
+    }
+}
+
 void Link::noteResetReason() {
     const esp_reset_reason_t r = esp_reset_reason();
     const char* name = resetReasonName((int)r);
@@ -514,7 +533,7 @@ void Link::noteResetReason() {
     // Причина каждого старта — сразу в Serial, а не через HAL: логи HAL
     // включаются только после подъёма Wi-Fi, то есть спустя секунды, а паника
     // через USB CDC теряется целиком. Это единственный надёжный след.
-    Serial.printf("[BOOT] reset reason: %s (%d)\n", name ? name : "normal", (int)r);
+    Serial.printf("[BOOT] reset reason: %s (%d)\n", resetReasonFullName(r), (int)r);
     Serial.flush();
 
     Preferences prefs;
