@@ -35,4 +35,7 @@
   X(ERRC_TIMEOUT,          "TIMEOUT",            "Operation timeout")           \
   X(ERRC_CONFIG_INVALID,   "CONFIG_INVALID",     "Invalid configuration")       \
   X(ERRC_STATE_CHANGE,     "STATE_CHANGE",       "State changed")               \
-  X(ERRC_PROTOCOL_ERROR,   "PROTOCOL_ERROR",     "Protocol error")
+  X(ERRC_PROTOCOL_ERROR,   "PROTOCOL_ERROR",     "Protocol error")                \
+  X(ERRC_ABNORMAL_RESET,   "ABNORMAL_RESET",     "Device restarted abnormally")   \
+  X(ERRC_LOW_MEMORY,       "LOW_MEMORY",         "Free memory critically low")    \
+  X(ERRC_AUTH_FAILED,      "AUTH_FAILED",        "Authentication rejected")

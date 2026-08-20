@@ -40,6 +40,8 @@
 
 #include <ArduinoJson.h>
 #include <stdlib.h>
+#include "hal/hal_types.h" // HAL_LOG_* — заголовок используется и там,
+                           // где HAL ещё не был подключён продуктом
 #include "menu_meta.h"     // MENU_META_COUNT, MENU_SERIALIZED_MAX_SIZE, g_menu_meta
 #include "menu_cache.h"    // g_menu_cache, MENU_MAX_UNITS
 #include "menu_commands.h" // MENU_JSON_DOC_CAP (capacity для DynamicJsonDocument)

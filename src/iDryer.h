@@ -308,6 +308,18 @@ private:
     /// File-scope pointer for non-capturing Improv callback.
     static Impl* s_currentImpl;
 
+    /// Тот же приём для обработчика шины ошибок: error_set_handler принимает
+    /// обычный указатель на функцию, замыкание туда не положить.
+    static Link* s_selfForErrors;
+
+    // ── Диагностика ненормальных перезагрузок ────────────────────────
+    static const char* resetReasonName(int reason);
+    void noteResetReason();      ///< читает причину сброса, копит счётчик в NVS
+    void reportAbnormalResets(); ///< шлёт накопленное в портал, пока не дойдёт
+
+    uint8_t abnPending_    = 0;  ///< сбросов накоплено и не доложено
+    int     abnLastReason_ = 0;  ///< esp_reset_reason_t последнего из них
+
     // fromLocal=true → команда пришла с локального WS (LAN, под токеном) и НЕ
     // гейтится флагом ignoreExternalCmd. fromLocal=false (дефолт) → облачный
     // MQTT-путь, гейтится. Источник проставляет вызывающий (проводка sink'ов),

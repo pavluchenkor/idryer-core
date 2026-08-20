@@ -22,12 +22,19 @@
 #include "cloud/cloud_state_machine.h"
 #include "local_access/local_access.h"
 #include "local_access/device_publisher.h"
+#include "core/error_process.h"
+#include "core/error_post.h"
+#include "core/error_table.h"
+#include <Preferences.h>
+#include <esp_system.h>
 
 #ifndef IDRYER_API_BASE
 #  error "IDRYER_API_BASE must be defined via build_flags (e.g. \"https://portal.idryer.org/api\")"
 #endif
 
 namespace iDryer {
+
+Link* Link::s_selfForErrors = nullptr;
 
 namespace {
 
@@ -446,10 +453,109 @@ bool Link::begin() {
         if (self->onDiagnostic) self->onDiagnostic(message);
     }, impl_);
 
+    // Шина ошибок ESP-стороны: без обработчика всё, что в неё кладут, тихо
+    // пропадает. Раньше проводку делал только iHeater-link, а touch и link не
+    // делали вовсе. Ставим обработчик по умолчанию здесь; продукт может
+    // переопределить его своим error_set_handler() уже после begin().
+    error_set_handler([](const ErrorEvent* ev) {
+        Link* self = s_selfForErrors;
+        if (!self || !ev) return;
+        EventKind kind;
+        switch (ev->severity) {
+            case ERRSEV_INFO:     kind = EventKind::Info;     break;
+            case ERRSEV_WARNING:  kind = EventKind::Warning;  break;
+            case ERRSEV_CRITICAL: kind = EventKind::Critical; break;
+            default:              kind = EventKind::Error;    break;
+        }
+        char eventKey[48];
+        snprintf(eventKey, sizeof(eventKey), "%s_%s",
+                 errsrc_name(ev->source), errcode_name(ev->code));
+        self->raiseEvent(kind, eventKey, ev->msg, ev->ctrl_id);
+    });
+    s_selfForErrors = this;
+
+    // Причина прошлой перезагрузки — до старта runtime, чтобы счётчик уже был
+    // готов к первому же выходу в онлайн.
+    noteResetReason();
+
     // Bring runtime online.
     impl_->runtime.begin();
 
     return true;
+}
+
+// ── Ненормальные перезагрузки ────────────────────────────────────────────
+//
+// Причина сброса живёт ровно до следующей загрузки, а логи по USB видит только
+// тот, кто сидит рядом с платой (паника через CDC теряется целиком: порт
+// переподключается раньше, чем текст уходит). Поэтому счётчик кладётся в NVS и
+// снимается ТОЛЬКО после успешной публикации: первая попытка приходится на
+// самый занятый момент — сразу после подключения устройство шлёт info, card,
+// телеметрию и меню, и событие может не влезть в очередь.
+//
+// Наблюдалось на живой плате ESP32-2424S012: касание зарядной микросхемы роняет
+// её по BROWNOUT, но в портал доезжало одно сообщение из десяти.
+
+const char* Link::resetReasonName(int reason) {
+    switch ((esp_reset_reason_t)reason) {
+        case ESP_RST_PANIC:    return "PANIC";     // исключение в коде
+        case ESP_RST_INT_WDT:  return "INT_WDT";   // зависание в прерывании
+        case ESP_RST_TASK_WDT: return "TASK_WDT";  // задача не отдала процессор
+        case ESP_RST_WDT:      return "WDT";
+        case ESP_RST_BROWNOUT: return "BROWNOUT";  // просадка питания
+        default:               return nullptr;     // штатная загрузка
+    }
+}
+
+void Link::noteResetReason() {
+    const esp_reset_reason_t r = esp_reset_reason();
+    const char* name = resetReasonName((int)r);
+
+    // Причина каждого старта — сразу в Serial, а не через HAL: логи HAL
+    // включаются только после подъёма Wi-Fi, то есть спустя секунды, а паника
+    // через USB CDC теряется целиком. Это единственный надёжный след.
+    Serial.printf("[BOOT] reset reason: %s (%d)\n", name ? name : "normal", (int)r);
+    Serial.flush();
+
+    Preferences prefs;
+    if (!prefs.begin("sys", false)) return;
+    abnPending_ = prefs.getUChar("abnCount", 0);
+    if (name) {
+        if (abnPending_ < 255) abnPending_++;
+        prefs.putUChar("abnCount", abnPending_);
+        prefs.putUChar("abnLast", (uint8_t)r);
+        abnLastReason_ = (int)r;
+        HAL_LOG_ERROR("BOOT", "abnormal reset: %s (не доложено: %u)",
+                      name, (unsigned)abnPending_);
+    } else if (abnPending_ > 0) {
+        // Этот сброс штатный, но с прошлого раза остались недоложенные.
+        abnLastReason_ = prefs.getUChar("abnLast", 0);
+    }
+    prefs.end();
+}
+
+void Link::reportAbnormalResets() {
+    if (abnPending_ == 0 || !isOnline()) return;
+
+    const char* name = resetReasonName(abnLastReason_);
+    StaticJsonDocument<192> ev;
+    ev["severity"] = "ERROR";
+    ev["source"]   = "CORE";
+    ev["event"]    = "CORE_ABNORMAL_RESET";
+    ev["message"]  = name ? name : "UNKNOWN";
+    ev["count"]    = abnPending_;      // сколько накопилось с прошлого доклада
+    ev["unitId"]   = "DEVICE";
+    if (!impl_->pub.publishEvent(ev)) return;   // повторим на следующем тике
+
+    HAL_LOG_ERROR("BOOT", "reported abnormal resets: %s x%u",
+                  name ? name : "UNKNOWN", (unsigned)abnPending_);
+    abnPending_ = 0;
+    Preferences prefs;
+    if (prefs.begin("sys", false)) {
+        prefs.remove("abnCount");
+        prefs.remove("abnLast");
+        prefs.end();
+    }
 }
 
 namespace {
@@ -539,6 +645,9 @@ void Link::loop() {
 #endif
 
     impl_->runtime.loop();
+    // Шина ошибок ESP-стороны: без этого вызова события в ней просто копятся.
+    error_process_all();
+    reportAbnormalResets();
     if (impl_->localStarted) impl_->local.loop();
     impl_->intManager.loop();
 
