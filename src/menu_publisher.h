@@ -57,51 +57,137 @@ namespace idryer {
 
 class MenuPublisher {
 public:
-    /// Pre-allocate heap-буфер под сериализованный JSON + JsonDocument.
-    /// Вызывать ОДИН РАЗ после s_link.begin() — гарантия что TLS-handshake
-    /// уже прошёл и contiguous heap максимально свободен.
-    /// @return true если оба malloc'а удались. Иначе false — продукт решает
-    ///         что делать (рестарт / retry / работа без публикации меню).
-    bool begin() {
-        if (textBuf_ && doc_) return true; // уже инициализирован
+    /// Ничего не выделяет: меню собирается и уходит потоком, буферы живут
+    /// только на время публикации. Метод оставлен ради совместимости с
+    /// продуктами, которые звали его в setup().
+    bool begin() { return true; }
 
-        if (!textBuf_) {
-            textBuf_ = (char*)malloc(MENU_SERIALIZED_MAX_SIZE);
-            if (!textBuf_) return false;
-        }
-        if (!doc_) {
-            // На ESP-IDF дефолт компилируется с -fno-exceptions, поэтому new
-            // возвращает nullptr при OOM (а не бросает bad_alloc).
-            doc_ = new DynamicJsonDocument(MENU_JSON_DOC_CAP);
-            if (!doc_) {
-                free(textBuf_);
-                textBuf_ = nullptr;
-                return false;
-            }
-        }
-        return true;
-    }
-
-    /// Собрать актуальный snapshot g_menu_meta + g_menu_cache и опубликовать
-    /// через publisher->publishConfigRaw(buf, len). Использует pre-allocated
-    /// ресурсы — никаких malloc/free в горячем пути.
+    /// Собрать актуальный snapshot g_menu_meta + g_menu_cache и опубликовать.
     ///
-    /// publisher — указатель на объект с методом
-    ///   publishConfigRaw(const char* data, size_t len)
-    /// (Шаблон, т.к. DevicePublisher живёт в Link и явная зависимость отсюда
-    /// нежелательна — избегаем циклов include).
+    /// Меню целиком (у DRYER это ~26 КБ) в память не помещается: на платах с
+    /// дисплеем свободной кучи единицы килобайт, а держать её заранее нельзя —
+    /// тогда не хватает сетевому стеку и не поднимается MQTT. Поэтому JSON
+    /// генерируется по одному пункту (каждый — крошечный документ на стеке,
+    /// формат остаётся байт в байт прежним) и уходит кусками, как только
+    /// накопится MENU_CHUNK_SIZE.
     ///
-    /// @return длина сериализованного JSON в байтах или 0 при ошибке (begin()
-    ///         не был вызван / overflow / serialize fail).
+    /// publisher — объект с методами publishConfigRaw(data, len) для короткого
+    /// меню и publishRawChunkTopic(...)/publishConfigRaw для чанков.
+    ///
+    /// @return длина сериализованного JSON или 0 при ошибке.
     template <typename PublisherT>
     size_t publishFull(PublisherT* publisher) {
-        if (!textBuf_ || !doc_ || !publisher) return 0;
+        if (!publisher) return 0;
 
-        doc_->clear();
+        // Первый проход — только считаем длину: она нужна в заголовке каждого
+        // куска (поле total), а портал по ней понимает, сколько ещё ждать.
+        CountingSink counter;
+        if (!generate(counter)) return 0;
+        const size_t total = counter.total;
+        if (total == 0) return 0;
 
-        // Та же логика что в menu_buildFullJson — копирована один-в-один,
-        // чтобы JSON-формат для backend не менялся.
-        (*doc_)["v"] = g_menu_cache.revision;
+        ChunkSinkT<PublisherT> sink(publisher, total);
+        if (!sink.ready()) {
+            HAL_LOG_ERROR("MENU", "no memory for chunk buffers");
+            return 0;
+        }
+        if (!generate(sink) || !sink.finish()) {
+            HAL_LOG_ERROR("MENU", "publish failed at chunk %u", (unsigned)sink.chunks());
+            return 0;
+        }
+        HAL_LOG_INFO("MENU", "config published: %u bytes in %u chunks",
+                     (unsigned)total, (unsigned)sink.chunks());
+        return total;
+    }
+
+    MenuPublisher() = default;
+    MenuPublisher(const MenuPublisher&) = delete;
+    MenuPublisher& operator=(const MenuPublisher&) = delete;
+
+private:
+    /// Сколько сырого JSON накапливаем перед отправкой куска. Меньше — больше
+    /// сообщений, но меньше пиковая память; 1500 байт с запасом влезают даже
+    /// когда свободной кучи всего несколько килобайт.
+    static constexpr size_t MENU_CHUNK_SIZE = 1500;
+
+    /// Приёмник, который только считает байты (первый проход).
+    struct CountingSink {
+        size_t total = 0;
+        bool put(const char* /*data*/, size_t len) { total += len; return true; }
+    };
+
+    /// Приёмник, который копит байты и публикует их кусками в формате
+    /// {tid, idx, total, last, d} — том же, что понимает портал.
+    template <typename PublisherT>
+    struct ChunkSinkT {
+        ChunkSinkT(PublisherT* pub, size_t total)
+            : pub_(pub), total_(total) {
+            static uint16_t s_tid = 0;
+            tid_ = ++s_tid;
+            raw_ = (char*)malloc(MENU_CHUNK_SIZE + 1);
+        }
+        ~ChunkSinkT() { free(raw_); }
+
+        bool ready() const { return raw_ != nullptr; }
+        uint16_t chunks() const { return idx_; }
+
+        bool put(const char* data, size_t len) {
+            size_t done = 0;
+            while (done < len) {
+                const size_t room = MENU_CHUNK_SIZE - fill_;
+                const size_t take = (len - done < room) ? (len - done) : room;
+                memcpy(raw_ + fill_, data + done, take);
+                fill_ += take;
+                done  += take;
+                sent_ += take;
+                if (fill_ == MENU_CHUNK_SIZE && !flush(sent_ >= total_)) return false;
+            }
+            return true;
+        }
+
+        bool finish() { return fill_ == 0 ? true : flush(true); }
+
+    private:
+        bool flush(bool last) {
+            raw_[fill_] = '\0';
+            // Конверт собираем ArduinoJson'ом — он же и экранирует кавычки
+            // внутри куска. Документ временный и маленький.
+            DynamicJsonDocument env(MENU_CHUNK_SIZE * 2 + 256);
+            env["tid"]   = tid_;
+            env["idx"]   = idx_;
+            env["total"] = total_;
+            env["last"]  = last;
+            env["d"]     = raw_;
+            if (env.overflowed()) return false;
+            const size_t need = measureJson(env) + 1;
+            char* out = (char*)malloc(need);
+            if (!out) return false;
+            const size_t written = serializeJson(env, out, need);
+            const bool ok = written > 0 && pub_->publishConfigRaw(out, written) != 0;
+            free(out);
+            if (!ok) return false;
+            idx_++;
+            fill_ = 0;
+            return true;
+        }
+
+        PublisherT* pub_;
+        size_t   total_;
+        char*    raw_  = nullptr;
+        size_t   fill_ = 0;
+        size_t   sent_ = 0;
+        uint16_t idx_  = 0;
+        uint16_t tid_  = 0;
+    };
+
+    /// Единственное место, где описан формат меню. Оба прохода (подсчёт и
+    /// публикация) идут через него, поэтому длина и содержимое не разъезжаются.
+    template <typename SinkT>
+    static bool generate(SinkT& sink) {
+        char head[48];
+        int n = snprintf(head, sizeof(head), "{\"v\":%u,\"menu\":[",
+                         (unsigned)g_menu_cache.revision);
+        if (n <= 0 || !sink.put(head, (size_t)n)) return false;
 
         if (MENU_META_COUNT >= 2) {
             uint16_t unitsCountId = MENU_META_COUNT - 2;
@@ -110,19 +196,19 @@ public:
                 g_menu_cache.units_count = unitsCountValue;
             }
             uint16_t langId = MENU_META_COUNT - 1;
-            uint8_t langValue = (uint8_t)g_menu_cache.getInt(langId, 0);
-            g_menu_cache.lang = langValue;
+            g_menu_cache.lang = (uint8_t)g_menu_cache.getInt(langId, 0);
         }
 
-        JsonArray menu = doc_->createNestedArray("menu");
-        uint8_t lang = g_menu_cache.getLang();
+        const uint8_t lang = g_menu_cache.getLang();
         uint8_t unitsCount = g_menu_cache.getUnitsCount();
         if (unitsCount == 0) unitsCount = 1;
 
         for (uint16_t id = 0; id < MENU_META_COUNT; id++) {
             const MenuMeta* meta = &g_menu_meta[id];
 
-            JsonObject item = menu.createNestedObject();
+            // Пункт целиком — на стеке. Формат тот же, что и раньше: ту же
+            // сериализацию делает та же библиотека, просто по одному объекту.
+            StaticJsonDocument<512> item;
             item["id"] = id;
 
             const char* typeStr = "sub";
@@ -135,69 +221,40 @@ public:
             item["t"] = typeStr;
             item["n"] = meta->title[lang] ? meta->title[lang] : "";
             item["p"] = meta->parent;
-
-            if (meta->unit[lang]) {
-                item["u"] = meta->unit[lang];
-            }
-            if (meta->role) {
-                item["r"] = meta->role;
-            }
+            if (meta->unit[lang]) item["u"] = meta->unit[lang];
+            if (meta->role)       item["r"] = meta->role;
 
             if (meta->type == META_VALUE || meta->type == META_TOGGLE) {
                 if (meta->type == META_VALUE) {
-                    item["min"] = meta->min_val;
-                    item["max"] = meta->max_val;
+                    item["min"]  = meta->min_val;
+                    item["max"]  = meta->max_val;
                     item["step"] = meta->step;
                 }
                 if (meta->scope == META_SCOPE_GLOBAL) {
-                    if (meta->type == META_TOGGLE) {
-                        item["val"] = g_menu_cache.getBool(id, 0);
-                    } else {
-                        item["val"] = g_menu_cache.getFloat(id, 0);
-                    }
+                    if (meta->type == META_TOGGLE) item["val"] = g_menu_cache.getBool(id, 0);
+                    else                           item["val"] = g_menu_cache.getFloat(id, 0);
                 } else {
                     JsonArray vals = item.createNestedArray("val");
                     for (uint8_t u = 0; u < unitsCount; u++) {
-                        if (meta->type == META_TOGGLE) {
-                            vals.add(g_menu_cache.getBool(id, u));
-                        } else {
-                            vals.add(g_menu_cache.getFloat(id, u));
-                        }
+                        if (meta->type == META_TOGGLE) vals.add(g_menu_cache.getBool(id, u));
+                        else                           vals.add(g_menu_cache.getFloat(id, u));
                     }
                 }
             }
+            if (item.overflowed()) {
+                HAL_LOG_ERROR("MENU", "item %u does not fit 512 bytes", (unsigned)id);
+                return false;
+            }
+
+            char buf[512];
+            const size_t len = serializeJson(item, buf, sizeof(buf));
+            if (len == 0) return false;
+            if (id != 0 && !sink.put(",", 1)) return false;
+            if (!sink.put(buf, len)) return false;
         }
 
-        if (doc_->overflowed()) {
-            return 0; // не публикуем усечённый JSON
-        }
-
-        size_t len = serializeJson(*doc_, textBuf_, MENU_SERIALIZED_MAX_SIZE);
-        if (len == 0) return 0;
-
-        publisher->publishConfigRaw(textBuf_, len);
-        return len;
+        return sink.put("]}", 2);
     }
-
-    ~MenuPublisher() {
-        if (textBuf_) {
-            free(textBuf_);
-            textBuf_ = nullptr;
-        }
-        if (doc_) {
-            delete doc_;
-            doc_ = nullptr;
-        }
-    }
-
-    // Запретить копирование — владение malloc/new строго единичное.
-    MenuPublisher() = default;
-    MenuPublisher(const MenuPublisher&) = delete;
-    MenuPublisher& operator=(const MenuPublisher&) = delete;
-
-private:
-    char* textBuf_ = nullptr;
-    DynamicJsonDocument* doc_ = nullptr;
 };
 
 } // namespace idryer
