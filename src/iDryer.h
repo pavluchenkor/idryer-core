@@ -317,6 +317,13 @@ private:
     void noteResetReason();      ///< читает причину сброса, копит счётчик в NVS
     void reportAbnormalResets(); ///< шлёт накопленное в портал, пока не дойдёт
 
+    void checkLowMemory();       ///< следит за крупнейшим свободным блоком
+
+    static constexpr uint32_t LOW_MEM_THRESHOLD = 8192;   ///< байт, порог тревоги
+    static constexpr uint32_t LOW_MEM_CHECK_MS  = 30000;  ///< как часто смотрим
+    bool     lowMemReported_   = false; ///< защёлка: сообщили и ждём возврата
+    uint32_t lowMemLastCheckMs_ = 0;
+
     uint8_t abnPending_    = 0;  ///< сбросов накоплено и не доложено
     int     abnLastReason_ = 0;  ///< esp_reset_reason_t последнего из них
 

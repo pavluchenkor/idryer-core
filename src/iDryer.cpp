@@ -470,7 +470,10 @@ bool Link::begin() {
         char eventKey[48];
         snprintf(eventKey, sizeof(eventKey), "%s_%s",
                  errsrc_name(ev->source), errcode_name(ev->code));
-        self->raiseEvent(kind, eventKey, ev->msg, ev->ctrl_id);
+        // CORE и LINK — про устройство целиком, а не про юнит: их ctrl_id
+        // всегда 0 и превратился бы в «U1», вешая ошибку связи на первый юнит.
+        const bool deviceWide = (ev->source == ERRSRC_CORE || ev->source == ERRSRC_LINK);
+        self->raiseEvent(kind, eventKey, ev->msg, deviceWide ? 0xFF : ev->ctrl_id);
     });
     s_selfForErrors = this;
 
@@ -523,6 +526,32 @@ static const char* resetReasonFullName(esp_reset_reason_t r) {
         case ESP_RST_WDT:      return "WDT";
         case ESP_RST_BROWNOUT: return "BROWNOUT";
         default:               return "UNKNOWN";
+    }
+}
+
+// Сторож памяти. Смотрим не общий свободный объём, а самый крупный непрерывный
+// блок: TLS-handshake, SUBSCRIBE и сборка JSON падают именно на нём, при вполне
+// приличном суммарном free. Порог 8 КБ выбран по замерам живой платы: ниже него
+// mbedtls уже не поднимался.
+//
+// Сообщаем один раз на вход в опасную зону, а не каждую проверку: иначе портал
+// зальёт одинаковыми событиями. Возврат к норме (двойной порог — гистерезис,
+// чтобы не дребезжало на границе) снимает защёлку.
+void Link::checkLowMemory() {
+    if (HAL_MILLIS() - lowMemLastCheckMs_ < LOW_MEM_CHECK_MS) return;
+    lowMemLastCheckMs_ = HAL_MILLIS();
+
+    const uint32_t largest =
+        (uint32_t)heap_caps_get_largest_free_block(MALLOC_CAP_DEFAULT);
+
+    if (!lowMemReported_ && largest < LOW_MEM_THRESHOLD) {
+        lowMemReported_ = true;
+        POST_ERROR(ERRSEV_WARNING, 0, ERRSRC_CORE, ERRC_LOW_MEMORY,
+                   "largest free block low", (int32_t)largest);
+        HAL_LOG_WARN("MEM", "low memory: largest free block %u", (unsigned)largest);
+    } else if (lowMemReported_ && largest > LOW_MEM_THRESHOLD * 2) {
+        lowMemReported_ = false;
+        HAL_LOG_INFO("MEM", "memory recovered: largest free block %u", (unsigned)largest);
     }
 }
 
@@ -667,6 +696,7 @@ void Link::loop() {
     // Шина ошибок ESP-стороны: без этого вызова события в ней просто копятся.
     error_process_all();
     reportAbnormalResets();
+    checkLowMemory();
     if (impl_->localStarted) impl_->local.loop();
     impl_->intManager.loop();
 
