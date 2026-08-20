@@ -48,6 +48,13 @@ bool DevicePublisher::publishConfig(JsonDocument& doc) {
     return mqtt_->publishConfig(doc);
 }
 
+uint16_t DevicePublisher::publishConfigChunk(const char* json, size_t len, bool first) {
+    // В локальный WS отдаём те же куски: клиент в LAN собирает их так же, как
+    // портал.
+    wsPublishRaw("config", json, len);
+    return mqtt_->publishConfigChunk(json, len, first);
+}
+
 uint16_t DevicePublisher::publishConfigRaw(const char* json, size_t len) {
     wsPublishRaw("config", json, len);
     return mqtt_->publishConfigRaw(json, len);

@@ -68,6 +68,9 @@ public:
     /** config topic — pre-serialized (e.g. large payload from RP2040). */
     uint16_t publishConfigRaw(const char* json, size_t len);
 
+    /** config topic — кусок большого меню, без retained. */
+    uint16_t publishConfigChunk(const char* json, size_t len, bool first);
+
     /** config/delta topic — partial config update. */
     bool publishConfigDelta(const char* json, size_t len);
 

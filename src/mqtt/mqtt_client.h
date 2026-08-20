@@ -191,6 +191,11 @@ public:
      */
     uint16_t publishConfigRaw(const char* json, size_t length);
 
+    /** Кусок конфига в формате {tid, idx, total, last, d}. В отличие от
+     *  publishConfigRaw публикуется БЕЗ retained (см. реализацию), а при
+     *  first=true заодно стирает устаревший retained-снимок на топике. */
+    uint16_t publishConfigChunk(const char* json, size_t length, bool first);
+
     /**
      * @brief Publishes a JSON string to @c idryer/{serial}/config/delta.
      *

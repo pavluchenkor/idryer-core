@@ -190,6 +190,30 @@ bool MqttClient::publishRfidWriteResult(JsonDocument& json) {
     return publishJson(IDRYER_TOPIC_RFID_WRITE_RESULT, json, /*qos=*/1, IDRYER_RETAINED_RFID_WRITE_RESULT);
 }
 
+uint16_t MqttClient::publishConfigChunk(const char* json, size_t length, bool first) {
+    if (!mqttClient_.connected() || !json || length == 0) return 0;
+    const char* topic = makeTopic(IDRYER_TOPIC_CONFIG);
+
+    // Первым делом стираем retained-снимок на топике: раньше там лежал полный
+    // конфиг, и новый подписчик получал бы устаревшее меню от прошлой версии
+    // прошивки. Пустая retained-публикация — штатный способ очистки.
+    if (first) {
+        mqttClient_.publish(topic, /*qos=*/0, /*retain=*/true,
+                            reinterpret_cast<const uint8_t*>(""), 0);
+    }
+
+    // Сами куски не retained: брокер хранит только последнее сообщение, то
+    // есть от ретейна куска толку нет — подписчик получил бы обрывок. Меню
+    // целиком устройство публикует заново при каждом выходе в онлайн, а
+    // портал складывает собранное в базу.
+    const uint16_t id = mqttClient_.publish(topic, /*qos=*/0, /*retain=*/false,
+                                            reinterpret_cast<const uint8_t*>(json), length);
+    // QoS 0 уходит из outbox в сеть только в loop() — прокачиваем сразу,
+    // иначе очередь растёт быстрее, чем освобождается.
+    mqttClient_.loop();
+    return id;
+}
+
 uint16_t MqttClient::publishConfigRaw(const char* json, size_t length) {
     if (!mqttClient_.connected() || !json || length == 0) return 0;
 
@@ -233,7 +257,12 @@ uint16_t MqttClient::publishConfigRaw(const char* json, size_t length) {
         size_t written = serializeJson(chunkDoc, chunkBuf, MQTT_CONFIG_CHUNK_SIZE + 100);
         free(dataBuf);
 
-        bool ok = mqttClient_.publish(topic, /*qos=*/0, IDRYER_RETAINED_CONFIG,
+        // Куски НЕ retained: брокер хранит на топике только последнее
+        // сообщение, поэтому от ретейна кусков толку нет — новый подписчик
+        // получил бы обрывок вместо меню. Целостность обеспечивает сам
+        // обмен: устройство публикует конфиг заново при каждом выходе в
+        // онлайн, а портал складывает собранное в базу.
+        bool ok = mqttClient_.publish(topic, /*qos=*/0, /*retain=*/false,
                                       reinterpret_cast<const uint8_t*>(chunkBuf), written) != 0;
         if (!ok) { HAL_LOG_ERROR("MQTT", "Failed to publish chunk %u", idx); free(chunkBuf); return 0; }
 

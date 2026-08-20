@@ -105,10 +105,15 @@ public:
     MenuPublisher& operator=(const MenuPublisher&) = delete;
 
 private:
-    /// Сколько сырого JSON накапливаем перед отправкой куска. Меньше — больше
-    /// сообщений, но меньше пиковая память; 1500 байт с запасом влезают даже
-    /// когда свободной кучи всего несколько килобайт.
-    static constexpr size_t MENU_CHUNK_SIZE = 1500;
+    /// Сколько сырого JSON накапливаем перед отправкой куска. Маленький кусок
+    /// намеренно: и он сам, и конверт вокруг него лежат на стеке, поэтому
+    /// публикация не зависит от того, насколько раздроблена куча. Раньше здесь
+    /// были malloc'и, и на фрагментированной куче отправка падала на середине
+    /// («publish failed at chunk 7»).
+    static constexpr size_t MENU_CHUNK_SIZE = 512;
+    /// Худший случай экранирования — каждый байт превращается в два, плюс
+    /// заголовок конверта.
+    static constexpr size_t MENU_ENV_CAP = MENU_CHUNK_SIZE * 2 + 96;
 
     /// Приёмник, который только считает байты (первый проход).
     struct CountingSink {
@@ -120,15 +125,12 @@ private:
     /// {tid, idx, total, last, d} — том же, что понимает портал.
     template <typename PublisherT>
     struct ChunkSinkT {
-        ChunkSinkT(PublisherT* pub, size_t total)
-            : pub_(pub), total_(total) {
+        ChunkSinkT(PublisherT* pub, size_t total) : pub_(pub), total_(total) {
             static uint16_t s_tid = 0;
             tid_ = ++s_tid;
-            raw_ = (char*)malloc(MENU_CHUNK_SIZE + 1);
         }
-        ~ChunkSinkT() { free(raw_); }
 
-        bool ready() const { return raw_ != nullptr; }
+        bool ready() const { return true; }   // ничего не выделяем
         uint16_t chunks() const { return idx_; }
 
         bool put(const char* data, size_t len) {
@@ -148,24 +150,38 @@ private:
         bool finish() { return fill_ == 0 ? true : flush(true); }
 
     private:
+        /// Конверт собираем вручную: ArduinoJson здесь требовал бы документ на
+        /// пару килобайт из кучи, а нам нужна отправка, не зависящая от неё.
         bool flush(bool last) {
-            raw_[fill_] = '\0';
-            // Конверт собираем ArduinoJson'ом — он же и экранирует кавычки
-            // внутри куска. Документ временный и маленький.
-            DynamicJsonDocument env(MENU_CHUNK_SIZE * 2 + 256);
-            env["tid"]   = tid_;
-            env["idx"]   = idx_;
-            env["total"] = total_;
-            env["last"]  = last;
-            env["d"]     = raw_;
-            if (env.overflowed()) return false;
-            const size_t need = measureJson(env) + 1;
-            char* out = (char*)malloc(need);
-            if (!out) return false;
-            const size_t written = serializeJson(env, out, need);
-            const bool ok = written > 0 && pub_->publishConfigRaw(out, written) != 0;
-            free(out);
-            if (!ok) return false;
+            char env[MENU_ENV_CAP];
+            int n = snprintf(env, sizeof(env),
+                             "{\"tid\":%u,\"idx\":%u,\"total\":%u,\"last\":%s,\"d\":\"",
+                             (unsigned)tid_, (unsigned)idx_, (unsigned)total_,
+                             last ? "true" : "false");
+            if (n <= 0) return false;
+            size_t pos = (size_t)n;
+
+            // Экранирование строки JSON: кавычка, обратный слэш и управляющие
+            // символы. Русские подписи — обычный UTF-8, идут как есть.
+            for (size_t i = 0; i < fill_; i++) {
+                const unsigned char c = (unsigned char)raw_[i];
+                if (pos + 8 >= sizeof(env)) return false;
+                if (c == '"' || c == '\\') {
+                    env[pos++] = '\\';
+                    env[pos++] = (char)c;
+                } else if (c < 0x20) {
+                    pos += (size_t)snprintf(env + pos, sizeof(env) - pos, "\\u%04x", c);
+                } else {
+                    env[pos++] = (char)c;
+                }
+            }
+            if (pos + 3 >= sizeof(env)) return false;
+            env[pos++] = '"';
+            env[pos++] = '}';
+            env[pos]   = '\0';
+
+            // Первый кусок заодно стирает устаревший retained-снимок меню.
+            if (pub_->publishConfigChunk(env, pos, idx_ == 0) == 0) return false;
             idx_++;
             fill_ = 0;
             return true;
@@ -173,7 +189,7 @@ private:
 
         PublisherT* pub_;
         size_t   total_;
-        char*    raw_  = nullptr;
+        char     raw_[MENU_CHUNK_SIZE];
         size_t   fill_ = 0;
         size_t   sent_ = 0;
         uint16_t idx_  = 0;
