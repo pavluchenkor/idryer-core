@@ -1,7 +1,7 @@
 Depois deste passo o seu dispositivo aparecerá na sua conta [portal.idryer.org](https://portal.idryer.org/) com estado Online. Todos os reinícios subsequentes são automáticos — nova vinculação não é necessária.
 
 
-O claim é um procedimento único em que o ESP32 se regista na nuvem idryer.org e se vincula à sua conta. O dispositivo gera um PIN de 7 dígitos válido por 10 minutos. Introduz o PIN no portal — vinculação completa.
+O claim é um procedimento único em que o ESP32 se regista na nuvem idryer.org e se vincula à sua conta. O dispositivo gera um PIN de 8 dígitos válido por 10 minutos. Introduz o PIN no portal — vinculação completa.
 
 Após o claim, um `deviceId` é guardado em NVS — o identificador único do dispositivo na nuvem. Nos reinícios subsequentes o ESP32 liga-se directamente a MQTT, sem repetir o fluxo de claim.
 
@@ -39,7 +39,7 @@ O dispositivo está à espera. O PIN é válido por 10 minutos.
 
 **4. Vá para [portal.idryer.org](https://portal.idryer.org/)** e navegue para **Adicionar dispositivo**.
 
-**5. Introduza o PIN** do Serial Monitor (7 dígitos, sem espaços).
+**5. Introduza o PIN** do Serial Monitor (8 dígitos, sem espaços).
 
 **6. Confirme a vinculação** no portal. O Serial Monitor mostrará então:
 

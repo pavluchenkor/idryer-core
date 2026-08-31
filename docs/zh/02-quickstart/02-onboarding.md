@@ -66,7 +66,7 @@ wifi MyHomeWiFi MySecretPass
 
 ### 4. 獲得 PIN 並在門戶中聲稱
 
-設備會自動佈建並註冊一個 7 位數 PIN。PIN 有效期為 10 分鐘。
+設備會自動佈建並註冊一個 8 位數 PIN。PIN 有效期為 10 分鐘。
 
 1. 打開 [portal.idryer.org](https://portal.idryer.org/)（或 staging）。
 2. 轉到**添加設備**。
@@ -131,7 +131,7 @@ Improv-WiFi 內置於所有構建中，不依賴 `IDRYER_DEV_REPL` 標誌。適�
 
 **設備已被聲稱到另一個帳戶。** 輸入 `wipe` — NVS 將被擦除，主機板將重啟並從頭開始登錄。
 
-**PIN 不被門戶接受。** 驗證您複製了所有 7 位數字且沒有空格，並且自 PIN 出現以來已經過了不到 10 分鐘。
+**PIN 不被門戶接受。** 驗證您複製了所有 8 位數字且沒有空格，並且自 PIN 出現以來已經過了不到 10 分鐘。
 
 **Improv-WiFi 在瀏覽器中看不到設備。** 確保您使用的是 Chrome 或 Edge，並且 ESP32 USB 驅動程序已安裝。
 

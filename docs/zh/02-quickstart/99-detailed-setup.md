@@ -123,7 +123,7 @@ pio device monitor -b 115200
 [CSM] state: WifiConnecting → Provisioning
 [CSM] state: Provisioning → AwaitingClaim
 > claim
-CLAIM_PIN:1234567:600
+CLAIM_PIN:12345678:600
 [claim] PIN=1234567, valid 600 s — 在入口網站中輸入
 [CSM] state: AwaitingClaim → Ready → Online
 > status

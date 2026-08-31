@@ -66,7 +66,7 @@ Credentials are written to NVS. The board immediately calls `WiFi.begin()`. The 
 
 ### 4. Get the PIN and claim in the portal
 
-The device automatically provisions itself and registers a 7-digit PIN. The PIN is valid for 10 minutes.
+The device automatically provisions itself and registers a 8-digit PIN. The PIN is valid for 10 minutes.
 
 1. Open [portal.idryer.org](https://portal.idryer.org/) (or staging).
 2. Go to **Add device**.
@@ -131,7 +131,7 @@ The page will ask for the network name and password, transmit them to the board 
 
 **Device already claimed to another account.** Enter `wipe` — NVS will be erased, the board will reboot and start onboarding from scratch.
 
-**PIN not accepted by the portal.** Verify you copied all 7 digits with no spaces and that fewer than 10 minutes have passed since the PIN appeared.
+**PIN not accepted by the portal.** Verify you copied all 8 digits with no spaces and that fewer than 10 minutes have passed since the PIN appeared.
 
 **Improv-WiFi does not see the device in the browser.** Make sure you are using Chrome or Edge and that the ESP32 USB driver is installed.
 

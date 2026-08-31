@@ -116,7 +116,7 @@ Stránka vás požádá o název sítě a heslo, pošle je do desky přes Serial
 
 **Zařízení je již připojeno k jinému účtu.** Zadejte `wipe` — NVS bude vymazáno, deska se restartuje a onboarding začne od začátku.
 
-**PIN není portálem přijat.** Ověřte, že jste zkopírovali všech 7 číslic bez mezer a že uplynulo méně než 10 minut od zobrazení PIN.
+**PIN není portálem přijat.** Ověřte, že jste zkopírovali všech 8 číslic bez mezer a že uplynulo méně než 10 minut od zobrazení PIN.
 
 **Improv-WiFi nevidí zařízení v prohlížeči.** Ujistěte se, že používáte Chrome nebo Edge a že je nainstalován ovladač USB pro ESP32.
 

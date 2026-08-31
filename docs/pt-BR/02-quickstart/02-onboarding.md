@@ -58,7 +58,7 @@ As credenciais são escritas em NVS. A placa chama imediatamente `WiFi.begin()`.
 ```
 
 
-O dispositivo provisiona-se automaticamente e registra um PIN de 7 dígitos. O PIN é válido por 10 minutos.
+O dispositivo provisiona-se automaticamente e registra um PIN de 8 dígitos. O PIN é válido por 10 minutos.
 
 1. Abra [portal.idryer.org](https://portal.idryer.org/) (ou staging).
 2. Vá para **Adicionar dispositivo**.
@@ -116,7 +116,7 @@ A página pedirá o nome da rede e a senha, transmiti-la-á à placa via Serial-
 
 **Dispositivo já vinculado a outra conta.** Insira `wipe` — NVS será apagado, a placa reiniciará e o onboarding começará do zero.
 
-**PIN não aceito pelo portal.** Verifique se você copiou todos os 7 dígitos sem espaços e se menos de 10 minutos passaram desde o PIN aparecer.
+**PIN não aceito pelo portal.** Verifique se você copiou todos os 8 dígitos sem espaços e se menos de 10 minutos passaram desde o PIN aparecer.
 
 **Improv-WiFi não vê o dispositivo no navegador.** Certifique-se de que você está usando Chrome ou Edge e de que o driver USB do ESP32 está instalado.
 

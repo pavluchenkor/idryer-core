@@ -4,7 +4,7 @@ Nach diesem Schritt wird Ihr Gerät in Ihrem Konto auf [portal.idryer.org](https
 
 ## Was ist Claiming
 
-Claiming ist ein einmaliges Verfahren, bei dem sich der ESP32 bei der idryer.org Cloud registriert und an Ihr Konto bindet. Das Gerät generiert eine 7-stellige PIN mit einer Gültigkeit von 10 Minuten. Sie geben die PIN im Portal ein — die Bindung ist fertig.
+Claiming ist ein einmaliges Verfahren, bei dem sich der ESP32 bei der idryer.org Cloud registriert und an Ihr Konto bindet. Das Gerät generiert eine 8-stellige PIN mit einer Gültigkeit von 10 Minuten. Sie geben die PIN im Portal ein — die Bindung ist fertig.
 
 Nach dem Claim wird eine `deviceId` im NVS gespeichert — die eindeutige Kennung des Geräts in der Cloud. Bei nachfolgenden Neustarts verbindet sich der ESP32 direkt mit MQTT, ohne den Claim-Fluss zu wiederholen.
 

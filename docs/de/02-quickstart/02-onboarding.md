@@ -66,7 +66,7 @@ Anmeldedaten werden im NVS geschrieben. Das Board ruft sofort `WiFi.begin()` auf
 
 ### 4. Holen Sie sich die PIN und beanspruchen Sie das Portal
 
-Das Gerät stellt sich automatisch selbst bereit und registriert eine 7-stellige PIN. Die PIN ist 10 Minuten lang gültig.
+Das Gerät stellt sich automatisch selbst bereit und registriert eine 8-stellige PIN. Die PIN ist 10 Minuten lang gültig.
 
 1. Öffnen Sie [portal.idryer.org](https://portal.idryer.org/) (oder Staging).
 2. Gehen Sie zu **Gerät hinzufügen**.

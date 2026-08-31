@@ -123,7 +123,7 @@ In the monitor:
 [CSM] state: WifiConnecting → Provisioning
 [CSM] state: Provisioning → AwaitingClaim
 > claim
-CLAIM_PIN:1234567:600
+CLAIM_PIN:12345678:600
 [claim] PIN=1234567, valid 600 s — enter in portal
 [CSM] state: AwaitingClaim → Ready → Online
 > status

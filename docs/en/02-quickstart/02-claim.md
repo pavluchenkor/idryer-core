@@ -4,7 +4,7 @@ After this step your device will appear in your [portal.idryer.org](https://port
 
 ## What is claiming
 
-Claiming is a one-time procedure in which the ESP32 registers with the idryer.org cloud and binds to your account. The device generates a 7-digit PIN valid for 10 minutes. You enter the PIN in the portal — binding is complete.
+Claiming is a one-time procedure in which the ESP32 registers with the idryer.org cloud and binds to your account. The device generates a 8-digit PIN valid for 10 minutes. You enter the PIN in the portal — binding is complete.
 
 After claiming, a `deviceId` is saved in NVS — the device's unique identifier in the cloud. On subsequent reboots the ESP32 connects to MQTT directly, without repeating the claim flow.
 
@@ -44,7 +44,7 @@ The device is waiting. The PIN is valid for 10 minutes.
 
 **4. Go to [portal.idryer.org](https://portal.idryer.org/)** and navigate to **Add device**.
 
-**5. Enter the PIN** from the Serial Monitor (7 digits, no spaces).
+**5. Enter the PIN** from the Serial Monitor (8 digits, no spaces).
 
 **6. Confirm the binding** in the portal. The Serial Monitor will then show:
 

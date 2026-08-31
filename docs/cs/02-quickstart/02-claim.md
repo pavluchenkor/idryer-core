@@ -39,7 +39,7 @@ Zařízení čeká. PIN je platný 10 minut.
 
 **4. Přejděte na [portal.idryer.org](https://portal.idryer.org/)** a otevřete **Přidat zařízení**.
 
-**5. Zadejte PIN** ze Serial Monitoru (7 číslic, bez mezer).
+**5. Zadejte PIN** ze Serial Monitoru (8 číslic, bez mezer).
 
 **6. Potvrďte připojení** na portálu. Serial Monitor pak zobrazí:
 
