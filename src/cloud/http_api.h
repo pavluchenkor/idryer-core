@@ -34,9 +34,12 @@ struct RegisterResult {
 struct ClaimCheckResult {
     bool success;
     bool claimed;
+    /// binding-v2: false = токен порталу неизвестен → идти в provision.
+    /// Старый портал поля не шлёт — default true («жди дальше»), совместимо.
+    bool known;
     char deviceId[IDRYER_MAX_DEVICE_ID_LEN];
 
-    ClaimCheckResult() : success(false), claimed(false) { deviceId[0] = '\0'; }
+    ClaimCheckResult() : success(false), claimed(false), known(true) { deviceId[0] = '\0'; }
 };
 
 class HttpApi {

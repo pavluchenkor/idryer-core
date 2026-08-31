@@ -129,6 +129,10 @@ public:
     /// 5 = MQTT_NOT_AUTHORIZED (в т.ч. ACL-бан), 7 = TCP_DISCONNECTED.
     uint8_t lastDisconnectReason() const { return lastDisconnectReason_; }
 
+    /// binding-v2: сброс кода разрыва после обработки (иначе старый отказ
+    /// авторизации продолжал бы накручивать streak после перевыпуска токена).
+    void clearLastDisconnectReason() { lastDisconnectReason_ = 0; }
+
     /**
      * @brief Publishes a pre-serialized JSON string to @c idryer/{serial}/info (retained, QoS 1).
      * @return @c true on success.

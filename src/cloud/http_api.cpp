@@ -119,6 +119,8 @@ ClaimCheckResult HttpApi::checkClaim(const char* token) {
 
     result.success = true;
     if (response.containsKey("claimed")) result.claimed = response["claimed"].as<bool>();
+    // binding-v2: known:false = «токен не подходит» (отличие от «жди дальше»).
+    if (response.containsKey("known")) result.known = response["known"].as<bool>();
     if (result.claimed && response.containsKey("deviceId")) {
         const char* d = response["deviceId"].as<const char*>();
         if (d) { strncpy(result.deviceId, d, sizeof(result.deviceId)-1); result.deviceId[sizeof(result.deviceId)-1] = '\0'; }

@@ -213,6 +213,9 @@ private:
     // Текущий интервал MQTT-ретрая: base × 2 на каждую неудачу, потолок
     // mqttRetryMaxMs; сброс к base при успешном подключении.
     uint32_t mqttRetryCurrentMs_   = 0;
+    /// binding-v2: подряд идущие отказы авторизации MQTT (reason 4/5);
+    /// ≥3 → refreshToken() → AwaitingClaim. Сетевые причины сбрасывают.
+    uint8_t  authRejectStreak_     = 0;
 
     bool awaitingClaim_      = false;
     bool mqttInitialized_    = false;
