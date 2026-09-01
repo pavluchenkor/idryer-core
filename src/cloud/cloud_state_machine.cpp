@@ -501,6 +501,14 @@ void CloudStateMachine::setMcuHardwareVersion(const char* hwVersion) {
     mcuHardwareVersion_[sizeof(mcuHardwareVersion_) - 1] = '\0';
 }
 
+void CloudStateMachine::setMcuWorkTimeCounter(uint32_t seconds) {
+    mcuWorkTimeCounter_ = seconds;
+}
+
+uint32_t CloudStateMachine::getMcuWorkTimeCounter() const {
+    return mcuWorkTimeCounter_;
+}
+
 const char* CloudStateMachine::getMcuHardwareVersion() const {
     return (mcuHardwareVersion_[0] != '\0') ? mcuHardwareVersion_ : nullptr;
 }

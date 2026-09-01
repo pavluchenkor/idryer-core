@@ -236,6 +236,11 @@ public:
     /// Included in info JSON as mcuHardwareVersion.
     void setMcuHardwareVersion(const char* hwVersion);
 
+    /// Pass the RP2040 work-time counter (seconds) from UART Hello. For
+    /// two-chip devices this is what goes into info.workTimeCounter — the
+    /// DEVICE's work time, not the ESP module's uptime.
+    void setMcuWorkTimeCounter(uint32_t seconds);
+
     /// Returns the mcuSerial received from RP2040 Hello, or nullptr if not set.
     const char* mcuSerial() const;
 

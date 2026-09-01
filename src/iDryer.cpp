@@ -84,7 +84,13 @@ public:
         StaticJsonDocument<1024> doc;
         doc["hardwareVersion"] = cfg_.hardwareVersion ? cfg_.hardwareVersion : "";
         doc["firmwareVersion"] = cfg_.firmwareVersion ? cfg_.firmwareVersion : "";
-        doc["workTimeCounter"] = idryer::WorkTimeTracker::instance().total();
+        // workTimeCounter = наработка УСТРОЙСТВА. Для двухчипа это счётчик
+        // RP2040 (из UART Hello) — он живёт с сушилкой и переживает замену
+        // ESP-модуля. Для одночипа платы нет — берём ESP WorkTimeTracker.
+        const uint32_t mcuWtc = cloud_ ? cloud_->getMcuWorkTimeCounter() : 0;
+        doc["workTimeCounter"] = (mcuWtc > 0)
+            ? mcuWtc
+            : idryer::WorkTimeTracker::instance().total();
         doc["unitsCount"]      = cfg_.unitsCount;
         // For two-chip devices, use the mcuSerial from CloudStateMachine (set via
         // UART Hello). For one-ID devices (no cloud_ or no mcuSerial set),
@@ -1273,6 +1279,10 @@ void Link::setMcuFirmwareVersion(uint32_t fwVersion) {
 
 void Link::setMcuHardwareVersion(const char* hwVersion) {
     impl_->cloud.setMcuHardwareVersion(hwVersion);
+}
+
+void Link::setMcuWorkTimeCounter(uint32_t seconds) {
+    impl_->cloud.setMcuWorkTimeCounter(seconds);
 }
 
 const char* Link::mcuSerial() const {

@@ -141,6 +141,12 @@ public:
     /// Returns the RP2040 hardware id, or nullptr if not set.
     const char* getMcuHardwareVersion() const;
 
+    /// Stores the RP2040 work-time counter (seconds) from UART Hello.
+    void setMcuWorkTimeCounter(uint32_t seconds);
+
+    /// Returns the RP2040 work-time counter (seconds), 0 if not received.
+    uint32_t getMcuWorkTimeCounter() const;
+
     /// Returns the active MQTT key (linkSerial before bind, mcuSerial after).
     const char* getMqttKey() const;
 
@@ -226,6 +232,10 @@ private:
     char mcuSerial_[IDRYER_MAX_SERIAL_NUMBER_LEN];
     char mcuFirmwareVersion_[12]; // "255.255.255\0"
     char mcuHardwareVersion_[16]; // Hello.hardwareVersion (char[16])
+    // Наработка контроллера RP2040 (сек), из UART Hello. Для двухчипа именно
+    // она уходит в info.workTimeCounter — это наработка УСТРОЙСТВА, а не ESP.
+    // 0 = не получена (одночип или до первого Hello).
+    uint32_t mcuWorkTimeCounter_ = 0;
     char mqttKey_[IDRYER_MAX_SERIAL_NUMBER_LEN];
 
     char     pendingPin_[IDRYER_MAX_PIN_LEN];
