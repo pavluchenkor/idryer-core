@@ -18,6 +18,57 @@ HttpApi::HttpApi(IHttpClient* http, const char* baseUrl) : http_(http) {
     }
 }
 
+ActivateResult HttpApi::activate(const char* pairingToken, const char* serialNumber, const char* mcuSerial) {
+    ActivateResult result;
+    if (!http_ || !pairingToken || pairingToken[0] == '\0' || !serialNumber || serialNumber[0] == '\0') {
+        HAL_LOG_ERROR("HTTP", "activate: invalid params");
+        return result;
+    }
+
+    char url[IDRYER_MAX_URL_LEN];
+    buildUrl(url, sizeof(url), "/devices/activate");
+
+    DynamicJsonDocument body(256);
+    body["pairingToken"] = pairingToken;
+    body["serialNumber"] = serialNumber;
+    if (mcuSerial && mcuSerial[0] != '\0') body["mcuSerial"] = mcuSerial;
+    char payload[512];
+    serializeJson(body, payload, sizeof(payload));
+
+    HAL_LOG_INFO("HTTP", "POST %s", url);
+
+    DynamicJsonDocument response(768);
+    bool ok = http_->postJson(url, payload, response);
+
+    // Успех — если пришёл постоянный секрет.
+    if (ok && response.containsKey("deviceToken")) {
+        const char* t = response["deviceToken"].as<const char*>();
+        if (t) { strncpy(result.deviceToken, t, sizeof(result.deviceToken)-1); result.deviceToken[sizeof(result.deviceToken)-1] = '\0'; }
+        if (response.containsKey("deviceId")) {
+            const char* d = response["deviceId"].as<const char*>();
+            if (d) { strncpy(result.deviceId, d, sizeof(result.deviceId)-1); result.deviceId[sizeof(result.deviceId)-1] = '\0'; }
+        }
+        result.success = (result.deviceToken[0] != '\0');
+        HAL_LOG_INFO("HTTP", "activate OK: deviceId=%s", result.deviceId);
+        return result;
+    }
+
+    // Ошибка: распознаём конфликт железа (409 DEVICE_CONFLICT) по errorCode.
+    // Остальное (невалидный/истёкший токен) — просто неуспех, устройство ретраит.
+    if (response.containsKey("errorCode")) {
+        const char* ec = response["errorCode"].as<const char*>();
+        if (ec && strcmp(ec, "DEVICE_CONFLICT") == 0) {
+            result.conflict = true;
+            HAL_LOG_INFO("HTTP", "activate CONFLICT: hardware bound to another account");
+            return result;
+        }
+        HAL_LOG_INFO("HTTP", "activate rejected: %s", ec ? ec : "?");
+    } else {
+        HAL_LOG_ERROR("HTTP", "activate failed");
+    }
+    return result;
+}
+
 ProvisionResult HttpApi::provision(const char* serialNumber) {
     ProvisionResult result;
     if (!http_ || !serialNumber || serialNumber[0] == '\0') {

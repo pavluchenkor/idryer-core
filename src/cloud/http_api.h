@@ -42,6 +42,18 @@ struct ClaimCheckResult {
     ClaimCheckResult() : success(false), claimed(false), known(true) { deviceId[0] = '\0'; }
 };
 
+/// binding-v3: результат активации токеном привязки.
+/// success → deviceToken заполнен (постоянный секрет). conflict → железо
+/// привязано к другому аккаунту (портал вернул DEVICE_CONFLICT).
+struct ActivateResult {
+    bool success;
+    bool conflict;
+    char deviceToken[IDRYER_MAX_TOKEN_LEN];
+    char deviceId[IDRYER_MAX_DEVICE_ID_LEN];
+
+    ActivateResult() : success(false), conflict(false) { deviceToken[0] = '\0'; deviceId[0] = '\0'; }
+};
+
 class HttpApi {
 public:
     HttpApi(IHttpClient* http, const char* baseUrl);
@@ -49,6 +61,11 @@ public:
     ProvisionResult  provision(const char* serialNumber);
     RegisterResult   registerDevice(const char* token, const char* serialNumber = nullptr);
     ClaimCheckResult checkClaim(const char* token);
+
+    /// binding-v3: обменять токен привязки на постоянный секрет устройства.
+    /// Устройство получает токен привязки локально (флешер/приложение) и
+    /// вызывает activate; при успехе сохраняет deviceToken в NVS.
+    ActivateResult   activate(const char* pairingToken, const char* serialNumber, const char* mcuSerial = nullptr);
 
 private:
     IHttpClient* http_;
