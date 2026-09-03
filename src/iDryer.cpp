@@ -389,6 +389,10 @@ bool Link::begin() {
         self->impl_->credentials.load(id);
         self->impl_->local.updateToken(id.token);
     }, this);
+    // binding-v3: приложение подало токен привязки по локальному WS → в cloud.
+    impl_->local.setPairingTokenCallback([](void* ctx, const char* token) {
+        static_cast<Link*>(ctx)->impl_->cloud.setPairingToken(token);
+    }, this);
 
     // Integrations.
     impl_->intStore.begin();

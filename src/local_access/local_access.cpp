@@ -212,6 +212,26 @@ void LocalAccess::handleMessage(uint8_t num, const char* json, size_t length)
         return;
     }
 
+    // ── binding-v3: приём токена привязки (до привязки, БЕЗ auth) ──────────────
+    // Приложение по локальному WS подаёт pairing-token свежему устройству
+    // (постоянного секрета ещё нет). Это единственная операция без auth и
+    // строго read-only: только принять токен. Уже привязанное устройство
+    // (deviceToken есть) этот путь отклоняет — «на лету» не перепривязать.
+    if (strcmp(type, "pair") == 0) {
+        const char* ptoken = doc["token"] | "";
+        StaticJsonDocument<64> resp;
+        if (deviceToken_[0] == '\0' && ptoken[0] != '\0' && pairingTokenCb_) {
+            pairingTokenCb_(ptoken);
+            resp["type"] = "pair_ok";
+            HAL_LOG_INFO("WS", "binding-v3: pairing token received via WS (#%d)", num);
+        } else {
+            resp["type"]   = "pair_fail";
+            resp["reason"] = (deviceToken_[0] != '\0') ? "already_bound" : "no_token";
+        }
+        sendDoc(nullptr, resp);
+        return;
+    }
+
     // ── Require auth for all other messages ───────────────────────────────────
     if (!clientAuthorized_) {
         StaticJsonDocument<64> resp;

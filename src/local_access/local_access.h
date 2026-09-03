@@ -51,6 +51,8 @@ public:
 
     /** Called when client presents an invalid token. Product should reload token. */
     using TokenRefreshCallback = Callback<void()>;
+    /// binding-v3: приложение подало токен привязки по локальному WS (до привязки).
+    using PairingTokenCallback = Callback<void(const char*)>;
 
     // ── Lifecycle ─────────────────────────────────────────────────────────────
 
@@ -105,6 +107,7 @@ public:
 
     /** Register the token-refresh callback. Called on invalid_token. */
     void setTokenRefreshCallback(TokenRefreshCallback::FnPtr fn, void* ctx = nullptr) { tokenRefreshCb_.set(fn, ctx); }
+    void setPairingTokenCallback(PairingTokenCallback::FnPtr fn, void* ctx = nullptr) { pairingTokenCb_.set(fn, ctx); }
 
     /** Update the device token (e.g. after portal auto-refresh). */
     void updateToken(const char* newToken);
@@ -129,6 +132,7 @@ private:
     void sendFragment(const char* type, const char* json, size_t len);
 
     CommandSink          commandSink_;
+    PairingTokenCallback pairingTokenCb_;
     TokenRefreshCallback tokenRefreshCb_;
 };
 
