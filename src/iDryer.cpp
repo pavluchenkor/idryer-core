@@ -643,7 +643,7 @@ void Link::loop() {
 
     // После WiFi: слушаем flasher-portal команды по Serial.
     {
-        static char   s_serial_buf[64];
+        static char   s_serial_buf[128]; // binding-v3: вмещает PAIR_TOKEN:<токен>
         static uint8_t s_serial_len = 0;
         while (Serial.available() > 0) {
             char c = (char)Serial.read();
@@ -685,6 +685,19 @@ void Link::loop() {
                             default:
                                 Serial.println("CLAIM_STARTED:ERROR:REGISTER_FAILED");
                                 break;
+                        }
+                        Serial.flush();
+                    }
+                    // binding-v3: подать токен привязки локально (по serial от
+                    // флешера/приложения). Устройство активируется им на
+                    // следующем витке cloud-машины (activate → секрет → Ready).
+                    else if (strncmp(cmd, "PAIR_TOKEN:", 11) == 0) {
+                        const char* tok = cmd + 11;
+                        if (tok[0] != '\0') {
+                            impl_->cloud.setPairingToken(tok);
+                            Serial.println("PAIR_TOKEN:OK");
+                        } else {
+                            Serial.println("PAIR_TOKEN:ERROR");
                         }
                         Serial.flush();
                     }
