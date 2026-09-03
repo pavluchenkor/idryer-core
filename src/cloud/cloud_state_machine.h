@@ -152,6 +152,12 @@ public:
 
     void setWaitForMcuSerial(bool wait) { config_.waitForMcuSerial = wait; }
 
+    /// binding-v3: подать устройству токен привязки, полученный локально
+    /// (флешер по serial / приложение по WS). Устройство активируется им на
+    /// следующем витке (activate → постоянный секрет → Ready). Пока секрета
+    /// нет, это новый путь привязки вместо provision+PIN.
+    void setPairingToken(const char* token);
+
     /// @brief Forces a token refresh (typically not needed in normal flow).
     bool refreshToken();
 
@@ -196,6 +202,7 @@ private:
     void handleWifiConnecting();
     void handleWaitingForMcuSerial();
     void handleProvisioning();
+    void tryActivate(); ///< binding-v3: обменять токен привязки на секрет
     void handleAwaitingClaim();
     void handleReady();
     void handleMqttConnecting();
@@ -241,6 +248,9 @@ private:
     char     pendingPin_[IDRYER_MAX_PIN_LEN];
     uint32_t pinCreatedAtMs_  = 0;
     uint32_t pinTotalSeconds_ = 0;
+
+    // binding-v3: токен привязки, поданный локально; потребляется в tryActivate().
+    char     pendingPairingToken_[IDRYER_MAX_TOKEN_LEN] = {0};
 
     CloudStateChangeCallback stateCallback_        = nullptr;
     void*                    stateCallbackCtx_      = nullptr;

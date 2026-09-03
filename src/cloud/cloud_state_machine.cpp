@@ -102,8 +102,52 @@ void CloudStateMachine::handleWaitingForMcuSerial() {
     }
 }
 
+void CloudStateMachine::setPairingToken(const char* token) {
+    if (!token || token[0] == '\0') return;
+    strncpy(pendingPairingToken_, token, sizeof(pendingPairingToken_) - 1);
+    pendingPairingToken_[sizeof(pendingPairingToken_) - 1] = '\0';
+    lastProvisionAttempt_ = HAL_MILLIS() - config_.provisionRetryMs; // активировать сразу
+    HAL_LOG_INFO("CLOUD", "binding-v3: pairing token received (%d chars)", (int)strlen(pendingPairingToken_));
+}
+
+void CloudStateMachine::tryActivate() {
+    if (pendingPairingToken_[0] == '\0') return;
+
+    const uint32_t now = HAL_MILLIS();
+    if (now - lastProvisionAttempt_ < config_.provisionRetryMs) return;
+    lastProvisionAttempt_ = now;
+
+    const char* mcu = (mcuSerial_[0] != '\0') ? mcuSerial_ : nullptr;
+    HAL_LOG_INFO("CLOUD", "binding-v3: activating with pairing token (serial=%s mcu=%s)",
+                 identity_.serialNumber, mcu ? mcu : "-");
+    ActivateResult r = api_->activate(pendingPairingToken_, identity_.serialNumber, mcu);
+
+    if (r.success && r.deviceToken[0] != '\0') {
+        identity_.setToken(r.deviceToken);
+        if (r.deviceId[0] != '\0') identity_.setDeviceId(r.deviceId);
+        store_->save(identity_);
+        pendingPairingToken_[0] = '\0'; // потреблён
+        HAL_LOG_INFO("CLOUD", "binding-v3: activated, deviceId=%s -> Ready", identity_.deviceId);
+        setState(CloudState::Ready);
+        return;
+    }
+    if (r.conflict) {
+        HAL_LOG_WARN("CLOUD", "binding-v3: CONFLICT — hardware bound to another account (prev owner must unbind)");
+        pendingPairingToken_[0] = '\0'; // этот токен бесполезен, ждём новый
+        return;
+    }
+    HAL_LOG_WARN("CLOUD", "binding-v3: activate failed, will retry");
+}
+
 void CloudStateMachine::handleProvisioning() {
     if (!wifi_->isConnected()) { setState(CloudState::WifiConnecting); return; }
+
+    // binding-v3: если подан токен привязки и постоянного секрета ещё нет —
+    // активируемся им (новый путь), минуя provision-по-MAC ниже.
+    if (!identity_.hasToken() && pendingPairingToken_[0] != '\0') {
+        tryActivate();
+        return;
+    }
 
     if (identity_.hasToken()) {
         // binding-v2: токен есть → верификация через check-claim, а не
