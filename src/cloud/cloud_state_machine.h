@@ -125,6 +125,10 @@ public:
      */
     bool handleBindAck(const char* mqttTopicKey, const char* mcuSerial);
 
+    /// binding-v3: обработать команду REVOKE (портал отвязал устройство).
+    /// Стирает секрет/deviceId из NVS и возвращает в ожидание токена привязки.
+    void handleRevoke();
+
     /// Returns the mcuSerial received from RP2040 Hello, or nullptr if not set.
     const char* getMcuSerial() const;
 

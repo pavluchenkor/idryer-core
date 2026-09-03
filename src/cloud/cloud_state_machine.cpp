@@ -139,62 +139,43 @@ void CloudStateMachine::tryActivate() {
     HAL_LOG_WARN("CLOUD", "binding-v3: activate failed, will retry");
 }
 
+void CloudStateMachine::handleRevoke() {
+    HAL_LOG_WARN("CLOUD", "binding-v3: REVOKE received — wiping secret, back to pairing (SETUP)");
+    identity_.token[0]        = '\0';
+    identity_.deviceId[0]     = '\0';
+    identity_.boundMqttKey[0] = '\0';
+    store_->save(identity_);
+    pendingPairingToken_[0] = '\0';
+    unclaimedNotified_ = false;
+    // Вернуться к ожиданию токена привязки. handleProvisioning (v3) увидит
+    // отсутствие секрета и будет ждать локальной подачи PAIR_TOKEN.
+    setState(CloudState::Provisioning);
+}
+
+// binding-v3: чистый путь рождения. Секрет и deviceId появляются ТОЛЬКО через
+// активацию токеном привязки (tryActivate). provision-по-MAC и PIN убраны:
+// пока секрета нет и токен не подан — устройство просто ЖДЁТ (SETUP).
 void CloudStateMachine::handleProvisioning() {
     if (!wifi_->isConnected()) { setState(CloudState::WifiConnecting); return; }
 
-    // binding-v3: если подан токен привязки и постоянного секрета ещё нет —
-    // активируемся им (новый путь), минуя provision-по-MAC ниже.
-    if (!identity_.hasToken() && pendingPairingToken_[0] != '\0') {
+    // Уже активировано (секрет + deviceId в NVS) → в MQTT.
+    if (identity_.hasToken() && identity_.hasDeviceId()) {
+        setState(CloudState::Ready);
+        return;
+    }
+
+    // Подан токен привязки → активируемся им.
+    if (pendingPairingToken_[0] != '\0') {
         tryActivate();
         return;
     }
 
-    if (identity_.hasToken()) {
-        // binding-v2: токен есть → верификация через check-claim, а не
-        // зависание здесь и не прыжок в Ready.
-        if (!identity_.hasDeviceId() && !unclaimedNotified_) {
-            unclaimedNotified_ = true;
-            HAL_LOG_WARN("CLOUD", "Device NOT claimed (token exists). Polling check-claim.");
-            if (unclaimedCallback_) unclaimedCallback_(unclaimedCtx_);
-        }
-        setState(CloudState::AwaitingClaim);
-        return;
-    }
-
-    const uint32_t now = HAL_MILLIS();
-    if (now - lastProvisionAttempt_ < config_.provisionRetryMs) return;
-    lastProvisionAttempt_ = now;
-
-    HAL_LOG_INFO("CLOUD", "Provisioning device...");
-    ProvisionResult result = api_->provision(identity_.serialNumber);
-
-    if (!result.success) { HAL_LOG_WARN("CLOUD", "Provision failed"); return; }
-
-    if (result.isClaimed && result.token[0] == '\0') {
-        HAL_LOG_WARN("CLOUD", "Serial claimed but token withheld. Delete device in app and re-claim.");
-        if (unclaimedCallback_) unclaimedCallback_(unclaimedCtx_);
-        return;
-    }
-
-    // binding-v2, защита от пустого токена: 2xx без deviceToken (любая
-    // недоговорка портала/прокси) не должен затирать рабочий секрет в NVS.
-    if (result.token[0] == '\0') {
-        HAL_LOG_WARN("CLOUD", "Provision returned no token — keeping current NVS");
-        return;
-    }
-
-    identity_.setToken(result.token);
-    if (result.isClaimed && result.deviceId[0] != '\0') identity_.setDeviceId(result.deviceId);
-    store_->save(identity_);
-
-    HAL_LOG_INFO("CLOUD", "Provision OK: isNew=%d isClaimed=%d", result.isNew, result.isClaimed);
-
-    // binding-v2: новый токен → сначала check-claim, только потом MQTT.
-    if (!identity_.hasDeviceId()) {
-        HAL_LOG_WARN("CLOUD", "Device NOT claimed. Polling check-claim, waiting for PIN entry.");
+    // Иначе ждём локальной подачи токена привязки (флешер/приложение).
+    if (!unclaimedNotified_) {
+        unclaimedNotified_ = true;
+        HAL_LOG_INFO("CLOUD", "binding-v3: no secret — awaiting pairing token (SETUP)");
         if (unclaimedCallback_) unclaimedCallback_(unclaimedCtx_);
     }
-    setState(CloudState::AwaitingClaim);
 }
 
 void CloudStateMachine::handleAwaitingClaim() {

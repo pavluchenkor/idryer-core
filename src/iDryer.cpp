@@ -1024,6 +1024,10 @@ void Link::raiseEvent(EventKind   severity,
     impl_->pub.publishEvent(doc);
 }
 
+void Link::handleRevoke() {
+    impl_->cloud.handleRevoke();
+}
+
 bool Link::onCommand(const char* name, CommandCallback cb) {
     if (!name || !name[0] || !cb) return false;
     // Replace if name already registered.

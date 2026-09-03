@@ -207,6 +207,10 @@ public:
     /// (max 12 commands) or invalid arguments.
     bool onCommand(const char* name, CommandCallback cb);
 
+    /// binding-v3: обработать команду REVOKE от портала — стереть секрет и
+    /// вернуться к ожиданию токена привязки. Вызывается из onCommand("revoke").
+    void handleRevoke();
+
     /// Called when an integration changes connectivity state. Optional.
     void onIntegrationStatus(IntegrationStatusCallback cb);
 
