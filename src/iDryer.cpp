@@ -701,6 +701,14 @@ void Link::loop() {
                         }
                         Serial.flush();
                     }
+                    // binding-v3: factory-reset идентичности (стереть секрет/
+                    // deviceId, сохранив WiFi) — вернуть устройство в SETUP.
+                    // Для переустановки/повторной привязки и E2E-тестов.
+                    else if (strcmp(cmd, "WIPE_IDENTITY") == 0) {
+                        impl_->cloud.handleRevoke();
+                        Serial.println("WIPE_IDENTITY:OK");
+                        Serial.flush();
+                    }
                 }
             } else if (s_serial_len < sizeof(s_serial_buf) - 1) {
                 s_serial_buf[s_serial_len++] = c;
