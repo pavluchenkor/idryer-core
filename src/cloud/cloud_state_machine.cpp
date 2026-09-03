@@ -147,6 +147,14 @@ void CloudStateMachine::handleRevoke() {
     store_->save(identity_);
     pendingPairingToken_[0] = '\0';
     unclaimedNotified_ = false;
+    // Разорвать текущую MQTT-сессию: секрета больше нет, оставаться на брокере
+    // нельзя. Сессия persistent (clean_session=false) и была поднята ДО стирания
+    // секрета — без явного disconnect прошивка продолжала бы публиковать
+    // телеметрию на старом коннекте, и портал видел бы ЛОЖНЫЙ online у
+    // устройства, которое на деле уже в SETUP. Сбрасываем и флаг инициализации,
+    // чтобы при следующей привязке MQTT поднялся заново на новом секрете.
+    if (mqtt_) mqtt_->disconnect();
+    mqttInitialized_ = false;
     // Вернуться к ожиданию токена привязки. handleProvisioning (v3) увидит
     // отсутствие секрета и будет ждать локальной подачи PAIR_TOKEN.
     setState(CloudState::Provisioning);
