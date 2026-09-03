@@ -299,7 +299,7 @@ void CloudStateMachine::handleMqttConnecting() {
     if (mqttRetryCurrentMs_ > config_.mqttRetryMaxMs) mqttRetryCurrentMs_ = config_.mqttRetryMaxMs;
 
     if (!mqttInitialized_) {
-        const char* key = (mqttKey_[0] != '\0') ? mqttKey_ : identity_.serialNumber;
+        const char* key = getMqttKey(); // binding-v3: deviceId (UUID); legacy fallback внутри
         mqtt_->begin(key, identity_.token);
         mqttInitialized_ = true;
     }
@@ -539,6 +539,10 @@ const char* CloudStateMachine::getMcuHardwareVersion() const {
 }
 
 const char* CloudStateMachine::getMqttKey() const {
+    // binding-v3 UUID-адресация: MQTT-ключ (логин/топики) = deviceId — единый
+    // для одночипа и двухчипа. Fallback (до активации / legacy-сборки):
+    // mqttKey_ (из bind) или serialNumber.
+    if (identity_.hasDeviceId()) return identity_.deviceId;
     return (mqttKey_[0] != '\0') ? mqttKey_ : identity_.serialNumber;
 }
 

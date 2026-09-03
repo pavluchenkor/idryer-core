@@ -232,9 +232,9 @@ private:
     CommandCallback commandCallback_;
     OtaChunkCallback otaChunkCallback_;
 
-    char serialNumber_[32];
+    char serialNumber_[48]; // binding-v3: вмещает deviceId (UUID, 36) + запас
     char token_[512];
-    char clientId_[32];
+    char clientId_[48];     // binding-v3: UUID-логин
     char topicBuffer_[TOPIC_BUFFER_SIZE];
     // setWill/subscribe хранят указатель — топики должны жить всё время клиента.
     char lwtTopic_[TOPIC_BUFFER_SIZE];
