@@ -1038,6 +1038,12 @@ void Link::raiseEvent(EventKind   severity,
 
 void Link::handleRevoke() {
     impl_->cloud.handleRevoke();
+    // binding-v3: cloud стёр секрет и ушёл в SETUP, но у local_access остаётся
+    // старый deviceToken_ от local.begin() — без этого WS-окно пейринга и после
+    // REVOKE/WIPE отвечало бы pair_fail already_bound до перезагрузки. Стираем
+    // токен у локального транспорта, чтобы окно привязки открылось сразу
+    // (инвариант §5: отвязанное устройство = SETUP, тот же путь входа, без ребута).
+    if (impl_->localStarted) impl_->local.clearToken();
 }
 
 bool Link::onCommand(const char* name, CommandCallback cb) {

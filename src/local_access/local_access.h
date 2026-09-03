@@ -112,6 +112,14 @@ public:
     /** Update the device token (e.g. after portal auto-refresh). */
     void updateToken(const char* newToken);
 
+    /**
+     * binding-v3: clear the device token after REVOKE/WIPE.
+     * Reopens the unauthenticated WS pairing window (deviceToken_ empty →
+     * the "pair" handler accepts a new pairing token) without a reboot, and
+     * drops any client authorized with the old token.
+     */
+    void clearToken();
+
 private:
     char deviceName_[40];
     char deviceToken_[IDRYER_MAX_TOKEN_LEN];

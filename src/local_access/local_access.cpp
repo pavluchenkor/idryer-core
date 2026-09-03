@@ -115,6 +115,16 @@ void LocalAccess::updateToken(const char* newToken)
     HAL_LOG_INFO("WS", "Token updated");
 }
 
+// binding-v3: стереть токен после REVOKE/WIPE. Пустой deviceToken_ снова
+// открывает неавторизованное окно пейринга (см. handleMessage type=="pair") без
+// перезагрузки; текущего клиента, авторизованного старым токеном, разлогиниваем.
+void LocalAccess::clearToken()
+{
+    deviceToken_[0]   = '\0';
+    clientAuthorized_ = false;
+    HAL_LOG_INFO("WS", "Token cleared — pairing window reopened (SETUP)");
+}
+
 // ── WS event dispatch ─────────────────────────────────────────────────────────
 
 void LocalAccess::onWsEvent(uint8_t num, uint8_t type, uint8_t* payload, size_t length)
