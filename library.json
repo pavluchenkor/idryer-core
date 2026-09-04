@@ -10,6 +10,13 @@
   },
   "frameworks": "arduino",
   "platforms": ["espressif32", "raspberrypi"],
+  "dependencies": [
+    { "owner": "knolleary", "name": "PubSubClient", "version": "2.8" },
+    { "owner": "bertmelis", "name": "espMqttClient", "version": "1.7.3" },
+    { "owner": "bblanchon", "name": "ArduinoJson", "version": "6.21.6" },
+    { "owner": "links2004", "name": "WebSockets", "version": "2.7.3" },
+    { "name": "Improv WiFi Library", "version": "https://github.com/pavluchenkor/Improv-WiFi-Library.git#6c7bf82737dda6d4da65a14a41ca8c2554b0b7e9" }
+  ],
   "build": {
     "srcDir": "src",
     "includeDir": "src"
