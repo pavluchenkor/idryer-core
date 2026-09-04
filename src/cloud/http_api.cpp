@@ -53,8 +53,14 @@ ActivateResult HttpApi::activate(const char* pairingToken, const char* serialNum
         return result;
     }
 
-    // Ошибка: распознаём конфликт железа (409 DEVICE_CONFLICT) по errorCode.
-    // Остальное (невалидный/истёкший токен) — просто неуспех, устройство ретраит.
+    // Ошибка: разбираем errorCode.
+    //  - DEVICE_CONFLICT (409) — железо занято другим аккаунтом (обрабатывается
+    //    отдельно, приложение показывает пользователю);
+    //  - любой другой errorCode (400: INVALID_PAIRING_TOKEN / PAIRING_TOKEN_EXPIRED /
+    //    DEVICE_LIMIT_REACHED) — СТАБИЛЬНЫЙ отказ: ретрай не поможет ни через минуту,
+    //    ни через сутки. Помечаем rejected, чтобы cloud прекратил ретраи, стёр
+    //    мёртвый токен и вернулся в SETUP (владелец подаст свежий токен).
+    //  - НЕТ errorCode (нет тела) — сетевая/временная ошибка: ретраить корректно.
     if (response.containsKey("errorCode")) {
         const char* ec = response["errorCode"].as<const char*>();
         if (ec && strcmp(ec, "DEVICE_CONFLICT") == 0) {
@@ -62,9 +68,10 @@ ActivateResult HttpApi::activate(const char* pairingToken, const char* serialNum
             HAL_LOG_INFO("HTTP", "activate CONFLICT: hardware bound to another account");
             return result;
         }
-        HAL_LOG_INFO("HTTP", "activate rejected: %s", ec ? ec : "?");
+        result.rejected = true;
+        HAL_LOG_INFO("HTTP", "activate rejected (stable, no retry): %s", ec ? ec : "?");
     } else {
-        HAL_LOG_ERROR("HTTP", "activate failed");
+        HAL_LOG_ERROR("HTTP", "activate failed (network/temporary — will retry)");
     }
     return result;
 }

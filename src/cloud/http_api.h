@@ -48,10 +48,11 @@ struct ClaimCheckResult {
 struct ActivateResult {
     bool success;
     bool conflict;
+    bool rejected;  ///< Стабильный отказ портала (400: токен невалиден/истёк, лимит) — ретрай бессмыслен.
     char deviceToken[IDRYER_MAX_TOKEN_LEN];
     char deviceId[IDRYER_MAX_DEVICE_ID_LEN];
 
-    ActivateResult() : success(false), conflict(false) { deviceToken[0] = '\0'; deviceId[0] = '\0'; }
+    ActivateResult() : success(false), conflict(false), rejected(false) { deviceToken[0] = '\0'; deviceId[0] = '\0'; }
 };
 
 class HttpApi {

@@ -136,7 +136,16 @@ void CloudStateMachine::tryActivate() {
         pendingPairingToken_[0] = '\0'; // этот токен бесполезен, ждём новый
         return;
     }
-    HAL_LOG_WARN("CLOUD", "binding-v3: activate failed, will retry");
+    if (r.rejected) {
+        // Стабильный отказ портала (токен невалиден/истёк, лимит): ретрай не
+        // поможет никогда. Стираем мёртвый токен и остаёмся в ожидании нового
+        // (SETUP, окно пейринга открыто) — иначе устройство бесконечно долбит
+        // портал 400-ответами, а привязка молча не появляется.
+        HAL_LOG_WARN("CLOUD", "binding-v3: pairing token rejected (dead/expired) — dropping, awaiting fresh token");
+        pendingPairingToken_[0] = '\0';
+        return;
+    }
+    HAL_LOG_WARN("CLOUD", "binding-v3: activate failed (network/temporary), will retry");
 }
 
 void CloudStateMachine::handleRevoke() {
