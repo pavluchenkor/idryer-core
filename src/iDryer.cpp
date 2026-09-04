@@ -347,6 +347,27 @@ bool Link::begin() {
             Link::s_currentImpl->wifi.begin(ssid, password);
         }
     });
+    // Свой connect для Improv вместо штатного tryConnectToWifi: тот сбрасывает
+    // WiFi только если уже подключён, поэтому после нескольких попыток
+    // (неверный→неверный→верный) драйвер ESP32-C3 стартует поверх мусорного
+    // состояния и верный пароль "порой" не проходит. Здесь перед КАЖДОЙ
+    // попыткой делаем полный сброс (disconnect(true) — стереть конфиг), даём
+    // связи до 15 c, и сразу выходим при явной ошибке (неверный пароль / нет
+    // сети), не досиживая таймаут.
+    impl_->improv.setCustomConnectWiFi([](const char* ssid, const char* password) -> bool {
+        WiFi.disconnect(true);
+        delay(200);
+        WiFi.begin(ssid, password);
+        const uint32_t startMs = millis();
+        while (millis() - startMs < 15000) {
+            const wl_status_t st = WiFi.status();
+            if (st == WL_CONNECTED) return true;
+            if (st == WL_CONNECT_FAILED || st == WL_NO_SSID_AVAIL) break;
+            delay(200);
+        }
+        WiFi.disconnect(true);
+        return false;
+    });
     Link::s_currentImpl = impl_;
 #endif
 
