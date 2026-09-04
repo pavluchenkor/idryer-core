@@ -50,7 +50,12 @@ void MqttClient::begin(const char* serialNumber, const char* token) {
     });
     mqttClient_.onDisconnect([this](espMqttClientTypes::DisconnectReason reason) {
         lastDisconnectReason_ = static_cast<uint8_t>(reason);
-        HAL_LOG_WARN("MQTT", "Disconnected: %s",
+        // Библиотечная строка бывает «No error» (штатное закрытие TCP/сессии, не
+        // сбой протокола) — само по себе это вводит в заблуждение. Показываем код
+        // причины и явно, что последует переподключение, чтобы «No error» не читался
+        // как «всё в порядке, но связь пропала без причины».
+        HAL_LOG_WARN("MQTT", "Disconnected (reason=%u: %s) — will reconnect",
+                     (unsigned)lastDisconnectReason_,
                      espMqttClientTypes::disconnectReasonToString(reason));
     });
     mqttClient_.onMessage([this](const espMqttClientTypes::MessageProperties& props,
@@ -337,6 +342,14 @@ void MqttClient::handleMessage(const char* topic, const char* payload, size_t le
     const char* cmdStart  = strstr(topic, cmdPrefix);
     if (!cmdStart) return;
     cmdStart += strlen(cmdPrefix);
+
+    // Пустой payload на командном топике — это СНЯТИЕ retained-команды (портал
+    // публикует пустое retained-сообщение, чтобы стереть, например, revoke после
+    // активации). Это не команда: тихо игнорируем, без ошибки парсинга.
+    if (length == 0) {
+        HAL_LOG_INFO("MQTT", "command '%s' cleared (empty retained) — ignored", cmdStart);
+        return;
+    }
 
     StaticJsonDocument<1024> doc;
     DeserializationError err = deserializeJson(doc, payload, length);
