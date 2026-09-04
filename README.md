@@ -117,6 +117,19 @@ Full public API reference: [`docs/ru/03-public-api/01-link-api-reference.md`](do
 
 ## License
 
-[GPL-3.0](LICENSE). Any product using this library must publish its source code under a compatible license.
+Licensed under the [Apache License, Version 2.0](LICENSE) — see also [NOTICE](NOTICE).
+
+You may use, modify, distribute and sell this library, including for commercial
+purposes, and you are not required to open the source of products built on it.
+
+The license does not grant rights to the iDryer name. Community projects are
+welcome and the naming policy is permissive — see [TRADEMARKS.md](TRADEMARKS.md).
+
+Hardware design and mechanical documentation are licensed separately and are
+not covered by this license.
+
+Releases up to and including the last GPL-3.0 tag remain available under
+GPL-3.0. Apache-2.0 applies from the first release that carries this LICENSE
+file onward.
 
 For questions not covered by the license, contact the author: [pavluchenkor](https://github.com/pavluchenkor).
