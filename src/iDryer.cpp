@@ -383,10 +383,21 @@ bool Link::begin() {
     // WiFi.begin() called directly so the non-DEV_REPL loop (which returns early
     // before runtime.loop()) can observe WL_CONNECTED without cloud state machine.
     char ssid[64], pass[64];
-    if (impl_->wifiStore.load(ssid, sizeof(ssid), pass, sizeof(pass))) {
+    const bool haveWifiCreds =
+        impl_->wifiStore.load(ssid, sizeof(ssid), pass, sizeof(pass));
+    if (haveWifiCreds) {
         impl_->wifi.begin(ssid, pass);
         WiFi.begin(ssid, pass);
     }
+
+    // Второй источник кредов рядом с Improv — по воздуху, из мобильного
+    // приложения. Поднимается сам, когда сети нет: на чистом устройстве сразу,
+    // с сохранёнными кредами — после таймаута подключения.
+    idryer::EspTouchProvisioner::instance().begin(
+        [](void* ctx, const char* s, const char* p) {
+            static_cast<Link*>(ctx)->setWifiCredentials(s, p);
+        },
+        this, haveWifiCreds);
 
     // Serial number from MAC: `DEVICE_<12HEX_UPPERCASE>` (see %02X in
     // ArduinoCredentialStore::seedSerialFromMac, contract rules.serial_format).
@@ -655,6 +666,9 @@ void Link::loop() {
     // WiFi.scanNetworks (~5с) переполняет USB CDC FIFO и ломает Improv-RPC.
     if (!impl_->logsEnabled) {
         impl_->improv.handleSerial();
+        // Провижининг по воздуху крутится здесь же, до раннего выхода: пока
+        // Wi-Fi нет, cloud.loop() не работает и радио свободно.
+        idryer::EspTouchProvisioner::instance().loop();
         if (WiFi.status() == WL_CONNECTED) {
             impl_->logsEnabled = true;
             idryer::hal::initArduinoHal(&Serial);
@@ -740,6 +754,9 @@ void Link::loop() {
             }
         }
     }
+#else
+    // В dev-режиме Improv-ветки выше нет — провижининг крутим отсюда.
+    idryer::EspTouchProvisioner::instance().loop();
 #endif
 
     impl_->runtime.loop();

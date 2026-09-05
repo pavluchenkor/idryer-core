@@ -42,6 +42,7 @@
 #include "platform/arduino/ArduinoHttpClient.h"
 #include "platform/arduino/ArduinoCredentialStore.h"
 #include "platform/arduino/ArduinoWifiStore.h"
+#include "platform/arduino/EspTouchProvisioner.h"
 #include "mqtt/idryer_topics.h"
 #include "mqtt/mqtt_client.h"
 #include "cloud/http_api.h"
