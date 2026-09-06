@@ -120,6 +120,15 @@ public:
      */
     void clearToken();
 
+    /// Есть ли у локального транспорта постоянный секрет (окно pair закрыто).
+    bool hasToken() const { return deviceToken_[0] != '\0'; }
+
+    /// Признак состояния привязки в mDNS TXT: `state=setup` (секрета нет, ждёт
+    /// токен) или `state=bound` (секрет есть). Приложение по нему отличает
+    /// устройство, которому нужна привязка, от занятого — без догадок по списку
+    /// портала: тот не знает про стёртый NVS и расходится с железом.
+    void publishMdnsState();
+
 private:
     char deviceName_[40];
     char deviceToken_[IDRYER_MAX_TOKEN_LEN];

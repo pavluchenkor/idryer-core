@@ -35,7 +35,9 @@ bool ArduinoHttpClient::postJson(const char* url, const char* body, JsonDocument
         }
         http.addHeader("Content-Type", "application/json");
         httpCode = http.POST(body);
-        if (httpCode >= 200 && httpCode < 300) payload = http.getString();
+        // Тело читаем при любом ответе: в 4xx/409 портал кладёт errorCode,
+        // по которому cloud отличает стабильный отказ от временного сбоя.
+        if (httpCode > 0) payload = http.getString();
         http.end();
     } else {
         WiFiClient client;
@@ -47,12 +49,18 @@ bool ArduinoHttpClient::postJson(const char* url, const char* body, JsonDocument
         }
         http.addHeader("Content-Type", "application/json");
         httpCode = http.POST(body);
-        if (httpCode >= 200 && httpCode < 300) payload = http.getString();
+        // Тело читаем при любом ответе: в 4xx/409 портал кладёт errorCode,
+        // по которому cloud отличает стабильный отказ от временного сбоя.
+        if (httpCode > 0) payload = http.getString();
         http.end();
     }
 
     if (httpCode < 200 || httpCode >= 300) {
-        HAL_LOG_ERROR("HTTP", "POST %s failed: %d", url, httpCode);
+        // Тело ошибки отдаём вызывающему, если оно разобралось: раньше оно
+        // выбрасывалось, и устройство не отличало «отказано» от «сеть моргнула».
+        if (payload.length() > 0) deserializeJson(response, payload);
+        HAL_LOG_ERROR("HTTP", "POST %s failed: %d body=%s", url, httpCode,
+                      payload.length() > 0 ? payload.c_str() : "<empty>");
         return false;
     }
 
@@ -82,7 +90,9 @@ bool ArduinoHttpClient::getJson(const char* url, JsonDocument& response) {
             return false;
         }
         httpCode = http.GET();
-        if (httpCode >= 200 && httpCode < 300) payload = http.getString();
+        // Тело читаем при любом ответе: в 4xx/409 портал кладёт errorCode,
+        // по которому cloud отличает стабильный отказ от временного сбоя.
+        if (httpCode > 0) payload = http.getString();
         http.end();
     } else {
         WiFiClient client;
@@ -93,7 +103,9 @@ bool ArduinoHttpClient::getJson(const char* url, JsonDocument& response) {
             return false;
         }
         httpCode = http.GET();
-        if (httpCode >= 200 && httpCode < 300) payload = http.getString();
+        // Тело читаем при любом ответе: в 4xx/409 портал кладёт errorCode,
+        // по которому cloud отличает стабильный отказ от временного сбоя.
+        if (httpCode > 0) payload = http.getString();
         http.end();
     }
 

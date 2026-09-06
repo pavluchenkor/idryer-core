@@ -179,6 +179,12 @@ bool MqttClient::publishEvent(JsonDocument& json) {
     return publishJson(IDRYER_TOPIC_EVENTS, json, /*qos=*/1, IDRYER_RETAINED_EVENTS);
 }
 
+bool MqttClient::publishRevokeAck() {
+    StaticJsonDocument<96> doc;
+    doc["event"] = "REVOKE_ACK";
+    return publishJson("revoke_ack", doc, /*qos=*/1, /*retained=*/false);
+}
+
 bool MqttClient::publishIntegrationsStatus(JsonDocument& json) {
     return publishJson(IDRYER_TOPIC_INTEGRATIONS_STATUS, json, /*qos=*/1, /*retained=*/true);
 }

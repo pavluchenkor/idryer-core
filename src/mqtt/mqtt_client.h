@@ -154,6 +154,12 @@ public:
     /// @brief Publishes to @c idryer/{serial}/events (QoS 1).
     bool publishEvent(JsonDocument& json);
 
+    /// binding-v3: подтверждение отзыва — «команду REVOKE получил, стираю
+    /// секрет». Публикуется ДО стирания: после него говорить уже нечем.
+    /// Портал по нему закрывает карточку (REVOKING → REVOKED) и снимает
+    /// retained REVOKE. Топик idryer/{key}/revoke_ack, QoS1, не retained.
+    bool publishRevokeAck();
+
     /// @brief Publishes to @c idryer/{serial}/integrations/status (retained, QoS 1).
     bool publishIntegrationsStatus(JsonDocument& json);
 

@@ -730,7 +730,13 @@ void Link::loop() {
                     // следующем витке cloud-машины (activate → секрет → Ready).
                     else if (strncmp(cmd, "PAIR_TOKEN:", 11) == 0) {
                         const char* tok = cmd + 11;
-                        if (tok[0] != '\0') {
+                        // Секрет уже есть → окно привязки закрыто. Тот же ответ,
+                        // что даёт локальный WS (pair_fail already_bound): иначе
+                        // провод отвечал «OK», токен молча терялся, и флешер
+                        // показывал успех там, где ничего не произошло.
+                        if (impl_->cloud.getIdentity().token[0] != '\0') {
+                            Serial.println("PAIR_TOKEN:ERROR:ALREADY_BOUND");
+                        } else if (tok[0] != '\0') {
                             impl_->cloud.setPairingToken(tok);
                             Serial.println("PAIR_TOKEN:OK");
                         } else {
@@ -741,8 +747,29 @@ void Link::loop() {
                     // binding-v3: factory-reset идентичности (стереть секрет/
                     // deviceId, сохранив WiFi) — вернуть устройство в SETUP.
                     // Для переустановки/повторной привязки и E2E-тестов.
+                    else if (strcmp(cmd, "STATUS") == 0) {
+                        // Факты для флешера вместо догадок «прошито, в сети»:
+                        // состояние привязки, Wi-Fi, адрес, кто мы. Отвечаем
+                        // только после подъёма Wi-Fi — до него Serial держит
+                        // Improv; молчание = сети ещё нет.
+                        const bool bound = impl_->cloud.getIdentity().token[0] != '\0';
+                        const bool wifi  = WiFi.status() == WL_CONNECTED;
+                        const char* mcu  = mcuSerial();
+                        Serial.printf("STATUS:state=%s wifi=%d ip=%s cloud=%s serial=%s mcu=%s fw=%s\n",
+                                      bound ? "bound" : "setup",
+                                      wifi ? 1 : 0,
+                                      wifi ? WiFi.localIP().toString().c_str() : "-",
+                                      impl_->cloud.isOnline() ? "online" : "offline",
+                                      serial(),
+                                      (mcu && mcu[0]) ? mcu : "-",
+                                      impl_->cfg.firmwareVersion ? impl_->cfg.firmwareVersion : "-");
+                        Serial.flush();
+                    }
                     else if (strcmp(cmd, "WIPE_IDENTITY") == 0) {
-                        impl_->cloud.handleRevoke();
+                        // Через Link::handleRevoke, а не cloud напрямую: иначе
+                        // локальный транспорт держит старый токен — окно pair по
+                        // WS закрыто, mDNS объявляет bound (инвариант §4b И-1).
+                        handleRevoke();
                         Serial.println("WIPE_IDENTITY:OK");
                         Serial.flush();
                     }
@@ -764,7 +791,15 @@ void Link::loop() {
     error_process_all();
     reportAbnormalResets();
     checkLowMemory();
-    if (impl_->localStarted) impl_->local.loop();
+    if (impl_->localStarted) {
+        impl_->local.loop();
+        // local.begin() отработал ещё в SETUP с пустым токеном, а узнать новый
+        // он мог только по провалу авторизации WS. Из-за этого после активации
+        // mDNS продолжал объявлять state=setup, а окно pair по WS оставалось
+        // открытым до перезагрузки. Секрет появился — отдаём сразу.
+        const char* tok = impl_->cloud.getIdentity().token;
+        if (tok[0] != '\0' && !impl_->local.hasToken()) impl_->local.updateToken(tok);
+    }
     impl_->intManager.loop();
 
     // Lazy: mDNS/WS только после WiFi (lwIP requirement).

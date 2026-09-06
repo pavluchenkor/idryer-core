@@ -33,6 +33,15 @@ public:
 
 // ── Lifecycle ─────────────────────────────────────────────────────────────────
 
+// Одно и то же объявление на всех путях: старт mDNS, привязка, REVOKE/WIPE.
+// mdns_service_txt_item_set (внутри addServiceTxt) обновляет значение на лету,
+// поэтому перезапускать сервис не нужно.
+void LocalAccess::publishMdnsState()
+{
+    const char* state = deviceToken_[0] != '\0' ? "bound" : "setup";
+    MDNS.addServiceTxt("_idryer", "_tcp", "state", state);
+}
+
 void LocalAccess::initMdns(const char* deviceName)
 {
     if (!deviceName || deviceName[0] == '\0') {
@@ -44,6 +53,7 @@ void LocalAccess::initMdns(const char* deviceName)
 
     if (MDNS.begin(deviceName_)) {
         MDNS.addService("_idryer", "_tcp", 81);
+        publishMdnsState();
         HAL_LOG_INFO("WS", "mDNS: %s.local → _idryer._tcp:81 (WS not yet started)", deviceName_);
     } else {
         HAL_LOG_WARN("WS", "mDNS: MDNS.begin failed for %s", deviceName_);
@@ -71,6 +81,7 @@ void LocalAccess::begin(const char* deviceName, const char* deviceToken)
     const bool mdnsOk = MDNS.begin(deviceName_);
     if (mdnsOk) {
         MDNS.addService("_idryer", "_tcp", 81);
+        publishMdnsState();
     }
 
     enabled_ = true;
@@ -112,6 +123,7 @@ void LocalAccess::updateToken(const char* newToken)
     if (!newToken || newToken[0] == '\0') return;
     strncpy(deviceToken_, newToken, sizeof(deviceToken_) - 1);
     deviceToken_[sizeof(deviceToken_) - 1] = '\0';
+    publishMdnsState();
     HAL_LOG_INFO("WS", "Token updated");
 }
 
@@ -122,6 +134,7 @@ void LocalAccess::clearToken()
 {
     deviceToken_[0]   = '\0';
     clientAuthorized_ = false;
+    publishMdnsState();
     HAL_LOG_INFO("WS", "Token cleared — pairing window reopened (SETUP)");
 }
 

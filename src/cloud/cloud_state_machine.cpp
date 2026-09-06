@@ -150,6 +150,19 @@ void CloudStateMachine::tryActivate() {
 
 void CloudStateMachine::handleRevoke() {
     HAL_LOG_WARN("CLOUD", "binding-v3: REVOKE received — wiping secret, back to pairing (SETUP)");
+    // Рапорт порталу «получил, стираю» — строго ДО стирания секрета и разрыва
+    // сессии: после них публиковать нечем. Даём стеку короткое окно отправить
+    // пакет; QoS1, брокер подтвердит. Если сессии нет (WIPE по проводу без
+    // сети) — молча пропускаем, портал закроет карточку при следующем выходе.
+    if (mqtt_ && mqtt_->isConnected()) {
+        if (mqtt_->publishRevokeAck()) {
+            const uint32_t until = HAL_MILLIS() + 400;
+            while (HAL_MILLIS() < until) { mqtt_->loop(); HAL_DELAY_MS(10); }
+            HAL_LOG_INFO("CLOUD", "binding-v3: revoke_ack sent");
+        } else {
+            HAL_LOG_WARN("CLOUD", "binding-v3: revoke_ack publish failed");
+        }
+    }
     identity_.token[0]        = '\0';
     identity_.deviceId[0]     = '\0';
     identity_.boundMqttKey[0] = '\0';

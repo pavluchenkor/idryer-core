@@ -71,7 +71,12 @@ ActivateResult HttpApi::activate(const char* pairingToken, const char* serialNum
         result.rejected = true;
         HAL_LOG_INFO("HTTP", "activate rejected (stable, no retry): %s", ec ? ec : "?");
     } else {
-        HAL_LOG_ERROR("HTTP", "activate failed (network/temporary — will retry)");
+        // Тело без errorCode бывает и у 5xx портала — печатаем, что пришло:
+        // иначе на железе видно только «failed», и причина теряется.
+        char body[192] = {};
+        serializeJson(response, body, sizeof(body));
+        HAL_LOG_ERROR("HTTP", "activate failed (network/temporary — will retry), body=%s",
+                      body[0] ? body : "<empty>");
     }
     return result;
 }
