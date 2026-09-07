@@ -163,7 +163,6 @@ public:
     // лямбды (без capture). Если нужно состояние — используйте глобал/синглтон.
     using CommandCallback           = void (*)(JsonObjectConst data);
     using IntegrationStatusCallback = void (*)(const IntegrationStatus&);
-    using ClaimPinCallback          = void (*)(const char* pin, uint32_t expiresInSeconds);
     /// Бэкенд подтвердил привязку. Приходит раньше, чем поднимется MQTT, —
     /// продукту этого достаточно, чтобы убрать с экрана PIN.
     using ClaimCompleteCallback     = void (*)(const char* deviceId);
@@ -213,9 +212,6 @@ public:
 
     /// Called when an integration changes connectivity state. Optional.
     void onIntegrationStatus(IntegrationStatusCallback cb);
-
-    /// Called when the cloud claim flow produces a PIN.
-    void onClaimPin(ClaimPinCallback cb);
     /// Called once the backend confirms the claim (before MQTT is up).
     void onClaimComplete(ClaimCompleteCallback cb);
     void onDiagnostic(DiagnosticCallback cb);
@@ -259,6 +255,11 @@ public:
 
     // ─── Diagnostics ─────────────────────────────────────────────────
     bool        isOnline() const;
+
+    /// binding-v3: у устройства есть постоянный секрет (привязано к аккаунту).
+    /// false — SETUP: ждём токен привязки от приложения или флешера. Продукту
+    /// нужно, чтобы показать это человеку на экране (idryer-touch).
+    bool        isBound() const;
     const char* serial() const;
 
     // ─── Dev / first-boot helpers ────────────────────────────────────
@@ -271,10 +272,6 @@ public:
     /// Dev / forced re-provisioning, ESPTouch, Improv.
     void setWifiCredentials(const char* ssid, const char* password);
 
-    /// Manually start the cloud claim flow (provision → register → check-claim).
-    /// Triggers @ref onClaimPin once the portal returns a PIN.
-    bool requestClaim();
-    iDryer::ClaimRequestResult requestClaimDetailed();
 
     /// Outlet to the SDK integrations manager — for product-side wiring of
     /// callbacks (Moonraker chamber target, Bambu printer status, etc.).

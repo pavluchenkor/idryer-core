@@ -15,7 +15,6 @@ const char* cloudStateToString(CloudState state) {
         case CloudState::WaitingForMcuSerial: return "WaitingForMcuSerial";
         case CloudState::Provisioning:        return "Provisioning";
         case CloudState::Registering:         return "Registering";
-        case CloudState::AwaitingClaim:       return "AwaitingClaim";
         case CloudState::Ready:               return "Ready";
         case CloudState::MqttConnecting:      return "MqttConnecting";
         case CloudState::Online:              return "Online";
@@ -28,7 +27,6 @@ CloudStateMachine::CloudStateMachine(IWifiManager* wifi, ICredentialStore* store
                                      const CloudConfig& config)
     : wifi_(wifi), store_(store), api_(api), mqtt_(mqtt), config_(config)
 {
-    pendingPin_[0]         = '\0';
     mcuSerial_[0]          = '\0';
     mcuFirmwareVersion_[0] = '\0';
     mcuHardwareVersion_[0] = '\0';
@@ -54,7 +52,6 @@ void CloudStateMachine::loop() {
         case CloudState::WifiConnecting:      handleWifiConnecting();      break;
         case CloudState::WaitingForMcuSerial: handleWaitingForMcuSerial(); break;
         case CloudState::Provisioning:        handleProvisioning();        break;
-        case CloudState::AwaitingClaim:       handleAwaitingClaim();       break;
         case CloudState::Ready:               handleReady();               break;
         case CloudState::MqttConnecting:      handleMqttConnecting();      break;
         case CloudState::Online:              handleOnline();              break;
@@ -74,12 +71,15 @@ void CloudStateMachine::handleWifiConnecting() {
         }
 
         if (identity_.hasToken()) {
-            // binding-v2: deviceId в NVS больше не даёт прыжка в Ready мимо
-            // портала. Всегда сначала check-claim (AwaitingClaim сам решит:
-            // подтверждено → Ready; «не привязан» → стереть deviceId и ждать
-            // PIN; «токен не подходит» → provision). Это закрывает вечный
-            // круг «запись удалили, пока модуль был офлайн».
-            setState(CloudState::AwaitingClaim);
+            // §4 модели v3: секрет в NVS — единственный источник правды о
+            // привязке. Спрашивать портал «а знаешь ли ты меня?» (check-claim)
+            // мы больше не ходим: устройство верило одному ответу и стирало
+            // секрет, поэтому откат бэкапа или баг эндпоинта разом разваливал
+            // парк. Секрет стирается ТОЛЬКО по явному REVOKE на командном
+            // топике; карточка на портале не исчезает (soft-delete), а
+            // REVOKING пускает устройство на брокер именно ради доставки
+            // этой команды.
+            setState(CloudState::Ready);
         } else {
             setState(CloudState::Provisioning);
         }
@@ -128,6 +128,8 @@ void CloudStateMachine::tryActivate() {
         store_->save(identity_);
         pendingPairingToken_[0] = '\0'; // потреблён
         HAL_LOG_INFO("CLOUD", "binding-v3: activated, deviceId=%s -> Ready", identity_.deviceId);
+        emitDiagnostic2("pair: activated deviceId=", identity_.deviceId);
+        if (claimCompleteCallback_) claimCompleteCallback_(identity_.deviceId, claimCompleteCtx_);
         setState(CloudState::Ready);
         return;
     }
@@ -208,65 +210,6 @@ void CloudStateMachine::handleProvisioning() {
     }
 }
 
-void CloudStateMachine::handleAwaitingClaim() {
-    if (!wifi_->isConnected()) { setState(CloudState::WifiConnecting); awaitingClaim_ = false; return; }
-    // binding-v2: deviceId в NVS сам по себе в Ready не пускает — привязку
-    // подтверждает check-claim (ответ портала главнее памяти ESP).
-
-    const uint32_t now = HAL_MILLIS();
-    if (now - lastClaimPoll_ < config_.claimPollIntervalMs) return;
-    lastClaimPoll_ = now;
-
-    emitDiagnostic("claim: checking backend");
-    ClaimCheckResult result = api_->checkClaim(identity_.token);
-    if (!result.success) return; // сеть/5xx — не отказ, ничего не трогаем
-
-    if (result.claimed) {
-        if (result.deviceId[0] != '\0' &&
-            strcmp(result.deviceId, identity_.deviceId) != 0) {
-            identity_.setDeviceId(result.deviceId);
-            store_->save(identity_);
-        }
-        awaitingClaim_ = false;
-        HAL_LOG_INFO("CLOUD", "Device claimed! deviceId=%s", identity_.deviceId);
-        emitDiagnostic2("claim: backend confirmed deviceId=", identity_.deviceId);
-        if (claimCompleteCallback_) claimCompleteCallback_(identity_.deviceId, claimCompleteCtx_);
-        setState(CloudState::Ready);
-        return;
-    }
-
-    // claimed:false, известный токен — привязки на портале нет.
-    if (result.known) {
-        if (identity_.hasDeviceId()) {
-            // binding-v2 mirror: запись удалили / портал из бэкапа. Стереть
-            // deviceId + boundMqttKey, токен оставить — дальше обычный PIN.
-            HAL_LOG_WARN("CLOUD", "Backend says not claimed — clearing stale deviceId=%s", identity_.deviceId);
-            emitDiagnostic("claim: backend not claimed, clearing stale NVS binding");
-            identity_.setDeviceId("");
-            identity_.setBoundMqttKey("");
-            store_->save(identity_);
-            mqttKey_[0] = '\0';
-            bindSwitchPending_ = false;
-        }
-        return; // ждём ввода PIN (человек)
-    }
-
-    // claimed:false + known:false — токен порталу неизвестен: стереть его и
-    // провижиниться заново. Единственное осознанное стирание токена — по
-    // явному сигналу портала, не по пустому ответу.
-    HAL_LOG_WARN("CLOUD", "Backend does not know this token — re-provisioning");
-    emitDiagnostic("claim: token unknown, re-provisioning");
-    identity_.setToken("");
-    identity_.setDeviceId("");
-    identity_.setBoundMqttKey("");
-    store_->save(identity_);
-    mqttKey_[0] = '\0';
-    bindSwitchPending_ = false;
-    awaitingClaim_ = false;
-    lastProvisionAttempt_ = HAL_MILLIS() - config_.provisionRetryMs;
-    setState(CloudState::Provisioning);
-}
-
 void CloudStateMachine::handleReady() {
     if (!wifi_->isConnected()) { setState(CloudState::WifiConnecting); return; }
     if (!identity_.hasToken() || !identity_.hasDeviceId()) { setState(CloudState::Provisioning); return; }
@@ -297,25 +240,20 @@ void CloudStateMachine::handleMqttConnecting() {
     // not authorized=5) три ретрая подряд → перевыпустить токен через
     // provision и заново пройти check-claim. Сетевые причины (TCP, TLS,
     // сервер недоступен) счётчик сбрасывают — они не отказ.
+    // §4 модели v3: устройство НЕ гадает по отказам авторизации. Секрет
+    // стирается только по явному REVOKE от портала. Отказ брокера — это или
+    // временный сбой (деплой, перезапуск go-auth), или уже висящий REVOKE,
+    // который придёт на командный топик: REVOKING пускает устройство на вход
+    // именно ради доставки. Поэтому здесь только backoff и повтор.
     if (mqttInitialized_) {
         const uint8_t reason = mqtt_->lastDisconnectReason();
-        const bool authReject = (reason == 4 || reason == 5);
-        authRejectStreak_ = authReject ? (uint8_t)(authRejectStreak_ + 1) : 0;
-        if (authRejectStreak_ >= 3) {
-            HAL_LOG_WARN("CLOUD", "MQTT auth rejected x%u — refreshing token via provision", authRejectStreak_);
-            authRejectStreak_ = 0;
-            mqtt_->clearLastDisconnectReason();
-            mqtt_->disconnect();
-            mqttInitialized_ = false;
-            mqttRetryCurrentMs_ = 0;
-            if (refreshToken()) {
-                // Новый токен → сначала check-claim, только потом MQTT.
-                lastClaimPoll_ = HAL_MILLIS() - config_.claimPollIntervalMs;
-                setState(CloudState::AwaitingClaim);
+        if ((reason == 4 || reason == 5) && authRejectStreak_ < 255) {
+            if (++authRejectStreak_ % 10 == 0) {
+                HAL_LOG_WARN("CLOUD", "MQTT auth rejected x%u — retrying (secret is cleared only by REVOKE)",
+                             authRejectStreak_);
             }
-            // refreshToken не удался (cooldown/отказ) — остаёмся, backoff
-            // продолжит попытки, кирпича нет.
-            return;
+        } else if (reason != 4 && reason != 5) {
+            authRejectStreak_ = 0;
         }
     }
 
@@ -347,114 +285,9 @@ void CloudStateMachine::handleOnline() {
     mqtt_->loop();
 }
 
-bool CloudStateMachine::requestClaim() {
-    idryer::ClaimRequestResult result = requestClaimDetailed();
-    return result == idryer::ClaimRequestResult::Started ||
-           result == idryer::ClaimRequestResult::AlreadyClaimed;
-}
-
-idryer::ClaimRequestResult CloudStateMachine::requestClaimDetailed() {
-    if (identity_.hasDeviceId()) {
-        HAL_LOG_WARN("CLOUD", "Local NVS has deviceId=%s, checking backend claim state...", identity_.deviceId);
-        emitDiagnostic2("claim: local NVS has deviceId=", identity_.deviceId);
-        emitDiagnostic("claim: checking backend");
-        if (!identity_.hasToken()) {
-            HAL_LOG_WARN("CLOUD", "Stale claim NVS: deviceId exists but token is missing");
-            emitDiagnostic("claim: stale NVS, token is missing");
-            return idryer::ClaimRequestResult::StaleNvs;
-        }
-
-        ClaimCheckResult claim = api_->checkClaim(identity_.token);
-        if (claim.success && claim.claimed) {
-            if (claim.deviceId[0] != '\0' && strcmp(claim.deviceId, identity_.deviceId) != 0) {
-                identity_.setDeviceId(claim.deviceId);
-                store_->save(identity_);
-            }
-            HAL_LOG_INFO("CLOUD", "Backend confirms claim: deviceId=%s", identity_.deviceId);
-            emitDiagnostic2("claim: backend confirmed deviceId=", identity_.deviceId);
-            return idryer::ClaimRequestResult::AlreadyClaimed;
-        }
-
-        HAL_LOG_WARN("CLOUD", "Stale claim NVS: backend did not confirm deviceId=%s", identity_.deviceId);
-        emitDiagnostic2("claim: stale NVS, backend did not confirm deviceId=", identity_.deviceId);
-        return idryer::ClaimRequestResult::StaleNvs;
-    }
-
-    if (!wifi_->isConnected()) { HAL_LOG_ERROR("CLOUD", "WiFi not connected"); return idryer::ClaimRequestResult::WifiNotConnected; }
-    if (config_.waitForMcuSerial && !serialVerified_) {
-        HAL_LOG_WARN("CLOUD", "Claim rejected: waiting for MCU serial");
-        return idryer::ClaimRequestResult::WaitingForMcuSerial;
-    }
-
-    if (!identity_.hasToken()) {
-        HAL_LOG_INFO("CLOUD", "No token, doing provision first...");
-        ProvisionResult provResult = api_->provision(identity_.serialNumber);
-        if (!provResult.success) { HAL_LOG_ERROR("CLOUD", "Provision failed"); return idryer::ClaimRequestResult::ProvisionFailed; }
-        if (provResult.isClaimed && provResult.token[0] == '\0') {
-            HAL_LOG_WARN("CLOUD", "Serial claimed but token withheld. Delete device in app first.");
-            return idryer::ClaimRequestResult::TokenWithheld;
-        }
-        // binding-v2: пустой токен не пишем — не затираем рабочий секрет.
-        if (provResult.token[0] == '\0') {
-            HAL_LOG_WARN("CLOUD", "Provision returned no token");
-            return idryer::ClaimRequestResult::ProvisionFailed;
-        }
-        identity_.setToken(provResult.token);
-        store_->save(identity_);
-        if (provResult.isClaimed && provResult.deviceId[0] != '\0') {
-            identity_.setDeviceId(provResult.deviceId);
-            store_->save(identity_);
-            HAL_LOG_INFO("CLOUD", "Already claimed: %s", identity_.deviceId);
-            return idryer::ClaimRequestResult::AlreadyClaimed;
-        }
-    }
-
-    if (awaitingClaim_) {
-        const uint32_t elapsedSec = (HAL_MILLIS() - pinCreatedAtMs_) / 1000;
-        const bool     pinAlive   = elapsedSec < pinTotalSeconds_;
-        // Пока код жив — повторяем его же с актуальным остатком. Когда истёк,
-        // проваливаемся ниже на register: бэкенд отдаёт тот же PIN, пока он
-        // действителен, и выпускает новый только после истечения — то есть
-        // повторный запрос безопасен, а без него на экране устройства висит
-        // мёртвый код до перезагрузки.
-        if (pinAlive) {
-            HAL_LOG_INFO("CLOUD", "Claim already in progress, PIN=%s", pendingPin_);
-            if (claimPinCallback_ && pendingPin_[0] != '\0') {
-                claimPinCallback_(pendingPin_, pinTotalSeconds_ - elapsedSec, claimPinCtx_);
-            }
-            return idryer::ClaimRequestResult::Started;
-        }
-        HAL_LOG_INFO("CLOUD", "PIN expired (%us), requesting a new one", (unsigned)elapsedSec);
-        awaitingClaim_ = false;
-    }
-
-    HAL_LOG_INFO("CLOUD", "Registering device for claim...");
-    emitDiagnostic("claim: requesting PIN from backend");
-    RegisterResult regResult = api_->registerDevice(identity_.token, identity_.serialNumber);
-    if (!regResult.success) { HAL_LOG_ERROR("CLOUD", "Register failed"); return idryer::ClaimRequestResult::RegisterFailed; }
-
-    if (regResult.alreadyClaimed && regResult.deviceId[0] != '\0') {
-        HAL_LOG_INFO("CLOUD", "Recovery: device already claimed, deviceId=%s", regResult.deviceId);
-        identity_.setDeviceId(regResult.deviceId);
-        store_->save(identity_);
-        setState(CloudState::Ready);
-        return idryer::ClaimRequestResult::AlreadyClaimed;
-    }
-
-    strncpy(pendingPin_, regResult.pin, sizeof(pendingPin_) - 1);
-    pendingPin_[sizeof(pendingPin_)-1] = '\0';
-    pinCreatedAtMs_  = HAL_MILLIS();
-    pinTotalSeconds_ = regResult.remainingSeconds;
-    awaitingClaim_ = true;
-    lastClaimPoll_ = HAL_MILLIS() - config_.claimPollIntervalMs;
-
-    HAL_LOG_INFO("CLOUD", "PIN: %s (expires in %us)", pendingPin_, regResult.remainingSeconds);
-    emitDiagnostic2("claim: PIN received pin=", pendingPin_);
-    if (claimPinCallback_) claimPinCallback_(pendingPin_, regResult.remainingSeconds, claimPinCtx_);
-
-    setState(CloudState::AwaitingClaim);
-    return idryer::ClaimRequestResult::Started;
-}
+// binding-v3: клейм убран целиком — и запрос PIN (requestClaim), и опрос
+// check-claim. Привязку начинает владелец из приложения/флешера, устройство
+// только принимает токен; отвязку — портал командой REVOKE.
 
 idryer::McuSerialResult CloudStateMachine::setMcuSerial(const char* mcuSerial) {
     if (!mcuSerial || mcuSerial[0] == '\0') {
@@ -576,26 +409,6 @@ const char* CloudStateMachine::getMqttKey() const {
     return (mqttKey_[0] != '\0') ? mqttKey_ : identity_.serialNumber;
 }
 
-bool CloudStateMachine::refreshToken() {
-    if (!wifi_->isConnected()) { HAL_LOG_WARN("CLOUD", "refreshToken: no WiFi"); return false; }
-    if (!identity_.hasSerialNumber()) { HAL_LOG_WARN("CLOUD", "refreshToken: no serial"); return false; }
-
-    const uint32_t now = HAL_MILLIS();
-    if (lastTokenRefreshMs_ != 0 && now - lastTokenRefreshMs_ < 30000u) {
-        HAL_LOG_INFO("CLOUD", "refreshToken: cooldown active");
-        return false;
-    }
-    lastTokenRefreshMs_ = now;
-
-    ProvisionResult result = api_->provision(identity_.serialNumber);
-    if (!result.success || result.token[0] == '\0') { HAL_LOG_WARN("CLOUD", "refreshToken: provision failed"); return false; }
-
-    identity_.setToken(result.token);
-    store_->save(identity_);
-    HAL_LOG_INFO("CLOUD", "refreshToken: token updated");
-    return true;
-}
-
 void CloudStateMachine::setState(CloudState newState) {
     if (state_ == newState) return;
     CloudState oldState = state_;
@@ -606,9 +419,6 @@ void CloudStateMachine::setState(CloudState newState) {
 
 void CloudStateMachine::setStateChangeCallback(CloudStateChangeCallback cb, void* ctx) {
     stateCallback_ = cb; stateCallbackCtx_ = ctx;
-}
-void CloudStateMachine::setClaimPinCallback(ClaimPinCallback cb, void* ctx) {
-    claimPinCallback_ = cb; claimPinCtx_ = ctx;
 }
 void CloudStateMachine::setClaimCompleteCallback(ClaimCompleteCallback cb, void* ctx) {
     claimCompleteCallback_ = cb; claimCompleteCtx_ = ctx;

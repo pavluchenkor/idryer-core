@@ -23,7 +23,6 @@ enum class CloudState : uint8_t {
     WaitingForMcuSerial, ///< Two-MCU only: waiting for Hello from RP2040.
     Provisioning,      ///< Registering the device with the backend API.
     Registering,       ///< Sending device registration request.
-    AwaitingClaim,     ///< Device is registered but not yet claimed by a user.
     Ready,             ///< Claimed and has credentials, ready to connect MQTT.
     MqttConnecting,    ///< Attempting MQTT connection.
     Online             ///< Fully connected and online.
@@ -35,12 +34,11 @@ const char* cloudStateToString(CloudState state);
 typedef void (*CloudStateChangeCallback)(CloudState oldState, CloudState newState, void* ctx);
 
 /// @brief Called when a claim PIN is available for the user to enter.
-typedef void (*ClaimPinCallback)(const char* pin, uint32_t expiresInSeconds, void* ctx);
 
-/// @brief Called when the device has been successfully claimed.
+/// @brief Called when the device has been bound (pairing token exchanged for a secret).
 typedef void (*ClaimCompleteCallback)(const char* deviceId, void* ctx);
 
-/// @brief Called when the device reaches @c AwaitingClaim (needs user action).
+/// @brief Called when the device has no secret and waits for a pairing token.
 typedef void (*UnclaimedCallback)(void* ctx);
 
 /// @brief Plain diagnostic line for product/UI logging.
@@ -54,7 +52,6 @@ typedef void (*DiagnosticCallback)(const char* message, void* ctx);
 struct CloudConfig {
     uint32_t wifiRetryIntervalMs   = IDRYER_WIFI_RETRY_INTERVAL_MS;
     uint32_t provisionRetryMs      = IDRYER_PROVISION_RETRY_MS;
-    uint32_t claimPollIntervalMs   = IDRYER_CLAIM_POLL_INTERVAL_MS;
     uint32_t mqttRetryIntervalMs   = IDRYER_MQTT_RETRY_INTERVAL_MS;
     /// Потолок экспоненциального backoff'а MQTT-реконнекта.
     uint32_t mqttRetryMaxMs        = IDRYER_MQTT_RETRY_MAX_MS;
@@ -100,8 +97,6 @@ public:
      *
      * @return @c true if the request was sent successfully.
      */
-    bool requestClaim();
-    idryer::ClaimRequestResult requestClaimDetailed();
 
     /**
      * @brief Passes the serial number received from the RP2040 controller.
@@ -163,7 +158,6 @@ public:
     void setPairingToken(const char* token);
 
     /// @brief Forces a token refresh (typically not needed in normal flow).
-    bool refreshToken();
 
     const DeviceIdentity& getIdentity() const { return identity_; }
 
@@ -184,7 +178,6 @@ public:
      *
      * The PIN should be displayed to the user so they can enter it in the app.
      */
-    void setClaimPinCallback(ClaimPinCallback cb, void* ctx);
 
     /// @brief Registers a callback for when the device is successfully claimed.
     void setClaimCompleteCallback(ClaimCompleteCallback cb, void* ctx);
@@ -207,7 +200,6 @@ private:
     void handleWaitingForMcuSerial();
     void handleProvisioning();
     void tryActivate(); ///< binding-v3: обменять токен привязки на секрет
-    void handleAwaitingClaim();
     void handleReady();
     void handleMqttConnecting();
     void handleOnline();
@@ -224,17 +216,14 @@ private:
 
     uint32_t lastWifiAttempt_      = 0;
     uint32_t lastProvisionAttempt_ = 0;
-    uint32_t lastTokenRefreshMs_   = 0;
-    uint32_t lastClaimPoll_        = 0;
     uint32_t lastMqttAttempt_      = 0;
     // Текущий интервал MQTT-ретрая: base × 2 на каждую неудачу, потолок
     // mqttRetryMaxMs; сброс к base при успешном подключении.
     uint32_t mqttRetryCurrentMs_   = 0;
-    /// binding-v2: подряд идущие отказы авторизации MQTT (reason 4/5);
-    /// ≥3 → refreshToken() → AwaitingClaim. Сетевые причины сбрасывают.
+    /// Подряд идущие отказы авторизации MQTT (reason 4/5) — только для лога:
+    /// по §4 устройство на них не реагирует, а ждёт REVOKE. Сетевые сбрасывают.
     uint8_t  authRejectStreak_     = 0;
 
-    bool awaitingClaim_      = false;
     bool mqttInitialized_    = false;
     bool unclaimedNotified_  = false;
     bool serialVerified_     = false;
@@ -249,17 +238,11 @@ private:
     uint32_t mcuWorkTimeCounter_ = 0;
     char mqttKey_[IDRYER_MAX_SERIAL_NUMBER_LEN];
 
-    char     pendingPin_[IDRYER_MAX_PIN_LEN];
-    uint32_t pinCreatedAtMs_  = 0;
-    uint32_t pinTotalSeconds_ = 0;
-
     // binding-v3: токен привязки, поданный локально; потребляется в tryActivate().
     char     pendingPairingToken_[IDRYER_MAX_TOKEN_LEN] = {0};
 
     CloudStateChangeCallback stateCallback_        = nullptr;
     void*                    stateCallbackCtx_      = nullptr;
-    ClaimPinCallback         claimPinCallback_      = nullptr;
-    void*                    claimPinCtx_           = nullptr;
     ClaimCompleteCallback    claimCompleteCallback_ = nullptr;
     void*                    claimCompleteCtx_      = nullptr;
     UnclaimedCallback        unclaimedCallback_     = nullptr;

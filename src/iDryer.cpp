@@ -240,7 +240,6 @@ struct Link::Impl {
 
     // User callbacks.
     Link::IntegrationStatusCallback onIntegrationStatus;
-    Link::ClaimPinCallback          onClaimPin;
     Link::ClaimCompleteCallback     onClaimComplete;
     Link::DiagnosticCallback        onDiagnostic;
     Link::PublishHookCallback       onTelemetryPublish;
@@ -470,20 +469,6 @@ bool Link::begin() {
         // Облачный MQTT-путь — гейтится ignoreExternalCmd.
         static_cast<Link*>(ctx)->dispatchCommand(command, data, /*fromLocal=*/false);
     }, this);
-
-    // Auto-claim for standalone devices — отключён: claim только по START_CLAIM от flasher.
-    // impl_->cloud.setUnclaimedCallback([](void* ctx) {
-    //     static_cast<Link::Impl*>(ctx)->cloud.requestClaim();
-    // }, impl_);
-
-    // Claim PIN: cloud → user callback (Serial, UI, etc).
-    impl_->cloud.setClaimPinCallback([](const char* pin, uint32_t expires, void* ctx) {
-        auto* self = static_cast<Link::Impl*>(ctx);
-        if (self->onClaimPin) self->onClaimPin(pin, expires);
-    }, impl_);
-    // Привязка подтверждена бэкендом. Событие приходит до подъёма MQTT,
-    // поэтому продукт может сразу убрать PIN с экрана: ждать соединения
-    // незачем, а на слабой связи это ожидание затягивалось на минуты.
     impl_->cloud.setClaimCompleteCallback([](const char* deviceId, void* ctx) {
         auto* self = static_cast<Link::Impl*>(ctx);
         if (self->onClaimComplete) self->onClaimComplete(deviceId);
@@ -689,46 +674,7 @@ void Link::loop() {
                     s_serial_buf[s_serial_len] = '\0';
                     s_serial_len = 0;
                     const char* cmd = s_serial_buf;
-                    if (strcmp(cmd, "START_CLAIM") == 0 || strcmp(cmd, "claim") == 0) {
-                        idryer::DeviceIdentity id;
-                        impl_->credentials.load(id);
-                        iDryer::ClaimRequestResult result = requestClaimDetailed();
-                        switch (result) {
-                            case iDryer::ClaimRequestResult::Started:
-                                Serial.println("CLAIM_STARTED:OK");
-                                break;
-                            case iDryer::ClaimRequestResult::AlreadyClaimed:
-                                Serial.printf("CLAIM_ALREADY:%s\n",
-                                              id.hasSerialNumber() ? id.serialNumber : "?");
-                                break;
-                            case iDryer::ClaimRequestResult::StaleNvs:
-                                Serial.printf("CLAIM_STALE_NVS:%s:%s\n",
-                                              id.hasSerialNumber() ? id.serialNumber : "?",
-                                              id.hasDeviceId() ? id.deviceId : "?");
-                                break;
-                            case iDryer::ClaimRequestResult::WaitingForMcuSerial:
-                                Serial.println("CLAIM_STARTED:ERROR:WAITING_FOR_MCU_SERIAL");
-                                break;
-                            case iDryer::ClaimRequestResult::WifiNotConnected:
-                                Serial.println("CLAIM_STARTED:ERROR:WIFI_NOT_CONNECTED");
-                                break;
-                            case iDryer::ClaimRequestResult::TokenWithheld:
-                                Serial.println("CLAIM_STARTED:ERROR:TOKEN_WITHHELD");
-                                break;
-                            case iDryer::ClaimRequestResult::ProvisionFailed:
-                                Serial.println("CLAIM_STARTED:ERROR:PROVISION_FAILED");
-                                break;
-                            case iDryer::ClaimRequestResult::RegisterFailed:
-                            default:
-                                Serial.println("CLAIM_STARTED:ERROR:REGISTER_FAILED");
-                                break;
-                        }
-                        Serial.flush();
-                    }
-                    // binding-v3: подать токен привязки локально (по serial от
-                    // флешера/приложения). Устройство активируется им на
-                    // следующем витке cloud-машины (activate → секрет → Ready).
-                    else if (strncmp(cmd, "PAIR_TOKEN:", 11) == 0) {
+                    if (strncmp(cmd, "PAIR_TOKEN:", 11) == 0) {
                         const char* tok = cmd + 11;
                         // Секрет уже есть → окно привязки закрыто. Тот же ответ,
                         // что даёт локальный WS (pair_fail already_bound): иначе
@@ -1235,9 +1181,6 @@ void Link::dispatchCommand(const char* command, JsonObjectConst data, bool fromL
     }
 }
 
-void Link::onClaimPin(ClaimPinCallback cb) {
-    impl_->onClaimPin = std::move(cb);
-}
 
 void Link::onClaimComplete(ClaimCompleteCallback cb) {
     impl_->onClaimComplete = std::move(cb);
@@ -1284,6 +1227,10 @@ void Link::onIntegrationStatus(IntegrationStatusCallback cb) {
     // loop() and dispatch on diff. Decision deferred to a follow-up step.
 }
 
+bool Link::isBound() const {
+    return impl_->cloud.getIdentity().token[0] != '\0';
+}
+
 bool Link::isOnline() const {
     return impl_->cloud.isOnline();
 }
@@ -1305,14 +1252,6 @@ void Link::setWifiCredentials(const char* ssid, const char* password) {
     // переподключаться со старыми (или пустыми) значениями до перезагрузки.
     // Тот же порядок, что в пути Improv выше.
     impl_->wifi.begin(ssid, password);
-}
-
-bool Link::requestClaim() {
-    return impl_->cloud.requestClaim();
-}
-
-iDryer::ClaimRequestResult Link::requestClaimDetailed() {
-    return impl_->cloud.requestClaimDetailed();
 }
 
 idryer::cloud::LinkIntegrationsManager* Link::integrationsManager() {
