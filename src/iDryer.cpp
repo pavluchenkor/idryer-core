@@ -9,6 +9,8 @@
 
 #include "iDryer.h"
 
+#include <esp_ota_ops.h>
+
 #include "mqtt/mqtt_client.h"   // MQTT_CONFIG_CHUNK_SIZE
 #include "work_time_tracker.h"  // накопительный workTimeCounter
 #include <Arduino.h>
@@ -242,6 +244,11 @@ struct Link::Impl {
     Link::IntegrationStatusCallback onIntegrationStatus;
     Link::ClaimCompleteCallback     onClaimComplete;
     Link::DiagnosticCallback        onDiagnostic;
+    /// Идёт загрузка прошивки — своей или, для двухчипа, транзитом для
+    /// контроллера. Пока она идёт, ядро молчит в эфир: канал занят.
+    bool otaActive = false;
+    Link::OtaBeginCallback          onOtaBegin  = nullptr;
+    Link::OtaAbortCallback          onOtaAbort  = nullptr;
     Link::PublishHookCallback       onTelemetryPublish;
     Link::PublishHookCallback       onStatusPublish;
 
@@ -701,14 +708,33 @@ void Link::loop() {
                         const bool bound = impl_->cloud.getIdentity().token[0] != '\0';
                         const bool wifi  = WiFi.status() == WL_CONNECTED;
                         const char* mcu  = mcuSerial();
-                        Serial.printf("STATUS:state=%s wifi=%d ip=%s cloud=%s serial=%s mcu=%s fw=%s\n",
+                        // Раздел загрузки и его состояние: без этого после
+                        // неудачного обновления невозможно понять, что
+                        // произошло — встала новая прошивка, откатился ли
+                        // bootloader на старую, или образ помечен негодным.
+                        const esp_partition_t* part = esp_ota_get_running_partition();
+                        const char* partLabel = part ? part->label : "?";
+                        const char* partState = "?";
+                        esp_ota_img_states_t st;
+                        if (part && esp_ota_get_state_partition(part, &st) == ESP_OK) {
+                            switch (st) {
+                                case ESP_OTA_IMG_NEW:            partState = "new";      break;
+                                case ESP_OTA_IMG_PENDING_VERIFY: partState = "pending";  break;
+                                case ESP_OTA_IMG_VALID:          partState = "valid";    break;
+                                case ESP_OTA_IMG_INVALID:        partState = "invalid";  break;
+                                case ESP_OTA_IMG_ABORTED:        partState = "aborted";  break;
+                                default:                         partState = "undefined";break;
+                            }
+                        }
+                        Serial.printf("STATUS:state=%s wifi=%d ip=%s cloud=%s serial=%s mcu=%s fw=%s part=%s/%s\n",
                                       bound ? "bound" : "setup",
                                       wifi ? 1 : 0,
                                       wifi ? WiFi.localIP().toString().c_str() : "-",
                                       impl_->cloud.isOnline() ? "online" : "offline",
                                       serial(),
                                       (mcu && mcu[0]) ? mcu : "-",
-                                      impl_->cfg.firmwareVersion ? impl_->cfg.firmwareVersion : "-");
+                                      impl_->cfg.firmwareVersion ? impl_->cfg.firmwareVersion : "-",
+                                      partLabel, partState);
                         Serial.flush();
                     }
                     else if (strcmp(cmd, "WIPE_IDENTITY") == 0) {
@@ -746,7 +772,12 @@ void Link::loop() {
         const char* tok = impl_->cloud.getIdentity().token;
         if (tok[0] != '\0' && !impl_->local.hasToken()) impl_->local.updateToken(tok);
     }
-    impl_->intManager.loop();
+    // Интеграции (Bambu по MQTT, Moonraker по WebSocket, Home Assistant) на
+    // время загрузки прошивки не крутим: это отдельные соединения и свой
+    // трафик в том же канале, по которому едет прошивка, плюс лишняя работа в
+    // цикле — а мы за него и боремся. После срыва загрузки они оживают сами,
+    // после успешной — устройство перезагружается.
+    if (!impl_->otaActive) impl_->intManager.loop();
 
     // Lazy: mDNS/WS только после WiFi (lwIP requirement).
     if (!impl_->localStarted && WiFi.status() == WL_CONNECTED) {
@@ -771,7 +802,17 @@ void Link::loop() {
         impl_->cardPublished = false;
     }
 
-    if (anyTransport) {
+    // Идёт загрузка прошивки — телеметрия и статус ждут.
+    //
+    // Каждое сообщение это лишний обмен с брокером ровно там, где счёт идёт на
+    // миллисекунды: устройство подтверждает каждый кусок, и портал шлёт
+    // следующий только после ответа. Смысла в замерах тоже нет — работа
+    // остановлена, а через минуту будет перезагрузка. Для двухчипа это верно и
+    // когда прошивка летит транзитом в контроллер: канал тот же.
+    //
+    // Пропущенные публикации не копятся: после перезагрузки уходит свежее
+    // состояние, а при срыве загрузки публикация возобновляется сама.
+    if (anyTransport && !impl_->otaActive) {
         // Idle-периоды: когда ни один юнит не активен, публикуем реже
         // (*PeriodIdleMs; 0 = не различать active/idle).
         bool anyActive = false;
@@ -1087,6 +1128,34 @@ void Link::dispatchCommand(const char* command, JsonObjectConst data, bool fromL
     // idryer-link ставит UART_FLAG_LOCAL при форварде action-команды на RP2040.
     impl_->currentCmdFromLocal = fromLocal;
 
+    // ─── Gate: идёт обновление прошивки ──────────────────────────────────
+    // Пока прошивка едет, устройство не выполняет ничего постороннего — ни из
+    // облака, ни из локальной сети. Причин две. Первая: запускать нагрев или
+    // сушку у железа, которое через минуту перезагрузится, небезопасно.
+    // Вторая: команда — это работа в том же цикле и трафик в том же канале,
+    // из-за которых загрузка и буксовала.
+    //
+    // Локальные команды тоже блокируем: здесь это не вопрос доверия к сети, а
+    // состояние железа. Проходят только сами firmware_* — иначе обновление
+    // отменило бы само себя.
+    if (impl_->otaActive) {
+        const bool isOta = (strncmp(command, "firmware_", 9) == 0);
+        if (!isOta) {
+            StaticJsonDocument<256> doc;
+            doc["severity"] = eventSeverityString(EventKind::Warning);
+            doc["event"]    = "COMMAND_REJECTED";
+            doc["message"]  = command;
+            doc["unitId"]   = "DEVICE";
+            doc["reason"]   = "firmware_update_in_progress";
+            if (data && data["commandId"].is<const char*>()) {
+                doc["commandId"] = data["commandId"].as<const char*>();
+            }
+            impl_->pub.publishEvent(doc);
+            HAL_LOG_WARN("LINK", "rejected '%s' (firmware update in progress)", command);
+            return;
+        }
+    }
+
     // ─── Gate: ignoreExternalCmd ─────────────────────────────────────────
     // Гейтит только ОБЛАЧНЫЙ путь (MQTT). Локальные команды (fromLocal=true —
     // WS в LAN, под токеном) проходят ВСЕГДА: смысл флага — «портал/облако мной
@@ -1264,6 +1333,36 @@ idryer::ha::HaBuilder& Link::ha() {
 
 idryer::MqttClient* Link::mqttClient() {
     return &impl_->mqtt;
+}
+
+// ─── Обновление прошивки: занятость и остановка работы ──────────────────────
+//
+// «Занят» ядро определяет само, по режимам юнитов: продукт их и так публикует
+// в status, отдельный опрос не нужен. Активные режимы перечислены в контракте
+// (unit_modes_per_product), здесь работает та же проверка, что и для «тихой»
+// телеметрии — новый режим у нового продукта учитывается автоматически.
+bool Link::anyUnitActive() const {
+    for (uint8_t i = 0; i < impl_->cfg.unitsCount && i < MAX_UNITS; ++i) {
+        if (isActiveUnitMode(status.mode[i])) return true;
+    }
+    return false;
+}
+
+OtaInterrupt Link::otaInterruptPolicy() const {
+    return impl_->cfg.otaInterrupt;
+}
+
+void Link::onOtaBegin(OtaBeginCallback cb) { impl_->onOtaBegin = cb; }
+void Link::onOtaAbort(OtaAbortCallback cb) { impl_->onOtaAbort = cb; }
+
+void Link::notifyOtaBegin() {
+    impl_->otaActive = true;
+    if (impl_->onOtaBegin) impl_->onOtaBegin();
+}
+
+void Link::notifyOtaAbort() {
+    impl_->otaActive = false;
+    if (impl_->onOtaAbort) impl_->onOtaAbort();
 }
 
 idryer::DevicePublisher* Link::devicePublisher() {

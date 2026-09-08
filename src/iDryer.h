@@ -167,6 +167,13 @@ public:
     /// продукту этого достаточно, чтобы убрать с экрана PIN.
     using ClaimCompleteCallback     = void (*)(const char* deviceId);
     using DiagnosticCallback        = void (*)(const char* message);
+    /// Началось обновление прошивки: продукт останавливает свою работу
+    /// (анимацию, экран) и показывает, что идёт обновление. Вызывается ПОСЛЕ
+    /// того, как ядро решило, что грузиться можно (см. Config.otaInterrupt).
+    using OtaBeginCallback          = void (*)();
+    /// Обновление закончилось неудачей — можно вернуться к обычной работе.
+    /// При успехе колбэк не приходит: устройство перезагружается.
+    using OtaAbortCallback          = void (*)();
     using PublishHookCallback       = void (*)(JsonObject root);
 
     /// Called right before telemetry is sent. Library has already filled
@@ -290,6 +297,23 @@ public:
     /// Outlet to the SDK MQTT client — for product-side components that
     /// publish their own topics or hook into command routing (MenuBridge etc).
     idryer::MqttClient* mqttClient();
+
+    // ─── Обновление прошивки: занятость и остановка работы ───────────
+    /// Хоть один юнит в активном режиме (сушит, греет, крутит анимацию).
+    /// Считается по status.mode[] — тем же правилам, что и «тихая» телеметрия.
+    bool anyUnitActive() const;
+
+    /// Политика прерывания работы ради OTA (из контракта, через Config).
+    OtaInterrupt otaInterruptPolicy() const;
+
+    /// Продукт останавливает свою работу на время загрузки прошивки.
+    void onOtaBegin(OtaBeginCallback cb);
+    /// Загрузка сорвалась — продукт возвращается к обычной работе.
+    void onOtaAbort(OtaAbortCallback cb);
+
+    /// Вызывается ядром (OtaReceiver), не продуктом.
+    void notifyOtaBegin();
+    void notifyOtaAbort();
 
     /// Outlet to the SDK dual-publish helper — sends one payload to both MQTT
     /// and Local WS. Use this for product-side responses that must reach a

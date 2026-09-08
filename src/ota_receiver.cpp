@@ -157,6 +157,25 @@ void OtaReceiver::handleAnnounce(JsonObjectConst data) {
         return;
     }
 
+    // ── Занятость устройства ────────────────────────────────────────────
+    // Работающее устройство обновлять нельзя вслепую: сушка испортится, а
+    // греющая камера останется без присмотра. Политика — свойство продукта и
+    // приходит из контракта (device_profiles.ota_interrupt → Config), а
+    // занятость прямо сейчас ядро видит по режимам юнитов.
+    //
+    // Wait  → отвечаем «занят», портал откладывает (это не провал).
+    // Allow → работа декоративная (подсветка) и сама не закончится никогда;
+    //         продукт останавливает её по сигналу и мы грузимся.
+    if (link_ && link_->anyUnitActive()) {
+        if (link_->otaInterruptPolicy() == iDryer::OtaInterrupt::Wait) {
+            safeCopy(commandId_, sizeof(commandId_), commandId);
+            HAL_LOG_INFO("OTA", "announce: device busy and must not be interrupted — deferring");
+            publishAck("rejected_busy", "device is running; update deferred until idle", 0, 0);
+            return;
+        }
+        HAL_LOG_INFO("OTA", "announce: device busy but interruptible — stopping work for update");
+    }
+
     // Если уже идёт сессия — abort старой. Backend в этом случае имеет
     // SAME commandId (idempotency replay) или новый (новый push).
     if (active_) {
@@ -210,6 +229,7 @@ void OtaReceiver::handleAnnounce(JsonObjectConst data) {
             }
         }
 
+        if (link_) link_->notifyOtaBegin();
         publishAck("accepted", nullptr, 0, freeHeap);
         return;
     }
@@ -225,6 +245,10 @@ void OtaReceiver::handleAnnounce(JsonObjectConst data) {
     shaStart();
 
     active_ = true;
+    // Продукт останавливает свою работу и показывает, что идёт обновление.
+    // Канал на ближайшую минуту занят прошивкой — телеметрия и анимация
+    // только мешают: с включённой лентой загрузка не доходила вовсе.
+    if (link_) link_->notifyOtaBegin();
     HAL_LOG_INFO("OTA", "Session started: cmd=%s v=%s size=%u chunks=%ux%uB sha=%.12s...",
                  commandId_, toVersion_, (unsigned)expectedSize_,
                  (unsigned)expectedChunks_, (unsigned)expectedChunkSize_, sha256Hex);
@@ -267,12 +291,17 @@ void OtaReceiver::handleChunk(const char* topic, const uint8_t* payload, size_t 
     }
 
     // Sequential ordering: ждём строго chunkIdx == chunksReceived_.
-    // QoS 1 не гарантирует порядок при reconnect — backend шлёт строго после
-    // ack progress на предыдущий, но дубликаты возможны. Дубликаты молча
-    // ингорируем (idempotency).
+    //
+    // Дубликат приходит, когда наш отчёт о приёме до портала не доехал и он
+    // прислал тот же кусок заново. Записывать нечего — но и МОЛЧАТЬ нельзя:
+    // портал ждёт ровно отчёта, повторяет впустую и через несколько попыток
+    // роняет сессию, хотя кусок давно принят (стенд: приняли 139, портал
+    // пять раз слал 138 в тишину и сдался). Отвечаем текущим прогрессом —
+    // портал видит, что мы ушли дальше, и продолжает.
     if (chunkIdx < chunksReceived_) {
-        HAL_LOG_DEBUG("OTA", "chunk %u duplicate (have %u), ignored",
+        HAL_LOG_DEBUG("OTA", "chunk %u duplicate (have %u) — re-sending progress",
                       chunkIdx, chunksReceived_);
+        publishProgress();
         return;
     }
     if (chunkIdx != chunksReceived_) {
@@ -307,7 +336,17 @@ void OtaReceiver::handleChunk(const char* topic, const uint8_t* payload, size_t 
         return;
     }
 
+    // Диагностика задержек OTA: на стенде загрузка иногда замирала на десятки
+    // секунд при идеальной сети. Меряем три этапа отдельно, чтобы видеть, кто
+    // именно встал: запись во флеш (стирание сектора дороже записи), подсчёт
+    // хеша или публикация отчёта. Печатаем только выбросы — иначе лог сам
+    // станет тормозом.
+    const uint32_t tChunkStart = HAL_MILLIS();
+    const uint32_t sinceLast   = lastChunkAtMs_ ? (tChunkStart - lastChunkAtMs_) : 0;
+    lastChunkAtMs_ = tChunkStart;
+
     size_t written = Update.write(const_cast<uint8_t*>(payload), len);
+    const uint32_t tAfterWrite = HAL_MILLIS();
     if (written != len) {
         HAL_LOG_ERROR("OTA", "Update.write %u/%u: %s",
                       (unsigned)written, (unsigned)len, Update.errorString());
@@ -318,6 +357,7 @@ void OtaReceiver::handleChunk(const char* topic, const uint8_t* payload, size_t 
     }
 
     shaUpdate(payload, len);
+    const uint32_t tAfterSha = HAL_MILLIS();
     bytesReceived_ += len;
     chunksReceived_ += 1;
 
@@ -325,6 +365,20 @@ void OtaReceiver::handleChunk(const char* topic, const uint8_t* payload, size_t 
     vTaskDelay(1 / portTICK_PERIOD_MS);
 
     publishProgress();
+    const uint32_t tDone = HAL_MILLIS();
+
+    const uint32_t writeMs = tAfterWrite - tChunkStart;
+    const uint32_t shaMs   = tAfterSha   - tAfterWrite;
+    const uint32_t pubMs   = tDone       - tAfterSha;
+    // Порог: обычный кусок укладывается в единицы миллисекунд. Всё, что
+    // заметно человеку (>300 мс где угодно или большая пауза между кусками),
+    // печатаем.
+    if (writeMs > 300 || shaMs > 300 || pubMs > 300 || sinceLast > 3000) {
+        HAL_LOG_WARN("OTA", "slow chunk %u: gap=%ums write=%ums sha=%ums pub=%ums heap=%u",
+                     (unsigned)chunkIdx, (unsigned)sinceLast, (unsigned)writeMs,
+                     (unsigned)shaMs, (unsigned)pubMs,
+                     (unsigned)heap_caps_get_free_size(MALLOC_CAP_DEFAULT));
+    }
 
     // Последний чанк → финализация.
     if (chunksReceived_ == expectedChunks_) {
@@ -336,6 +390,7 @@ void OtaReceiver::handleChunk(const char* topic, const uint8_t* payload, size_t 
             Update.abort();
             publishComplete("sha_mismatch", "binary hash differs from announce");
             resetSession();
+            if (link_) link_->notifyOtaAbort();
             return;
         }
 
@@ -383,6 +438,7 @@ void OtaReceiver::handleChunk(const char* topic, const uint8_t* payload, size_t 
             HAL_LOG_ERROR("OTA", "Update.end failed: %s", Update.errorString());
             publishComplete("flash_failed", Update.errorString());
             resetSession();
+            if (link_) link_->notifyOtaAbort();
             return;
         }
 
@@ -390,10 +446,24 @@ void OtaReceiver::handleChunk(const char* topic, const uint8_t* payload, size_t 
                      (unsigned)bytesReceived_);
         publishComplete("verified", nullptr);
 
-        // Дать PubSubClient момент протолкнуть publish в TCP перед restart.
-        // На ESP32 PubSubClient sync publish — после возврата из publish
-        // пакет уже в socket. 200 мс с запасом на TLS flush.
-        delay(200);
+        // Дать стеку реально ОТПРАВИТЬ рапорт перед перезагрузкой.
+        //
+        // Здесь стоял delay(200) с расчётом на PubSubClient, у которого
+        // publish() синхронный. Библиотека давно другая — espMqttClient
+        // асинхронный: publish лишь кладёт пакет в очередь, а отправка идёт
+        // из loop(). delay() цикл не крутит, поэтому рапорт уезжал в никуда:
+        // портал не узнавал об успехе и через таймаут писал FAILED на
+        // прошивке, которая на самом деле успешно встала. Проверено замером
+        // на брокере — сообщения не было вовсе.
+        //
+        // Крутим loop, а не спим (так же сделано в revoke_ack).
+        if (mqtt_) {
+            const uint32_t until = HAL_MILLIS() + 800;
+            while (HAL_MILLIS() < until) {
+                mqtt_->loop();
+                HAL_DELAY_MS(10);
+            }
+        }
 
         resetSession();
         ESP.restart();
@@ -566,6 +636,26 @@ bool OtaReceiver::hexToBytes(const char* hex, uint8_t* out, size_t outLen) {
 // ─── Self-confirm boot partition ────────────────────────────────────────
 
 void OtaReceiver::markCurrentBootValid() {
+    // Печатаем, откуда и в каком состоянии загрузились, ДО подтверждения.
+    // Иначе после неудачного обновления не отличить «встала новая» от
+    // «bootloader откатил на старую» — а это разные болезни.
+    const esp_partition_t* running = esp_ota_get_running_partition();
+    if (running) {
+        esp_ota_img_states_t st;
+        const char* name = "?";
+        if (esp_ota_get_state_partition(running, &st) == ESP_OK) {
+            switch (st) {
+                case ESP_OTA_IMG_NEW:            name = "new";       break;
+                case ESP_OTA_IMG_PENDING_VERIFY: name = "pending";   break;
+                case ESP_OTA_IMG_VALID:          name = "valid";     break;
+                case ESP_OTA_IMG_INVALID:        name = "invalid";   break;
+                case ESP_OTA_IMG_ABORTED:        name = "aborted";   break;
+                default:                         name = "undefined"; break;
+            }
+        }
+        HAL_LOG_INFO("OTA", "boot from %s (%s)", running->label, name);
+    }
+
     esp_err_t err = esp_ota_mark_app_valid_cancel_rollback();
     if (err == ESP_OK) {
         HAL_LOG_INFO("OTA", "boot partition marked valid (rollback cancelled)");
@@ -740,9 +830,17 @@ void OtaReceiver::handleOtaCommitNow() {
         // получит timeout/missing-info и поймёт что что-то не так.
         return;
     }
-    HAL_LOG_INFO("OTA", "Boot partition set → restart in 200ms");
+    HAL_LOG_INFO("OTA", "Boot partition set → flushing MQTT, then restart");
     WorkTimeTracker::instance().flush();
-    delay(200);
+    // То же, что в solo-ветке: publish асинхронный, отправка идёт из loop().
+    // Спать перед перезагрузкой бессмысленно — крутим цикл.
+    if (mqtt_) {
+        const uint32_t until = HAL_MILLIS() + 800;
+        while (HAL_MILLIS() < until) {
+            mqtt_->loop();
+            HAL_DELAY_MS(10);
+        }
+    }
     ESP.restart();
 }
 

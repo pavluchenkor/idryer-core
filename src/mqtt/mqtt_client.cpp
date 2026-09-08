@@ -307,13 +307,47 @@ void MqttClient::onMqttMessage(const espMqttClientTypes::MessageProperties& prop
                                size_t len, size_t index, size_t total) {
     (void)props;
 
-    // EMC_RX_BUFFER_SIZE=16384 гарантирует, что все наши payload'ы (команды
-    // ≤1КБ, OTA-chunks ≤4КБ) приходят одним куском. Частичная доставка =
-    // сообщение больше буфера — дропаем, как раньше дропал PubSubClient.
-    if (index != 0 || len != total) {
-        HAL_LOG_ERROR("MQTT", "← chunked payload on %s (%u/%u) — dropped, raise EMC_RX_BUFFER_SIZE",
-                      topic, (unsigned)(index + len), (unsigned)total);
-        return;
+    // Библиотека НЕ собирает сообщение целиком: payload отдаётся порциями по
+    // мере прихода TCP-сегментов (Parser::_payloadPublish берёт min(доступно,
+    // остаток)), а сегмент — это ~1.4 КБ. Поэтому OTA-кусок в 4 КБ почти
+    // всегда приезжает в 2-3 вызова. EMC_RX_BUFFER_SIZE тут ни при чём: это
+    // размер одного чтения из сокета, а не гарантия целостности сообщения.
+    //
+    // Раньше здесь стоял дроп всего, что пришло не целиком, — и OTA работала
+    // лотереей: кусок принимался, только если сегменты случайно легли удачно.
+    // Теперь собираем фрагменты по index/total, которые библиотека для этого
+    // и передаёт.
+    static uint8_t s_asm_buf[OTA_CHUNK_ASSEMBLY_SIZE];
+    static char    s_asm_topic[TOPIC_BUFFER_SIZE];
+    static size_t  s_asm_len = 0;
+
+    if (total > len) {
+        if (total > sizeof(s_asm_buf)) {
+            HAL_LOG_ERROR("MQTT", "← payload %u B on %s exceeds assembly buffer (%u B) — dropped",
+                          (unsigned)total, topic, (unsigned)sizeof(s_asm_buf));
+            s_asm_len = 0;
+            return;
+        }
+        if (index == 0) {
+            // Начало нового сообщения: запоминаем топик, чтобы не склеить два
+            // разных сообщения, если они пойдут вперемешку.
+            strncpy(s_asm_topic, topic, sizeof(s_asm_topic) - 1);
+            s_asm_topic[sizeof(s_asm_topic) - 1] = '\0';
+            s_asm_len = 0;
+        } else if (s_asm_len != index || strcmp(s_asm_topic, topic) != 0) {
+            // Пропущенная порция или чужое сообщение: собирать нечего.
+            HAL_LOG_WARN("MQTT", "← out-of-order fragment on %s (index=%u, have=%u) — dropped",
+                         topic, (unsigned)index, (unsigned)s_asm_len);
+            s_asm_len = 0;
+            return;
+        }
+        memcpy(s_asm_buf + index, payload, len);
+        s_asm_len = index + len;
+        if (s_asm_len < total) return;  // ждём остальные порции
+
+        payload = s_asm_buf;            // сообщение собрано целиком
+        len     = total;
+        s_asm_len = 0;
     }
 
     // OTA-chunks (commands/firmware_update_chunk/{commandId}/{chunkIdx}) — это

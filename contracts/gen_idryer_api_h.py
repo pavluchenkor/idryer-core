@@ -269,6 +269,35 @@ def render_integration_status_struct() -> list[str]:
     ]
 
 
+def render_ota_interrupt(doc: dict) -> list[str]:
+    """Политика прерывания работы ради OTA — из device_profiles.ota_interrupt.
+
+    Устройство должно решать это САМО, в том числе без связи с порталом
+    (токен и прошивка могут прийти по локальной сети). Поэтому политика
+    попадает в прошивку значением по умолчанию для Config, а не спрашивается
+    у бэкенда.
+    """
+    profiles = (doc.get("device_profiles") or {})
+    out = [
+        "/// Можно ли прервать РАБОТУ устройства ради обновления прошивки.",
+        "/// Значение по умолчанию берётся из device_profiles.ota_interrupt",
+        "/// в mqtt_contract.yaml; продукт может переопределить в Config.",
+        "enum class OtaInterrupt : uint8_t {",
+        "    Wait  = 0,   ///< Нельзя: дождаться простоя (нагрев, сушка).",
+        "    Allow = 1,   ///< Можно: остановить работу и обновиться (подсветка).",
+        "};",
+        "",
+        "/// Политика продукта из контракта. Продукт передаёт её в Config;",
+        "/// хардкодить значение в main.cpp не нужно.",
+    ]
+    for name, prof in profiles.items():
+        policy = str(prof.get("ota_interrupt", "wait")).lower()
+        enum_val = "Allow" if policy == "allow" else "Wait"
+        const = "OTA_INTERRUPT_" + name.upper()
+        out.append(f"constexpr OtaInterrupt {const} = OtaInterrupt::{enum_val};")
+    return out
+
+
 def render_config_struct(doc: dict) -> list[str]:
     vocab = doc.get("capability_vocabulary") or {}
     out = [
@@ -302,6 +331,12 @@ def render_config_struct(doc: dict) -> list[str]:
         "    uint32_t    telemetryPeriodIdleMs;  ///< Period while ALL units are idle (no active mode); 0 = use telemetryPeriodMs",
         "    uint32_t    statusPeriodMs;         ///< Reconciliation period; status also publishes immediately on meaningful change",
         "    uint32_t    statusPeriodIdleMs;     ///< Reconciliation period while ALL units are idle; 0 = use statusPeriodMs",
+        "",
+        "    // ── Поведение при обновлении прошивки ──",
+        "    /// Можно ли прервать работу устройства ради OTA. Значение из",
+        "    /// контракта: OTA_INTERRUPT_<PROFILE> (см. выше). Занятость в",
+        "    /// текущий момент ядро спрашивает у продукта отдельно.",
+        "    OtaInterrupt otaInterrupt;",
         "",
         "    // ── Identification (published in `info` retained payload) ──",
         "    const char* hardwareVersion;",
@@ -346,6 +381,7 @@ def render_module(doc: dict) -> str:
     out += render_integration_state_enum(doc) + [""]
     out += render_event_kind_enum() + [""]
     out += render_request_kind_enum(doc) + [""]
+    out += render_ota_interrupt(doc) + [""]
 
     out += [
         "// ── Data structs ──────────────────────────────────────────────────",

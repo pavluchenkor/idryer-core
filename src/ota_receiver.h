@@ -141,6 +141,8 @@ private:
     uint16_t expectedChunkSize_ = 0;
     uint16_t chunksReceived_ = 0;
     uint32_t bytesReceived_ = 0;
+    /// Когда пришёл предыдущий кусок — для замера пауз в приёме (диагностика).
+    uint32_t lastChunkAtMs_ = 0;
 
     // Sync polling state для UART-proxy chunk ack (target=rp2040).
     bool ackReceived_ = false;
