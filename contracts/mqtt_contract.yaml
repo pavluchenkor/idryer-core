@@ -890,10 +890,10 @@ payloads:
           currentStage: { type: uint8 }
           totalStages: { type: uint8 }
           stagePhase: { type: enum, ref: UartStagePhase }
-          _pad:
+          pendingErrors:
             {
               type: uint8,
-              note: "trailing padding для выравнивания entry; должен быть 0",
+              note: "Сколько неснятых записей журнала ошибок относится к этой камере (0 — чисто). Source: errlog в EEPROM на RP2040, живёт между перезагрузками и обнуляется только командой ClearErrors. Нужен экранам: режим камеры после ребута чистый (Idle), а неподтверждённая авария остаётся — по mode её не отличить. Занимает бывший _pad, поэтому размер entry прежний: старая прошивка шлёт 0 и читается как «чисто».",
             }
       uptime:
         {
