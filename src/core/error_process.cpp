@@ -1,4 +1,5 @@
-#if defined(ESP32) || defined(ESP_PLATFORM)
+// Платформонезависимая реализация: фильтры и колбэк. Раньше собиралась
+// только под ESP32, из-за чего RP2040 держал свою копию.
 #include "error_process.h"
 
 static ErrorCallback g_cb        = nullptr;
@@ -20,4 +21,3 @@ void error_process_all(void) {
     }
 }
 
-#endif // ESP32 || ESP_PLATFORM

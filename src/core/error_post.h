@@ -26,6 +26,19 @@ static inline bool errbus_post_ex(uint8_t     ctrl_id,
 
 // ── Convenience wrappers (timestamp auto-filled from millis()) ────────────────
 
+// Историческое имя из iDryerControllerV2 — оставлено, чтобы не переписывать
+// вызовы в прошивках, которые уже его используют.
+static inline bool post_err_ex(uint8_t     ctrl_id,
+                               ErrSource   src,
+                               ErrSeverity sev,
+                               ErrCode     code,
+                               const char* msg,
+                               int32_t     data,
+                               uint32_t    now_ms)
+{
+    return errbus_post_ex(ctrl_id, src, sev, code, msg, data, now_ms);
+}
+
 static inline bool POST_ERROR(ErrSeverity sev,
                               uint8_t     ctrl_id,
                               ErrSource   src,

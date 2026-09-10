@@ -1,4 +1,5 @@
-#if defined(ESP32) || defined(ESP_PLATFORM)
+// Платформонезависимая реализация: таблица имён. Раньше собиралась
+// только под ESP32, из-за чего RP2040 держал свою копию.
 #include "error_table.h"
 #include "error_defs.h"
 #include <stdio.h>
@@ -54,4 +55,3 @@ int error_format_line(const ErrorEvent* ev, char* buf, size_t buf_sz) {
     );
 }
 
-#endif // ESP32 || ESP_PLATFORM
