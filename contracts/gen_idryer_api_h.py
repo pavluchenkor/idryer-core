@@ -298,6 +298,22 @@ def render_ota_interrupt(doc: dict) -> list[str]:
     return out
 
 
+def render_publish_defaults(doc: dict) -> list[str]:
+    """Периоды автопубликации из contracts/mqtt_contract.yaml → constexpr."""
+    pd = doc.get("publish_defaults") or {}
+    tel = pd.get("telemetry") or {}
+    st = pd.get("status") or {}
+    return [
+        "// ── Периоды автопубликации по умолчанию (publish_defaults в yaml) ──",
+        "// Единственное место, где эти числа заданы. Продукт, оставивший поле",
+        "// Config нулём, получает значение отсюда.",
+        f"constexpr uint32_t DEFAULT_TELEMETRY_PERIOD_MS      = {tel.get('period_ms', 30000)};",
+        f"constexpr uint32_t DEFAULT_TELEMETRY_PERIOD_IDLE_MS = {tel.get('period_idle_ms', 60000)};",
+        f"constexpr uint32_t DEFAULT_STATUS_PERIOD_MS         = {st.get('period_ms', 60000)};",
+        f"constexpr uint32_t DEFAULT_STATUS_PERIOD_IDLE_MS    = {st.get('period_idle_ms', 300000)};",
+    ]
+
+
 def render_config_struct(doc: dict) -> list[str]:
     vocab = doc.get("capability_vocabulary") or {}
     out = [
@@ -327,10 +343,18 @@ def render_config_struct(doc: dict) -> list[str]:
     out += [
         "",
         "    // ── Auto-publish periods (ms) ──",
-        "    uint32_t    telemetryPeriodMs;",
-        "    uint32_t    telemetryPeriodIdleMs;  ///< Period while ALL units are idle (no active mode); 0 = use telemetryPeriodMs",
-        "    uint32_t    statusPeriodMs;         ///< Reconciliation period; status also publishes immediately on meaningful change",
-        "    uint32_t    statusPeriodIdleMs;     ///< Reconciliation period while ALL units are idle; 0 = use statusPeriodMs",
+        "    // Ноль в любом из полей = взять значение из контракта (константы",
+        "    // DEFAULT_* выше). Задавайте своё, только если продукту это",
+        "    // действительно нужно — числа контракта уже согласованы с порталом.",
+        "    uint32_t    telemetryPeriodMs;      ///< 0 = DEFAULT_TELEMETRY_PERIOD_MS",
+        "    uint32_t    telemetryPeriodIdleMs;  ///< Пока ВСЕ юниты простаивают; 0 = DEFAULT_TELEMETRY_PERIOD_IDLE_MS",
+        "    uint32_t    statusPeriodMs;         ///< Сверка; статус публикуется и сразу при изменении. 0 = DEFAULT_STATUS_PERIOD_MS",
+        "    uint32_t    statusPeriodIdleMs;     ///< Сверка, пока ВСЕ юниты простаивают; 0 = DEFAULT_STATUS_PERIOD_IDLE_MS",
+        "    /// Продукт не публикует `status` вовсе (например, Storage: у него",
+        "    /// нет режимов и уставок). Именно флаг, а не нулевой период:",
+        "    /// ноль теперь означает «взять из контракта», а незаданное поле в C",
+        "    /// равно нулю — значит по умолчанию статус публикуется, как и был.",
+        "    bool        statusDisabled;",
         "",
         "    // ── Поведение при обновлении прошивки ──",
         "    /// Можно ли прервать работу устройства ради OTA. Значение из",
@@ -397,6 +421,7 @@ def render_module(doc: dict) -> str:
         "// ── Config ────────────────────────────────────────────────────────",
         "",
     ]
+    out += render_publish_defaults(doc) + [""]
     out += render_config_struct(doc) + [""]
 
     out += [

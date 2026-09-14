@@ -59,6 +59,16 @@
         }
       }
     },
+    "publish_defaults": {
+      "type": "object",
+      "description": "Периоды автопубликации по умолчанию. Ядро берёт их, когда продукт оставил соответствующее поле Config нулём.",
+      "additionalProperties": false,
+      "properties": {
+        "telemetry": { "$ref": "#/$defs/PublishPeriod" },
+        "status": { "$ref": "#/$defs/PublishPeriod" }
+      },
+      "required": ["telemetry", "status"]
+    },
     "source_of_truth": { "$ref": "#/$defs/SourceOfTruth" },
     "rules": { "$ref": "#/$defs/Rules" },
     "uart_kind_ranges": { "$ref": "#/$defs/UartKindRanges" },
@@ -101,6 +111,15 @@
   },
 
   "$defs": {
+    "PublishPeriod": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "period_ms": { "type": "integer", "minimum": 1 },
+        "period_idle_ms": { "type": "integer", "minimum": 1 }
+      },
+      "required": ["period_ms", "period_idle_ms"]
+    },
     "SourceOfTruth": {
       "type": "object",
       "additionalProperties": false,

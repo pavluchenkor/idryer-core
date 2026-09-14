@@ -847,9 +847,18 @@ void Link::loop() {
             if (isActiveUnitMode(status.mode[i])) { anyActive = true; break; }
         }
 
-        uint32_t telemetryPeriod = impl_->cfg.telemetryPeriodMs;
-        if (!anyActive && impl_->cfg.telemetryPeriodIdleMs > 0) {
-            telemetryPeriod = impl_->cfg.telemetryPeriodIdleMs;
+        // Ноль в поле Config = «взять значение из контракта». Продукт больше
+        // не обязан помнить эти числа: раньше каждый вписывал их руками, и они
+        // разъезжались (idryer-touch публиковался в восемнадцать раз чаще, чем
+        // просит контракт). Своё значение задать по-прежнему можно — это
+        // осознанное решение, а не обязанность.
+        uint32_t telemetryPeriod = impl_->cfg.telemetryPeriodMs
+                                       ? impl_->cfg.telemetryPeriodMs
+                                       : iDryer::DEFAULT_TELEMETRY_PERIOD_MS;
+        if (!anyActive) {
+            telemetryPeriod = impl_->cfg.telemetryPeriodIdleMs
+                                  ? impl_->cfg.telemetryPeriodIdleMs
+                                  : iDryer::DEFAULT_TELEMETRY_PERIOD_IDLE_MS;
         }
         // Событийно по булевым полям (fan/servo): смена состояния публикует
         // телеметрию сразу; дебаунс 2с защищает от дребезга. Периодика — сверка.
@@ -873,7 +882,10 @@ void Link::loop() {
         // НЕ считаются — иначе каждый снапшот «новый» и событийность теряет
         // смысл. Кастомные поля продуктов (onStatusPublish hook) SDK не видит —
         // их события продукт публикует сам через publishStatusNow().
-        if (impl_->cfg.statusPeriodMs > 0) {
+        // statusDisabled — продукт вовсе не публикует статус (Storage: у него
+        // нет ни режимов, ни уставок). Отдельный флаг, потому что нулевой
+        // период теперь означает «взять из контракта».
+        if (!impl_->cfg.statusDisabled) {
             bool statusChanged = false;
             for (uint8_t i = 0; i < impl_->cfg.unitsCount && i < MAX_UNITS; ++i) {
                 if (status.mode[i]        != impl_->lastPubMode[i] ||
@@ -884,9 +896,13 @@ void Link::loop() {
                 }
             }
 
-            uint32_t statusPeriod = impl_->cfg.statusPeriodMs;
-            if (!anyActive && impl_->cfg.statusPeriodIdleMs > 0) {
-                statusPeriod = impl_->cfg.statusPeriodIdleMs;
+            uint32_t statusPeriod = impl_->cfg.statusPeriodMs
+                                        ? impl_->cfg.statusPeriodMs
+                                        : iDryer::DEFAULT_STATUS_PERIOD_MS;
+            if (!anyActive) {
+                statusPeriod = impl_->cfg.statusPeriodIdleMs
+                                   ? impl_->cfg.statusPeriodIdleMs
+                                   : iDryer::DEFAULT_STATUS_PERIOD_IDLE_MS;
             }
 
             if (statusChanged || now - impl_->lastStatusMs >= statusPeriod) {
@@ -1035,6 +1051,11 @@ void Link::publishTelemetryNow() {
 }
 
 void Link::publishStatusNow() {
+    // Единственный заслон для продуктов без статуса. Периодику отсекает
+    // проверка в loop(), но публикацию зовут и события (setIgnoreExternalCmd,
+    // продуктовый код) — без этой строки Storage опубликовал бы пустой статус.
+    if (impl_->cfg.statusDisabled) return;
+
     const Config& cfg = impl_->cfg;
     StaticJsonDocument<512> doc;
 

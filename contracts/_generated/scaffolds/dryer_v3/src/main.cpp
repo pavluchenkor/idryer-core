@@ -1,6 +1,6 @@
 // ============================================================================
 // SCAFFOLD: dryer_v3
-// Generated 2026-09-09 by contracts/gen_scaffold.py from mqtt_contract.yaml
+// Generated 2026-09-14 by contracts/gen_scaffold.py from mqtt_contract.yaml
 //
 // HOW TO START:
 //   1. Copy this directory to your PlatformIO project root.
@@ -42,9 +42,10 @@ static const idryer::Config CFG = {
     .allowBambu        = false,
     .allowMoonraker    = false,
     .allowHa           = false,
-    // Publish periods (ms):
-    .telemetryPeriodMs = 5000,
-    .statusPeriodMs    = 10000,
+    // Publish periods: leave unset — the SDK takes them from the
+    // contract (publish_defaults in mqtt_contract.yaml). Set a field
+    // only if your product really needs a different rate; the contract
+    // values are the ones the portal expects.
     // Identity shown on portal:
     .hardwareVersion   = "1.0",
     .firmwareVersion   = "0.1.0",
