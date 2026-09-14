@@ -186,7 +186,15 @@ def main():
     ap.add_argument("--serial",  required=True, help="Device serial, e.g. DEVICE_ACEBE648EAD0")
     ap.add_argument("--broker",  default="192.168.1.27")
     ap.add_argument("--port",    type=int, default=1883)
-    ap.add_argument("--timeout", type=float, default=10.0, help="Seconds per test")
+    # Крайний срок ожидания, а не пауза: проверка заканчивается сразу, как
+    # пришло сообщение. Поэтому запас ничего не замедляет — дольше становится
+    # только падение.
+    #
+    # 75 с взято с запасом к самому длинному периоду публикации из контракта:
+    # телеметрия в простое идёт раз в 60 с. С прежним умолчанием 10 с тест
+    # писал «нет сообщения» на полностью исправном устройстве.
+    ap.add_argument("--timeout", type=float, default=75.0,
+                    help="Крайний срок на проверку, с (умолчание с запасом к периоду телеметрии)")
     ap.add_argument("--user",     default="", help="Broker username (брокер с авторизацией)")
     ap.add_argument("--password", default="", help="Broker password")
     ap.add_argument("--only",    default="", help="Comma-separated test names to run")
