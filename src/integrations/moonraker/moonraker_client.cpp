@@ -6,6 +6,7 @@
 #if defined(ESP32) || defined(ESP_PLATFORM)
 
 #include "moonraker_client.h"
+#include "../../core/error_post.h"
 #include "../../hal/hal_types.h"
 #include <ArduinoJson.h>
 #include <WiFi.h>
@@ -178,22 +179,7 @@ void MoonrakerClient::onWebSocketEvent(WStype_t type, uint8_t* payload, size_t l
         // Fail-safe: при потере соединения обнуляем chamber target и сообщаем
         // продукту, чтобы auto_heat выключил нагрев. Иначе нагрев продолжится
         // на последнем известном target пока коннект не восстановится.
-        bool wasActive = status_.virtualChamberAvailable
-                      || status_.chamberTarget != 0.0f
-                      || status_.chamberHasSensor;
-        status_ = MoonrakerStatus{};
-        if (wasActive) {
-            if (vcCallback_) {
-                VirtualChamberData data{};
-                data.available   = false;
-                data.hasSensor   = false;
-                data.target      = 0.0f;
-                data.temperature = 0.0f;
-                vcCallback_(data);
-            }
-            if (chamberCallback_) chamberCallback_(0.0f, false);
-            if (statusCallback_)  statusCallback_(status_);
-        }
+        resetChamberFailSafe();
         setState(MoonrakerConnectionState::Connecting);
         reconnectBackoffMs_ *= 2;
         if (reconnectBackoffMs_ > kReconnectMaxMs) reconnectBackoffMs_ = kReconnectMaxMs;
@@ -282,6 +268,50 @@ void MoonrakerClient::handleJsonRpcMessage(const char* text, size_t length)
     }
 
     const char* method = doc["method"] | (const char*)nullptr;
+
+    // Klippy поднялся — переподписываемся. Подписки живут на стороне Klippy, и
+    // Moonraker стирает их все, когда теряет с ним связь (klippy_connection:
+    // _on_connection_closed → subscriptions = {}). WebSocket при этом остаётся
+    // живым: пинги ходят, а notify_status_update не приходит никогда, потому
+    // что подписки уже нет. Без этой переподписки интеграция молчит до
+    // перезагрузки iHeater.
+    if (method && strcmp(method, "notify_klippy_ready") == 0) {
+        HAL_LOG_INFO("MOON", "klippy ready → re-subscribe");
+        // Закрываем инцидент: о потере Klippy сообщали критическим событием,
+        // и без парного сообщения о возврате оно висит в ленте портала как
+        // неснятая авария.
+        if (klippyDownReported_) {
+            klippyDownReported_ = false;
+            post_info(0, ERRSRC_LINK, ERRC_OK,
+                      "Moonraker: Klippy ready, chamber control restored", 0);
+        }
+        sendSubscribe();
+        return;
+    }
+
+    // Klippy пропал, а WebSocket жив: данные о камере больше не обновляются, и
+    // без сброса нагрев продолжался бы по последнему target вслепую. Тот же
+    // fail-safe, что и при разрыве соединения; подписку вернёт
+    // notify_klippy_ready.
+    if (method && (strcmp(method, "notify_klippy_disconnected") == 0
+                || strcmp(method, "notify_klippy_shutdown") == 0)) {
+        const bool isShutdown = strcmp(method, "notify_klippy_shutdown") == 0;
+        HAL_LOG_WARN("MOON", "%s → chamber target → 0 (safety)", method);
+        resetChamberFailSafe();
+        setError(isShutdown ? "klippy shutdown" : "klippy disconnected");
+        // Критическое событие на портал и в приложение: управление камерой
+        // потеряно на работающем принтере, нагрев снят не пользователем.
+        // Один пост на инцидент — флаг снимется на notify_klippy_ready.
+        if (!klippyDownReported_) {
+            klippyDownReported_ = true;
+            POST_ERROR(ERRSEV_CRITICAL, 0, ERRSRC_LINK, ERRC_NO_RESPONSE,
+                       isShutdown ? "Moonraker: Klippy shutdown, chamber control lost"
+                                  : "Moonraker: Klippy disconnected, chamber control lost",
+                       0);
+        }
+        return;
+    }
+
     if (method && strcmp(method, "notify_status_update") == 0) {
         JsonArrayConst params = doc["params"].as<JsonArrayConst>();
         if (!params.isNull() && params.size() >= 1) {
@@ -455,6 +485,26 @@ void MoonrakerClient::setState(MoonrakerConnectionState newState)
                  moonrakerConnectionStateToString(old),
                  moonrakerConnectionStateToString(newState));
     if (stateCallback_) stateCallback_(newState);
+}
+
+void MoonrakerClient::resetChamberFailSafe()
+{
+    const bool wasActive = status_.virtualChamberAvailable
+                        || status_.chamberTarget != 0.0f
+                        || status_.chamberHasSensor;
+    status_ = MoonrakerStatus{};
+    if (!wasActive) return;
+
+    if (vcCallback_) {
+        VirtualChamberData data{};
+        data.available   = false;
+        data.hasSensor   = false;
+        data.target      = 0.0f;
+        data.temperature = 0.0f;
+        vcCallback_(data);
+    }
+    if (chamberCallback_) chamberCallback_(0.0f, false);
+    if (statusCallback_)  statusCallback_(status_);
 }
 
 void MoonrakerClient::setError(const char* message)

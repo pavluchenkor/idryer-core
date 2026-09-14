@@ -580,7 +580,7 @@ widgets:
     applies_to: [iheater_link]
     purpose: "Карточка нагревателя. Локальный draft state для temp/duration, не затрагивает меню."
     telemetry:
-      - "chamberTemp — температура камеры от активной интеграции (Bambu или Moonraker); приходит только при наличии датчика камеры у принтера"
+      - "telemetry.units[0].temperature — температура камеры от активной интеграции (Bambu или Moonraker); приходит только при наличии датчика камеры у принтера. Своего датчика воздуха у Link нет"
     status_signals:
       - "status.units[0].mode (IDLE | DRYING)"
       - "status.units[0].target.temperature (float °C) — текущая цель нагрева"
@@ -597,7 +597,7 @@ widgets:
       - "button: Стоп → commands/invoke {action:'heat.stop'}"
     mockup_idle: |
       ┌─ iHeater Link · Idle · ▂▂▂▆ ─────────┐
-      │  🌡 23.5 °C (chamberTemp от интеграции) │
+      │  🌡 23.5 °C (камера принтера, интеграция)│
       │  ─────────────────────────────────    │
       │  Темп  [  60  ] °C                    │
       │  Время [   0  ] мин (0=∞)             │
@@ -1455,16 +1455,17 @@ messages:
                   }
                 outputMode: { type: int, note: "0 = выключен, 1 = нагрев" }
                 targetTempC: { type: float, unit: "°C" }
-                chamberTemp:
-                  type: float
-                  unit: "°C"
-                  optional: true
-                  note: "Температура камеры от активной интеграции (Bambu или Moonraker). Приходит только если у принтера реально есть датчик камеры. Отсутствие поля = нет датчика (см. rules.telemetry_null_policy)."
               extra_unit_fields:
                 "units[0].heaterPower":
                   { type: int, note: "0 или 100 (heating ? 100 : 0)" }
+                "units[0].temperature":
+                  type: float
+                  unit: "°C"
+                  optional: true
+                  note: "Температура камеры от активной интеграции (Bambu или Moonraker) — у Link своего датчика воздуха нет, камера принтера его единственная измеряемая температура. Публикуется в стандартном поле юнита: только по нему backend пишет телеметрию в БД и строит график. Приходит только если у принтера реально есть датчик камеры; отсутствие поля = нет датчика (см. rules.telemetry_null_policy)."
               notes:
                 - "iHeater Link публикует эти поля сверх стандартной units[]-схемы."
+                - "Отдельного top-level chamberTemp НЕТ (убран 2026-09-14): температура камеры едет в units[0].temperature. Своё поле рядом с units[] ни backend, ни фронт, ни приложение не читали — график устройства оставался пустым."
       uart:
         kind: Telemetry
         kind_id: 0x10

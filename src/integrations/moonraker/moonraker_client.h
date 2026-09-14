@@ -115,6 +115,11 @@ private:
     void applyStatusUpdate(const JsonObjectConst& statusObj);
     void sendSubscribe();
 
+    /// Fail-safe: обнулить состояние камеры и сообщить продукту (target → 0).
+    /// Вызывается, когда данные о камере перестали быть достоверными: разрыв
+    /// WebSocket либо потеря Klippy под живым соединением.
+    void resetChamberFailSafe();
+
     void setState(MoonrakerConnectionState newState);
     void setError(const char* message);
 
@@ -122,6 +127,9 @@ private:
     bool                     configValid_ = false;
     MoonrakerConnectionState state_       = MoonrakerConnectionState::Disabled;
     char                     lastError_[96] = {0};
+    /// Критическое событие о потере Klippy уже отправлено — не повторяем,
+    /// пока не придёт notify_klippy_ready.
+    bool                     klippyDownReported_ = false;
     bool                     logPayloads_ = false;
 
     WebSocketsClient         ws_;
