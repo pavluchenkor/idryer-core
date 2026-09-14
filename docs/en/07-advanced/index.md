@@ -9,3 +9,4 @@ It describes the internal library components: the device coordinator, the UART t
 - [Integrations](03-integrations.md) — Home Assistant, Bambu Lab, Moonraker/Klipper
 - [Arduino platform](04-platform-arduino.md) — WiFi, NVS, OTA interfaces
 - [Profiles](05-profiles.md) — `IProfile` model and device behaviour
+- [Wi-Fi provisioning](06-wifi-provisioning.md) — provisioning phases, setup mode, timeouts

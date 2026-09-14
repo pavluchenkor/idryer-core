@@ -9,3 +9,4 @@ Popisuje interní součásti knihovny: koordinátor zařízení, vrstvu UART tra
 - [Integrace](03-integrations.md) — Home Assistant, Bambu Lab, Moonraker/Klipper
 - [Arduino platforma](04-platform-arduino.md) — WiFi, NVS, OTA rozhraní
 - [Profily](05-profiles.md) — model `IProfile` a chování zařízení
+- [Připojení k Wi-Fi](06-wifi-provisioning.md) — fáze provisioningu, režim nastavení, časové limity

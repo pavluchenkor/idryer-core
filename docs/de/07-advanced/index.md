@@ -9,3 +9,4 @@ Es beschreibt die internen Bibliotheks-Komponenten: den Geräte-Koordinator, die
 - [Integrationen](03-integrations.md) — Home Assistant, Bambu Lab, Moonraker/Klipper
 - [Arduino-Plattform](04-platform-arduino.md) — WiFi, NVS, OTA-Schnittstellen
 - [Profile](05-profiles.md) — `IProfile` Modell und Geräte-Verhalten
+- [WLAN-Verbindung](06-wifi-provisioning.md) — Provisioning-Phasen, Einrichtungsmodus, Zeitgrenzen

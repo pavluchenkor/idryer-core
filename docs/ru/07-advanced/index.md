@@ -9,3 +9,4 @@
 - [Интеграции](03-integrations.md) — Home Assistant, Bambu Lab, Moonraker/Klipper
 - [Arduino-платформа](04-platform-arduino.md) — интерфейсы WiFi, NVS, OTA
 - [Профили](05-profiles.md) — модель `IProfile` и поведение устройства
+- [Подключение к Wi-Fi](06-wifi-provisioning.md) — фазы провижининга, режим настройки, таймауты
