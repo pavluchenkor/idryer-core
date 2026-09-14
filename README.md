@@ -1,135 +1,149 @@
+<div align="center">
+
 # idryer-core
 
-[developer docs](https://dev.idryer.org/core/)
+**A library for ESP32. Two lines of code connect your device to the iDryer ecosystem.**
 
-> **Before editing anything, read the "Code Generation" section below.**
-> Some files in this repository are generated automatically, and manual changes will be overwritten.
+[![Docs](https://img.shields.io/badge/docs-idryer.org-e7352c)](https://docs.idryer.org/en/development/core/) [![Telegram](https://img.shields.io/badge/Telegram-iDryer-2ca5e0)](https://t.me/iDryer) [![Discord](https://img.shields.io/badge/Discord-join-5865f2)](https://discord.gg/jGce5eeHHz) [![License](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
 
----
-
-Embedded library for ESP32 devices in the iDryer ecosystem.
-
-If you are building a device that should work with the [iDryer portal](https://portal.idryer.org/) infrastructure (cloud, web portal, mobile app, printer integrations), this library provides the full integration layer: WiFi provisioning, claim flow, TLS MQTT session with auto-reconnect, command routing, and periodic telemetry publishing.
-[App Store](https://apps.apple.com/app/idryer/id6760609044)
-[Google Play](https://play.google.com/store/apps/details?id=org.idryer.mobile)
-
-
-You only implement device-specific logic: sensor reads, peripheral control, and business logic. Everything else is handled by `iDryer::Link link(cfg); link.begin(); link.loop();`.
+</div>
 
 ---
 
-## Code Generation
+## What this is
 
-**Single source of truth: [`contracts/mqtt_contract.yaml`](contracts/mqtt_contract.yaml)**
+The shared integration layer for iDryer devices. If your device has to work with the [portal](https://portal.idryer.org/), the mobile app and printer integrations, this library covers everything between the hardware and the cloud.
 
-This file is used to generate:
-
-| Generated artifact | Output path | Used by |
-|---|---|---|
-| `iDryer::Config` (`has*` flags) | `src/_generated/iDryer_api.h` | Firmware (`main.cpp`) |
-| UART protocol (structs/enums/kind ids) | `contracts/_generated/uart_protocol.h` | UART bridge |
-| MQTT topics (C++ constants) | `contracts/_generated/mqtt_topics.h` | Firmware |
-| `HardwareUnitConfigCapabilities` | `contracts/_generated/mqtt-api.types.ts` | Portal (TypeScript) |
-
-**Rule:** do not edit files in `src/_generated/` and `contracts/_generated/` manually. They are overwritten on the next regeneration.
-
-### Run Regeneration
-
-```bash
-cd contracts
-./regen.sh
-```
-
-Internally: YAML validation -> all generators in sequence. Usually takes around 1 second.
-
-The pre-commit hook runs this automatically. Setup is described in [`contracts/HOOKS.md`](contracts/HOOKS.md).
-
-### Add a New Capability
-
-Example: add support for a button (`button`):
-
-**1. Add to YAML:**
-
-```yaml
-# contracts/mqtt_contract.yaml → capability_vocabulary:
-button:
-  json_key: "button"
-  config_flag: "hasButton"
-  description: "Control button"
-```
-
-**2. Run regeneration:**
-
-```bash
-cd contracts && ./regen.sh
-```
-
-After that, `iDryer::Config` will include `hasButton`, and TypeScript will include `HardwareUnitConfigCapabilities.button`.
-
-**3. In your device `main.cpp`:**
+About five hundred lines of boilerplate collapse into two calls:
 
 ```cpp
+#include <iDryer.h>
+
 static const iDryer::Config CFG = {
-    // ...
-    .hasButton = true,   // field is now available
+    .deviceType        = iDryer::DeviceType::StorageLink,
+    .unitsCount        = 1,
+    .hasAirTemp        = true,
+    .telemetryPeriodMs = 10000,
+    .hardwareVersion   = "1.0",
+    .firmwareVersion   = "1.0.0",
 };
+static iDryer::Link link(CFG);
+
+void setup() { link.begin(); }
+void loop()  { link.loop(); link.telemetry.airTempC[0] = sensor.read(); }
 ```
 
-**4. Flash the device** — the portal reads `button: true` from `/info` and renders the corresponding UI block.
+That is a working device: it connects to Wi-Fi, binds to an account and shows up in the portal with its telemetry.
 
-### Contract Navigation
+## Who it is for
 
-```bash
-cd contracts
+For 3D printing enthusiasts who invent their own devices and want a result fast, not an infrastructure project.
 
-# File map
-python3 show.py
+- **You built a device and want to control it remotely.** From your phone, from a browser, with a push notification when something happens. The portal, the mobile app, account binding, telemetry and charts already exist. One evening, and your device appears in the app with its own card.
+- **You write only your part.** Sensors, actuators, logic. Wi-Fi, secure transport, commands and over-the-air updates come with the library.
+- **You extend the ecosystem.** Firmware, portal and the bridge between microcontrollers all read one contract. This is where it lives.
 
-# Find a specific action
-python3 show.py invoke_actions.storage_link.led.pulse
+## What it handles
 
-# All invoke actions across devices
-python3 show.py --actions
+- **Wi-Fi** connection, keep-alive, and first-time setup over Improv on Web Serial.
+- **Binding** registration in the backend and linking to a user account by PIN.
+- **MQTT** broker session: TLS, persistent session, automatic reconnect, time sync.
+- **Telemetry and status** published periodically on a timer.
+- **Commands** routing of incoming `invoke`, `set` and `ping` into your product handler.
+- **Local WebSocket** a client on the same network sees the same stream as the cloud.
+- **Storage** Wi-Fi credentials, device token and menu configuration survive a reboot.
+- **Printer integrations** Home Assistant, Bambu Lab, Moonraker: the device learns the print state with no code on your side.
+- **Over-the-air updates** receiving firmware for the ESP32 and proxying it to a second microcontroller over UART.
 
-# Device profiles (capability sets per device)
-python3 show.py device_profiles
-```
+## What it does not do
 
----
+The library does not touch hardware and does not know what device you are building. Fans, heaters, LED strips and sensors are yours. So is the drying, storage or lighting logic.
 
-## Usage
+Telemetry does not appear on its own: you fill in `link.telemetry.*` in your own `loop()`.
 
-Used in production devices:
+The boundary is deliberate. The library owns transport, your product owns meaning.
 
-- **iDryer Storage Link** - filament rack lighting control.
-- **iHeater Link** - bridge between printer systems (Bambu/Klipper/HA) and an active iHeater-based thermal chamber.
+## The contract is the source of truth
 
-Each device has its own product repository and uses this library via PlatformIO `lib_deps` or a symlink.
+The protocol is described in a single file: [`contracts/mqtt_contract.yaml`](contracts/mqtt_contract.yaml). Everything else is generated from it:
 
-## Documentation
+| What is generated | Where | For whom |
+|---|---|---|
+| `iDryer::Config` with `has*` flags | `src/_generated/iDryer_api.h` | firmware |
+| UART protocol: structs, enums, codes | `contracts/_generated/uart_protocol.h` | bridge between microcontrollers |
+| MQTT topics as constants | `contracts/_generated/mqtt_topics.h` | firmware |
+| Capability types | `contracts/_generated/mqtt-api.types.ts` | portal |
 
-- Site: https://dev.idryer.org/core/
-- In this repository: [`docs/ru/`](docs/ru/) - Russian docs.
+Firmware, bridge and portal cannot drift apart, because they share one description.
 
-5-minute quick start: [`docs/ru/02-quickstart/01-five-minutes.md`](docs/ru/02-quickstart/01-five-minutes.md).
+> **Never edit files in `_generated/` by hand.** The next generation run overwrites them. Edit the YAML, then run `cd contracts && ./regen.sh`, about a second. The pre-commit hook does it for you.
 
-Full public API reference: [`docs/ru/03-public-api/01-link-api-reference.md`](docs/ru/03-public-api/01-link-api-reference.md).
+## Two ways to get an interface
+
+**Your own device: the card builds itself.** The firmware declares a list of entities: sensors, numeric fields, switches, buttons. The portal receives that description and renders the card from it. No changes on the portal side are needed. This mechanism exists precisely for community devices.
+
+**Ecosystem products: cards are written by hand.** The dryers, iHeater and Storage have their own interfaces, polished for a specific product, and they are not built from a description.
+
+An important consequence. Adding a new capability to the shared contract vocabulary, `hasButton` for example, is not enough to make it appear in the interface of product devices: the vocabulary describes the protocol, and the product card has to be extended separately. If you need a capability in the shared vocabulary, start with an issue. It has to be agreed on.
+
+For your own device nothing needs to be agreed on: declare the entities in the firmware and get a card.
+
+→ [Add your own product](https://docs.idryer.org/en/development/core/09-add-product/01-add-new-product/)
+
+## Where it is used
+
+The library is the foundation of every device in the ecosystem: [iDryer Link](https://github.com/pavluchenkor/iDryer-Link), [iHeater Link](https://github.com/pavluchenkor/iHeater-Link), [iDryer Storage](https://github.com/pavluchenkor/iDryer-Storage), [iDryer Touch](https://github.com/pavluchenkor/idryer-touch), [iDryer Controller V2](https://github.com/pavluchenkor/iDryerControllerV2).
+
+Add it through `lib_deps` in PlatformIO or with a symlink.
+
+If you want to build your own device on it, there are complete end-to-end examples with every step explained: [Build Your Own iDryer](https://docs.idryer.org/en/development/byod/).
+
+## Where to start
+
+**[Get running in five minutes](https://docs.idryer.org/en/development/core/02-quickstart/01-five-minutes/)** from an empty folder to a device showing Online in the portal. You need an ESP32-C3, a cable and PlatformIO.
+
+Then, as needed:
+
+- [What idryer-core is and when you need it](https://docs.idryer.org/en/development/core/01-overview/01-what-is-idryer-core/)
+- [Full API reference](https://docs.idryer.org/en/development/core/03-public-api/01-link-api-reference/)
+- [Add a sensor](https://docs.idryer.org/en/development/core/04-patterns/01-add-sensor/)
+- [How the contract works](https://docs.idryer.org/en/development/core/08-contracts/01-mqtt-contract/)
+- [What to do when it does not work](https://docs.idryer.org/en/development/core/10-troubleshooting/01-troubleshooting/)
+
+## Status
+
+The library is the foundation of every device in the ecosystem. The protocol contract is shared by firmware and portal, and changes go through generation.
+
+## What is in the repository
+
+| Path | What it is |
+|---|---|
+| `src/` | The library |
+| `contracts/` | Protocol contract, generators, YAML navigation |
+| `examples/` | Ready-to-build examples, from minimal to complete |
+| `menu/` | The menu described as a protocol |
+| `CARD-MANIFEST` | Dynamic device cards for the portal |
 
 ## License
 
-Licensed under the [Apache License, Version 2.0](LICENSE) — see also [NOTICE](NOTICE).
+Code: [Apache License 2.0](LICENSE), [NOTICE](NOTICE).
 
-You may use, modify, distribute and sell this library, including for commercial
-purposes, and you are not required to open the source of products built on it.
+The iDryer name is not covered by the license, see [TRADEMARKS.md](TRADEMARKS.md).
 
-The license does not grant rights to the iDryer name. Community projects are
-welcome and the naming policy is permissive — see [TRADEMARKS.md](TRADEMARKS.md).
+Releases up to and including the last GPL-3.0 tag remain available under GPL-3.0. Apache-2.0 applies from the first release that contains the current LICENSE file.
 
-Hardware design and mechanical documentation are licensed separately and are
-not covered by this license.
+## Help
 
-Releases up to and including the last GPL-3.0 tag remain available under
-GPL-3.0. Apache-2.0 applies from the first release that carries this LICENSE
-file onward.
+- [Telegram](https://t.me/iDryer)
+- [Discord](https://discord.gg/jGce5eeHHz)
+- [Documentation](https://docs.idryer.org/en/development/core/)
 
-For questions not covered by the license, contact the author: [pavluchenkor](https://github.com/pavluchenkor).
+## Contributing
+
+Built a device on the core, found a bug, missed a capability in the contract? Open an issue or send a pull request.
+
+Before making changes, read the section on generation: some files in the repository are created automatically.
+
+## Next
+
+[Five minutes to your first device](https://docs.idryer.org/en/development/core/02-quickstart/01-five-minutes/): flash an ESP32 and see it in the portal.

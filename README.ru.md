@@ -1,136 +1,149 @@
+<div align="center">
+
 # idryer-core
 
-[developer docs](https://dev.idryer.org/core/)
+**Библиотека для ESP32. Устройство подключается к экосистеме iDryer двумя строками кода.**
 
-> **Перед тем как что-либо редактировать — прочитайте раздел «Кодогенерация» ниже.**
-> Часть файлов в этом репозитории генерируется автоматически, и ваши правки будут перезаписаны.
+[![Документация](https://img.shields.io/badge/docs-idryer.org-e7352c)](https://docs.idryer.org/development/core/) [![Telegram](https://img.shields.io/badge/Telegram-iDryer-2ca5e0)](https://t.me/iDryer) [![Discord](https://img.shields.io/badge/Discord-join-5865f2)](https://discord.gg/jGce5eeHHz) [![Лицензия](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
 
----
-
-Embedded-библиотека для ESP32-устройств экосистемы iDryer.
-
-Если вы делаете своё устройство, которое должно работать с инфраструктурой [portal iDryer](https://portal.idryer.org/) — облако, портал, мобильное приложение, интеграции с принтерами — эта библиотека снимает с вас всю обвязку: WiFi-provisioning, claim-протокол привязки к аккаунту, MQTT-сессию с TLS и автореконнектом, маршрутизацию команд, периодическую публикацию телеметрии.
-[App Store](https://apps.apple.com/app/idryer/id6760609044)
-[Google Play](https://play.google.com/store/apps/details?id=org.idryer.mobile)
-
-
-Вы пишете только то, что специфично вашему устройству: чтение датчиков, управление периферией, бизнес-логику. Всё остальное — `iDryer::Link link(cfg); link.begin(); link.loop();`.
+</div>
 
 ---
 
-## Кодогенерация
+## Что это
 
-**Единственный источник правды: [`contracts/mqtt_contract.yaml`](contracts/mqtt_contract.yaml)**
+Общий слой интеграции для устройств iDryer. Если ваше устройство должно работать с [порталом](https://portal.idryer.org/), мобильным приложением и интеграциями с принтерами, эта библиотека закрывает всё, что лежит между железом и облаком.
 
-Из этого файла автоматически генерируется:
-
-| Что генерируется | Куда | Кто читает |
-|---|---|---|
-| `iDryer::Config` (has* флаги) | `src/_generated/iDryer_api.h` | Прошивка (`main.cpp`) |
-| UART-протокол (structs/enums/kind ids) | `contracts/_generated/uart_protocol.h` | UART bridge |
-| MQTT topics (C++ constants) | `contracts/_generated/mqtt_topics.h` | Прошивка |
-| `HardwareUnitConfigCapabilities` | `contracts/_generated/mqtt-api.types.ts` | Портал (TypeScript) |
-
-**Правило:** не редактируйте файлы в `src/_generated/` и `contracts/_generated/` вручную — они перезаписываются при следующей регенерации.
-
-### Запуск регенерации
-
-```bash
-cd contracts
-./regen.sh
-```
-
-Внутри: валидация YAML → все генераторы подряд. Занимает ~1 секунду.
-
-Pre-commit hook делает это автоматически. Установка — см. [`contracts/HOOKS.md`](contracts/HOOKS.md).
-
-### Как добавить новую периферию (capability)
-
-Например, добавляем поддержку кнопки (`button`):
-
-**1. Добавить в YAML:**
-
-```yaml
-# contracts/mqtt_contract.yaml → capability_vocabulary:
-button:
-  json_key: "button"
-  config_flag: "hasButton"
-  description: "Кнопка управления"
-```
-
-**2. Запустить регенерацию:**
-
-```bash
-cd contracts && ./regen.sh
-```
-
-После этого в `iDryer::Config` появится поле `hasButton`, а в TypeScript — `HardwareUnitConfigCapabilities.button`.
-
-**3. В `main.cpp` вашего устройства:**
+Порядка пятисот строк однотипной обвязки сворачиваются в два вызова:
 
 ```cpp
+#include <iDryer.h>
+
 static const iDryer::Config CFG = {
-    // ...
-    .hasButton = true,   // ← теперь это поле существует
+    .deviceType        = iDryer::DeviceType::StorageLink,
+    .unitsCount        = 1,
+    .hasAirTemp        = true,
+    .telemetryPeriodMs = 10000,
+    .hardwareVersion   = "1.0",
+    .firmwareVersion   = "1.0.0",
 };
+static iDryer::Link link(CFG);
+
+void setup() { link.begin(); }
+void loop()  { link.loop(); link.telemetry.airTempC[0] = sensor.read(); }
 ```
 
-**4. Прошить устройство** — портал подхватит `button: true` из `/info` и отобразит нужный UI-блок.
+Это рабочее устройство: оно подключится к Wi-Fi, привяжется к аккаунту и появится в портале со своей телеметрией.
 
-### Навигация по контракту
+## Для кого
 
-```bash
-cd contracts
+Для энтузиастов 3D-печати, которые придумывают свои устройства и хотят быстро получить результат, а не строить инфраструктуру.
 
-# Карта файла
-python3 show.py
+- **Вы собрали устройство и хотите управлять им удалённо.** С телефона, из браузера, с push-уведомлением, когда что-то произошло. Портал, мобильное приложение, привязка к аккаунту, телеметрия и графики уже есть. За один вечер устройство появляется в приложении со своей карточкой.
+- **Вы пишете только своё.** Датчики, нагрузка, логика. Wi-Fi, защищённая связь, команды, обновления по воздуху приходят с библиотекой.
+- **Вы дорабатываете экосистему.** Прошивки, портал и мост между микроконтроллерами читают один контракт. Здесь его источник.
 
-# Найти конкретный action
-python3 show.py invoke_actions.storage_link.led.pulse
+## Что берёт на себя
 
-# Все invoke actions всех устройств
-python3 show.py --actions
+- **Wi-Fi** — подключение, удержание, первичная настройка через Improv по Web Serial.
+- **Привязка** — регистрация в бэкенде и связывание с аккаунтом пользователя по PIN.
+- **MQTT** — сессия с брокером: TLS, persistent session, автоматический reconnect, синхронизация времени.
+- **Телеметрия и статус** — периодическая публикация по таймеру.
+- **Команды** — маршрутизация входящих `invoke`, `set` и `ping` в обработчик продукта.
+- **Локальный WebSocket** — клиент в той же сети видит тот же поток, что и облако.
+- **Хранение** — учётные данные Wi-Fi, токен устройства и конфигурация меню переживают перезагрузку.
+- **Интеграции с принтерами** — Home Assistant, Bambu Lab, Moonraker: устройство узнаёт о состоянии печати без кода на вашей стороне.
+- **Обновление по воздуху** — приём прошивки для ESP32 и проксирование её второму микроконтроллеру по UART.
 
-# Профили устройств (что умеет каждое)
-python3 show.py device_profiles
-```
+## Чего не делает
 
----
+Библиотека не трогает железо и не знает, что за устройство вы собираете. Вентиляторы, нагреватели, ленты и датчики — ваша зона. Логика сушки, хранения или подсветки — тоже.
 
-## Применение
+Телеметрия не появляется сама: вы заполняете `link.telemetry.*` в своём `loop()`.
 
-Используется в реальных устройствах:
+Граница проведена намеренно. Библиотека отвечает за транспорт, продукт — за смысл.
 
-- **iDryer Storage Link** — управление подсветкой стеллажа с филаментом.
-- **iHeater Link** — мост между принтером (Bambu/Klipper/HA) и активной термокамерой на базе iHeater.
+## Контракт как источник правды
 
-Каждое устройство — отдельный продуктовый репозиторий, подключающий эту библиотеку через PlatformIO `lib_deps` или симлинк.
+Протокол описан в одном файле — [`contracts/mqtt_contract.yaml`](contracts/mqtt_contract.yaml). Из него генерируется всё остальное:
 
-## Документация
+| Что генерируется | Куда | Для кого |
+|---|---|---|
+| `iDryer::Config` с флагами `has*` | `src/_generated/iDryer_api.h` | прошивка |
+| UART-протокол: структуры, enum'ы, коды | `contracts/_generated/uart_protocol.h` | мост между микроконтроллерами |
+| MQTT-топики константами | `contracts/_generated/mqtt_topics.h` | прошивка |
+| Типы возможностей | `contracts/_generated/mqtt-api.types.ts` | портал |
 
-- Сайт: https://dev.idryer.org/core/ *(после первой публикации)*
-- В репозитории: [`docs/ru/`](docs/ru/) — русская версия.
+Прошивка, мост и портал не могут разойтись, потому что описание у них одно.
 
-Старт за 5 минут — [`docs/ru/02-quickstart/01-five-minutes.md`](docs/ru/02-quickstart/01-five-minutes.md).
+> **Файлы в `_generated/` руками не правятся** — их перезапишет следующая генерация. Правится YAML, дальше `cd contracts && ./regen.sh`, около секунды. Pre-commit hook делает это сам.
 
-Полный API фасада — [`docs/ru/03-public-api/01-link-api-reference.md`](docs/ru/03-public-api/01-link-api-reference.md).
+## Два способа получить интерфейс
+
+**Своё устройство — карточка строится сама.** Прошивка объявляет список сущностей: датчики, числовые поля, переключатели, кнопки. Портал получает это описание и рисует карточку по нему. Правок на стороне портала не требуется — механизм рассчитан именно на устройства сообщества.
+
+**Продукты экосистемы — карточки написаны вручную.** У сушилок, iHeater и Storage интерфейс свой, вылизанный под конкретное изделие, и он не строится из описания.
+
+Отсюда следует важное. Добавить новую возможность в общий словарь контракта — например `hasButton` — недостаточно, чтобы она появилась в интерфейсе продуктовых устройств: словарь описывает протокол, а карточку продукта надо доработать отдельно. Если вам нужна возможность в общем словаре, начните с issue — её нужно согласовать.
+
+Для своего устройства ничего согласовывать не нужно: объявляйте сущности в прошивке и получайте карточку.
+
+→ [Добавить свой продукт](https://docs.idryer.org/development/core/09-add-product/01-add-new-product/)
+
+## Где используется
+
+Библиотека лежит в основе всех устройств экосистемы: [iDryer Link](https://github.com/pavluchenkor/iDryer-Link), [iHeater Link](https://github.com/pavluchenkor/iHeater-Link), [iDryer Storage](https://github.com/pavluchenkor/iDryer-Storage), [iDryer Touch](https://github.com/pavluchenkor/idryer-touch), [iDryer Controller V2](https://github.com/pavluchenkor/iDryerControllerV2).
+
+Подключается через `lib_deps` в PlatformIO или симлинком.
+
+Хотите собрать своё устройство на ней — есть готовые сквозные примеры с разбором каждого шага: [Build Your Own iDryer](https://docs.idryer.org/development/byod/).
+
+## С чего начать
+
+**[Запустить за пять минут](https://docs.idryer.org/development/core/02-quickstart/01-five-minutes/)** — от пустой папки до устройства со статусом Online в портале. Нужны ESP32-C3, кабель и PlatformIO.
+
+Дальше по мере необходимости:
+
+- [Что такое idryer-core и когда он нужен](https://docs.idryer.org/development/core/01-overview/01-what-is-idryer-core/)
+- [Полный справочник API](https://docs.idryer.org/development/core/03-public-api/01-link-api-reference/)
+- [Добавить датчик](https://docs.idryer.org/development/core/04-patterns/01-add-sensor/)
+- [Устройство контракта](https://docs.idryer.org/development/core/08-contracts/01-mqtt-contract/)
+- [Что делать, если не работает](https://docs.idryer.org/development/core/10-troubleshooting/01-troubleshooting/)
+
+## Статус
+
+Библиотека в основе всех устройств экосистемы. Контракт протокола общий для прошивок и портала, изменения идут через генерацию.
+
+## Что лежит в репозитории
+
+| Путь | Что это |
+|---|---|
+| `src/` | Библиотека |
+| `contracts/` | Контракт протокола, генераторы, навигация по YAML |
+| `examples/` | Готовые к сборке примеры от минимального до полного |
+| `menu/` | Описание меню как протокола |
+| `CARD-MANIFEST` | Динамические карточки устройств для портала |
 
 ## Лицензия
 
-Распространяется под [Apache License 2.0](LICENSE) — см. также [NOTICE](NOTICE).
+Код — [Apache License 2.0](LICENSE), [NOTICE](NOTICE).
 
-Библиотеку разрешено использовать, изменять, распространять и продавать, в том
-числе в коммерческих целях. Открывать исходники продуктов, построенных на ней,
-не требуется.
+Имя iDryer лицензией не покрывается — [TRADEMARKS.md](TRADEMARKS.md).
 
-Лицензия не передаёт прав на имя iDryer. Проекты сообщества приветствуются,
-политика по имени разрешительная — см. [TRADEMARKS.md](TRADEMARKS.md).
+Релизы по последний GPL-3.0 тег включительно остаются доступны под GPL-3.0. Apache-2.0 применяется начиная с первого релиза, содержащего текущий файл LICENSE.
 
-Конструкция железа и механическая документация лицензируются отдельно и этой
-лицензией не покрываются.
+## Помощь
 
-Релизы по последний GPL-3.0 тег включительно остаются доступны под GPL-3.0.
-Apache-2.0 применяется начиная с первого релиза, содержащего текущий файл
-LICENSE.
+- [Telegram](https://t.me/iDryer)
+- [Discord](https://discord.gg/jGce5eeHHz)
+- [Документация](https://docs.idryer.org/development/core/)
 
-По вопросам, не покрытым лицензией — связаться с автором: [pavluchenkor](https://github.com/pavluchenkor).
+## Участие
+
+Собрали устройство на ядре, нашли ошибку, не хватило возможности в контракте — заводите issue или присылайте pull request.
+
+Перед правками прочитайте раздел про генерацию: часть файлов в репозитории создаётся автоматически.
+
+## Дальше
+
+[Пять минут до первого устройства](https://docs.idryer.org/development/core/02-quickstart/01-five-minutes/): прошить ESP32 и увидеть его в портале.
