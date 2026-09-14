@@ -90,6 +90,12 @@ public:
     bool publishRfidWriteResult(JsonDocument& doc);
 
     bool isMqttConnected() const  { return mqtt_->isConnected(); }
+    /// Ниже этого порога свободной кучи передачу конфига не начинаем и не
+    /// продолжаем: копии кусков живут в куче, пока их не заберёт сеть.
+    static constexpr uint32_t kMinHeapForConfig = 12000;
+
+    /// Почему брокер не принял последний кусок конфига — для сообщения об ошибке.
+    const char* lastMqttChunkErrorText() const { return mqtt_->lastChunkErrorText(); }
 #if defined(ESP32) || defined(ESP_PLATFORM)
     bool isLocalConnected() const { return local_ && local_->isClientConnected(); }
 #else

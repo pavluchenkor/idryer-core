@@ -45,6 +45,7 @@
 #include "menu_meta.h"     // MENU_META_COUNT, MENU_SERIALIZED_MAX_SIZE, g_menu_meta
 #include "menu_cache.h"    // g_menu_cache, MENU_MAX_UNITS
 #include "menu_commands.h" // MENU_JSON_DOC_CAP (capacity для DynamicJsonDocument)
+#include "radio_busy.h"    // отметка «радио занято» на время передачи
 
 // Backward-compat fallback: MENU_SERIALIZED_MAX_SIZE генерируется menu_gen.py
 // (точный размер сериализованного текста по содержимому меню). Если генератор
@@ -53,6 +54,21 @@
 // in-memory структуры вместо реального размера текста), но не сломает сборку.
 #ifndef MENU_SERIALIZED_MAX_SIZE
 #define MENU_SERIALIZED_MAX_SIZE MENU_FULL_JSON_BUF_SIZE
+#endif
+
+// Отправка меню — самый тяжёлый момент жизни устройства: десятки килобайт
+// подряд при почти пустой куче. Именно здесь рвётся связь, поэтому по ходу
+// передачи снимаем обстановку. Вне ESP32 цифр нет — там и проблемы нет.
+#if defined(ESP32) || defined(ESP_PLATFORM)
+#include <esp_heap_caps.h>
+#include <WiFi.h>
+#define MENU_HEAP_FREE()    (unsigned)heap_caps_get_free_size(MALLOC_CAP_DEFAULT)
+#define MENU_HEAP_LARGEST() (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_DEFAULT)
+#define MENU_RSSI()         (int)WiFi.RSSI()
+#else
+#define MENU_HEAP_FREE()    0u
+#define MENU_HEAP_LARGEST() 0u
+#define MENU_RSSI()         0
 #endif
 
 namespace idryer {
@@ -77,32 +93,94 @@ public:
     /// меню и publishRawChunkTopic(...)/publishConfigRaw для чанков.
     ///
     /// @return длина сериализованного JSON или 0 при ошибке.
+    /// Почему publishFull вернул 0. Раньше продукт сообщал на портал одну и ту
+    /// же фразу на все случаи, и по ней нельзя было отличить нехватку памяти от
+    /// обрыва отправки на середине.
+    enum class Error : uint8_t {
+        None,         ///< ошибки не было
+        NoPublisher,  ///< не передан издатель
+        BuildFailed,  ///< не собрался JSON (счётный проход)
+        Empty,        ///< меню пустое
+        NoBuffers,    ///< не нашлось памяти под буферы кусков
+        SendAborted,  ///< отправка оборвалась на куске lastChunk()
+    };
+
+    Error    lastError() const { return lastError_; }
+    uint16_t lastChunk() const { return lastChunk_; }
+
+    const char* lastErrorText() const {
+        switch (lastError_) {
+            case Error::None:        return "ok";
+            case Error::NoPublisher: return "no publisher";
+            case Error::BuildFailed: return "json build failed";
+            case Error::Empty:       return "empty menu";
+            case Error::NoBuffers:   return "no memory for chunk buffers";
+            case Error::SendAborted: return "send aborted at chunk";
+        }
+        return "unknown";
+    }
+
     template <typename PublisherT>
     size_t publishFull(PublisherT* publisher) {
-        if (!publisher) return 0;
+        lastError_ = Error::None;
+        lastChunk_ = 0;
+        if (!publisher) { lastError_ = Error::NoPublisher; return 0; }
 
         // Первый проход — только считаем длину: она нужна в заголовке каждого
         // куска (поле total), а портал по ней понимает, сколько ещё ждать.
         CountingSink counter;
-        if (!generate(counter)) return 0;
+        if (!generate(counter)) { lastError_ = Error::BuildFailed; return 0; }
         const size_t total = counter.total;
-        if (total == 0) return 0;
+        if (total == 0) { lastError_ = Error::Empty; return 0; }
+
+        // Пока меню уходит, радио не отдаём: скан ради выбора точки посреди
+        // передачи оборвал бы её на середине.
+        RadioBusyGuard radioGuard;
+
+        const uint32_t startedMs = HAL_MILLIS();
+        // Снимок «до»: с чем передача начинается. Если она сорвётся, сравнение
+        // этих цифр с теми, что напечатает обрыв, показывает, просела ли куча
+        // за время отправки или её не хватало с самого начала.
+        HAL_LOG_INFO("MENU", "publishFull: start %u bytes (~%u chunks of %u), "
+                             "rssi %d dBm, heap free=%u largest=%u",
+                     (unsigned)total,
+                     (unsigned)((total + MENU_CHUNK_SIZE - 1) / MENU_CHUNK_SIZE),
+                     (unsigned)MENU_CHUNK_SIZE, MENU_RSSI(),
+                     MENU_HEAP_FREE(), MENU_HEAP_LARGEST());
 
         ChunkSinkT<PublisherT> sink(publisher, total);
         if (!sink.ready()) {
+            lastError_ = Error::NoBuffers;
             HAL_LOG_ERROR("MENU", "no memory for chunk buffers");
             return 0;
         }
         if (!generate(sink) || !sink.finish()) {
-            HAL_LOG_ERROR("MENU", "publish failed at chunk %u", (unsigned)sink.chunks());
+            lastError_ = Error::SendAborted;
+            lastChunk_ = sink.chunks();
+            HAL_LOG_ERROR("MENU", "publish failed at chunk %u of ~%u after %u ms, "
+                                  "rssi %d dBm, heap free=%u largest=%u min=%u",
+                          (unsigned)sink.chunks(),
+                          (unsigned)((total + MENU_CHUNK_SIZE - 1) / MENU_CHUNK_SIZE),
+                          (unsigned)(HAL_MILLIS() - startedMs), MENU_RSSI(),
+                          MENU_HEAP_FREE(), MENU_HEAP_LARGEST(), sink.minHeap());
             return 0;
         }
-        HAL_LOG_INFO("MENU", "config published: %u bytes in %u chunks",
-                     (unsigned)total, (unsigned)sink.chunks());
+        // Минимум кучи за передачу важнее итогового: к концу память уже
+        // вернулась, а сорваться могло на самом дне.
+        HAL_LOG_INFO("MENU", "config published: %u bytes in %u chunks, %u ms "
+                             "(chunk size %u), rssi %d dBm, heap min=%u largest-min=%u, "
+                             "retries=%u",
+                     (unsigned)total, (unsigned)sink.chunks(),
+                     (unsigned)(HAL_MILLIS() - startedMs), (unsigned)MENU_CHUNK_SIZE,
+                     MENU_RSSI(), sink.minHeap(), sink.minLargest(), sink.slowChunks());
         return total;
     }
 
     MenuPublisher() = default;
+
+    Error    lastError_ = Error::None;
+    uint16_t lastChunk_ = 0;
+
     MenuPublisher(const MenuPublisher&) = delete;
     MenuPublisher& operator=(const MenuPublisher&) = delete;
 
@@ -134,6 +212,14 @@ private:
 
         bool ready() const { return true; }   // ничего не выделяем
         uint16_t chunks() const { return idx_; }
+        /// Самая низкая точка кучи за передачу — по ней видно, насколько близко
+        /// к краю прошла отправка, даже если она удалась.
+        unsigned minHeap() const { return minHeap_; }
+        unsigned minLargest() const { return minLargest_; }
+        /// Куски, на которых очередь брокера была занята и публикация прошла не
+        /// с первой попытки: рост этого числа — первый признак, что канал не
+        /// успевает за отправкой.
+        unsigned slowChunks() const { return slowChunks_; }
 
         bool put(const char* data, size_t len) {
             size_t done = 0;
@@ -182,8 +268,28 @@ private:
             env[pos++] = '}';
             env[pos]   = '\0';
 
+            // Обстановку снимаем до публикации: после неё буфер уже освобождён
+            // и дно кучи не поймать.
+            const unsigned heapNow    = MENU_HEAP_FREE();
+            const unsigned largestNow = MENU_HEAP_LARGEST();
+            if (heapNow    < minHeap_)    minHeap_    = heapNow;
+            if (largestNow < minLargest_) minLargest_ = largestNow;
+
             // Первый кусок заодно стирает устаревший retained-снимок меню.
+            const uint32_t t0 = HAL_MILLIS();
             if (pub_->publishConfigChunk(env, pos, idx_ == 0) == 0) return false;
+            // Публикация штатно занимает единицы миллисекунд (пауза kPaceMs).
+            // Десятки — значит очередь была занята и внутри крутились повторы.
+            if (HAL_MILLIS() - t0 > 15) slowChunks_++;
+
+            // Подробный след — каждый восьмой кусок: по нему видно, падает ли
+            // куча равномерно или проваливается в одном месте. Писать каждый
+            // кусок нельзя — сам вывод в USB тормозит передачу.
+            if ((idx_ % 8) == 0)
+                HAL_LOG_DEBUG("MENU", "chunk %u: %u/%u bytes, rssi %d dBm, "
+                                      "heap free=%u largest=%u",
+                              (unsigned)idx_, (unsigned)sent_, (unsigned)total_,
+                              MENU_RSSI(), heapNow, largestNow);
             idx_++;
             fill_ = 0;
             return true;
@@ -191,6 +297,9 @@ private:
 
         PublisherT* pub_;
         size_t   total_;
+        unsigned minHeap_    = 0xFFFFFFFFu;
+        unsigned minLargest_ = 0xFFFFFFFFu;
+        unsigned slowChunks_ = 0;
         char     raw_[MENU_CHUNK_SIZE];
         size_t   fill_ = 0;
         size_t   sent_ = 0;

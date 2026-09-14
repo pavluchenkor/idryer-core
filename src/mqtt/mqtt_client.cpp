@@ -5,6 +5,9 @@
 #include "../hal/hal_types.h"
 #include <esp_system.h>
 #include <esp_heap_caps.h>
+// Только ради RSSI в логах связи: по коду причины разрыва не отличить слабый
+// эфир от нехватки памяти, а цифра рядом отличает сразу.
+#include <WiFi.h>
 #include <time.h>
 #include <string.h>
 
@@ -54,9 +57,29 @@ void MqttClient::begin(const char* serialNumber, const char* token) {
         // сбой протокола) — само по себе это вводит в заблуждение. Показываем код
         // причины и явно, что последует переподключение, чтобы «No error» не читался
         // как «всё в порядке, но связь пропала без причины».
-        HAL_LOG_WARN("MQTT", "Disconnected (reason=%u: %s) — will reconnect",
+        // Обстановка в момент обрыва — главное, ради чего этот лог существует.
+        // Без RSSI и памяти по коду причины не отличить слабый эфир от нехватки
+        // кучи: «TCP disconnected» приходит в обоих случаях. Сколько связь
+        // прожила — отделяет разрыв под нагрузкой (секунды после начала меню)
+        // от потери сети (минуты ровной работы).
+        const uint32_t uptimeS = (uint32_t)(HAL_MILLIS() / 1000);
+        const uint32_t onlineS = connectedAtMs_ ? (HAL_MILLIS() - connectedAtMs_) / 1000 : 0;
+#if defined(ESP32) || defined(ESP_PLATFORM)
+        HAL_LOG_WARN("MQTT", "Disconnected (reason=%u: %s) — will reconnect; "
+                             "online %us, uptime %us, rssi %d dBm, heap free=%u largest=%u",
                      (unsigned)lastDisconnectReason_,
-                     espMqttClientTypes::disconnectReasonToString(reason));
+                     espMqttClientTypes::disconnectReasonToString(reason),
+                     (unsigned)onlineS, (unsigned)uptimeS, (int)WiFi.RSSI(),
+                     (unsigned)heap_caps_get_free_size(MALLOC_CAP_DEFAULT),
+                     (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_DEFAULT));
+#else
+        HAL_LOG_WARN("MQTT", "Disconnected (reason=%u: %s) — will reconnect; "
+                             "online %us, uptime %us",
+                     (unsigned)lastDisconnectReason_,
+                     espMqttClientTypes::disconnectReasonToString(reason),
+                     (unsigned)onlineS, (unsigned)uptimeS);
+#endif
+        connectedAtMs_ = 0;
     });
     mqttClient_.onMessage([this](const espMqttClientTypes::MessageProperties& props,
                                  const char* topic, const uint8_t* payload,
@@ -124,7 +147,15 @@ void MqttClient::loop() {
 }
 
 void MqttClient::onMqttConnect(bool sessionPresent) {
+    connectedAtMs_ = HAL_MILLIS();
+#if defined(ESP32) || defined(ESP_PLATFORM)
+    HAL_LOG_INFO("MQTT", "Connected! (session present=%d) rssi %d dBm, heap free=%u largest=%u",
+                 (int)sessionPresent, (int)WiFi.RSSI(),
+                 (unsigned)heap_caps_get_free_size(MALLOC_CAP_DEFAULT),
+                 (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_DEFAULT));
+#else
     HAL_LOG_INFO("MQTT", "Connected! (session present=%d)", (int)sessionPresent);
+#endif
 
     // Persistent session: при sessionPresent=true подписка уже жива на брокере,
     // но повторный SUBSCRIBE безвреден и защищает от рассинхрона.
@@ -202,7 +233,21 @@ bool MqttClient::publishRfidWriteResult(JsonDocument& json) {
 }
 
 uint16_t MqttClient::publishConfigChunk(const char* json, size_t length, bool first) {
-    if (!mqttClient_.connected() || !json || length == 0) return 0;
+    // Начало новой передачи — снова пробуем брокера.
+    if (first) skipRestOfConfig_ = false;
+
+    // Очередь уже переполнялась в этой передаче. Продолжать бессмысленно и
+    // вредно: каждая неудачная публикация тормозит цикл, и куски локальному
+    // клиенту уходят с паузами в десятки секунд — телефон не дожидается и
+    // выбрасывает собранное. Портал получит меню следующей передачей.
+    if (skipRestOfConfig_) return 0;
+
+    if (!mqttClient_.connected() || !json || length == 0) {
+        // Только на первом куске: иначе строка повторится 28 раз подряд.
+        lastChunkError_ = ChunkError::NotConnected;
+        if (first) HAL_LOG_WARN("MQTT", "config chunk dropped: broker offline");
+        return 0;
+    }
     const char* topic = makeTopic(IDRYER_TOPIC_CONFIG);
 
     // Первым делом стираем retained-снимок на топике: раньше там лежал полный
@@ -217,11 +262,37 @@ uint16_t MqttClient::publishConfigChunk(const char* json, size_t length, bool fi
     // есть от ретейна куска толку нет — подписчик получил бы обрывок. Меню
     // целиком устройство публикует заново при каждом выходе в онлайн, а
     // портал складывает собранное в базу.
-    const uint16_t id = mqttClient_.publish(topic, /*qos=*/0, /*retain=*/false,
-                                            reinterpret_cast<const uint8_t*>(json), length);
+    // publish() только кладёт пакет в очередь, а очередь живёт в куче: 28 кусков
+    // меню по ~700 байт — это около 20 КБ, которых на плате с дисплеем нет.
+    // Поэтому отказ очереди — не приговор: даём ей уйти в сеть и пробуем снова.
+    static constexpr uint8_t  kRetries      = 4;   // ~20 мс на кусок в худшем случае
+    static constexpr uint32_t kRetryPauseMs = 5;
+    static constexpr uint32_t kPaceMs       = 3;   // пауза после каждого куска
+
+    uint16_t id = mqttClient_.publish(topic, /*qos=*/0, /*retain=*/false,
+                                      reinterpret_cast<const uint8_t*>(json), length);
+    for (uint8_t i = 0; i < kRetries && id == 0; i++) {
+        mqttClient_.loop();
+        delay(kRetryPauseMs);
+        id = mqttClient_.publish(topic, /*qos=*/0, /*retain=*/false,
+                                 reinterpret_cast<const uint8_t*>(json), length);
+    }
+
+    // Ноль при живом соединении и после повторов — очередь так и не освободилась.
+    // Дальше в этой передаче брокера не трогаем: каждая неудачная публикация
+    // тормозит цикл, а локальному клиенту куски нужны без пауз.
+    if (id == 0) {
+        lastChunkError_ = ChunkError::OutboxFull;
+        skipRestOfConfig_ = true;
+        HAL_LOG_WARN("MQTT", "config chunk not queued: outbox full (%u bytes), "
+                             "skipping rest of transfer", (unsigned)length);
+    } else {
+        lastChunkError_ = ChunkError::None;
+    }
     // QoS 0 уходит из outbox в сеть только в loop() — прокачиваем сразу,
     // иначе очередь растёт быстрее, чем освобождается.
     mqttClient_.loop();
+    delay(kPaceMs);
     return id;
 }
 

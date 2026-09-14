@@ -109,6 +109,20 @@ private:
     void publishProgress();
     void publishComplete(const char* status, const char* errorReason);
 
+    /**
+     * @brief Доставляет хвост MQTT, гасит сеть и перезагружает контроллер.
+     *
+     * ESP.restart() с живым Wi-Fi оставляет радио в недоинициализированном
+     * состоянии: после такого сброса STA к точке не цепляется, и через 20 с
+     * EspTouchProvisioner уводит устройство в режим настройки — навсегда,
+     * потому что оттуда оно само не выходит. Ловится редко (~1 раз на 10
+     * прошивок), проявляется как «встала новая версия, но устройство офлайн».
+     * Поймано на стенде Storage: rst:0x3 → credentials=yes → 19.7 с тишины →
+     * «ESPTouch v2 listening». Аппаратный сброс той же прошивки поднимает
+     * сеть за 1.9 с — то есть дело именно в порядке выключения.
+     */
+    [[noreturn]] void flushAndRestart();
+
     // SHA256 streaming wrappers (для testability и читаемости).
     void shaStart();
     void shaUpdate(const uint8_t* data, size_t len);
@@ -130,6 +144,10 @@ private:
     // Active session state. Не trivially destructible (mbedtls_sha256_context
     // нужно free'ить). resetSession() обнуляет и зовёт mbedtls_sha256_free.
     bool active_ = false;
+    /// Отметка «радио занято» поставлена этой сессией. Отдельный флаг, а не
+    /// active_: отметка снимается ровно столько раз, сколько ставилась, иначе
+    /// счётчик занятости уедет.
+    bool radioHeld_ = false;
     bool shaInited_ = false;
     bool targetRp_ = false;       // текущая сессия для RP (UART-proxy) vs ESP (Update)
     uint32_t commandIdHash_ = 0;  // FNV1a от commandId — для корреляции с UartOtaChunkAck

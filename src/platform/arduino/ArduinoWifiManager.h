@@ -56,6 +56,13 @@ public:
     void loop() override;
 
 private:
+    /// @brief Заход в сеть, сохраняющий выбранную точку доступа.
+    ///
+    /// Отдельно от @c connect(), потому что форма вызова здесь принципиальна:
+    /// @c WiFi.begin(ssid,password) обнуляет привязку к точке, а
+    /// @c WiFi.begin() без аргументов — нет. Подробности в .cpp.
+    void startConnect();
+
     char ssid_[IDRYER_MAX_SSID_LEN];
     char password_[IDRYER_MAX_PASSWORD_LEN];
     bool scanLogged_ = false;

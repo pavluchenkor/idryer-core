@@ -5,6 +5,7 @@
 #if defined(ESP32) || defined(ESP_PLATFORM)
 
 #include "ota_receiver.h"
+#include "radio_busy.h"   // на время обновления радио занято целиком
 #include "iDryer.h"
 #include "mqtt/mqtt_client.h"
 #include "hal/hal_types.h"
@@ -14,6 +15,7 @@
 
 #include <Arduino.h>
 #include <Update.h>
+#include <WiFi.h>
 #include <esp_heap_caps.h>
 #include <esp_ota_ops.h>
 #include <string.h>
@@ -101,6 +103,7 @@ void OtaReceiver::resetSession() {
         Update.abort();
     }
     shaFree();
+    if (radioHeld_) { idryer::radioBusyEnd(); radioHeld_ = false; }
     active_ = false;
     shaInited_ = false;
     targetRp_ = false;
@@ -206,6 +209,10 @@ void OtaReceiver::handleAnnounce(JsonObjectConst data) {
         // вызываются — SHA256 финально верифицирует RP. ESP лишь пробрасывает
         // chunks через UART и пересылает ack/progress/complete в MQTT.
         active_ = true;
+    if (!radioHeld_) { idryer::radioBusyBegin(); radioHeld_ = true; }
+        // Обновление прошивки — самый неподходящий момент, чтобы прошивка
+        // ушла сканировать эфир ради выбора точки получше.
+        if (!radioHeld_) { idryer::radioBusyBegin(); radioHeld_ = true; }
         HAL_LOG_INFO("OTA", "Proxy session started (RP2040): cmd=%s v=%s size=%u chunks=%ux%uB",
                      commandId_, toVersion_, (unsigned)expectedSize_,
                      (unsigned)expectedChunks_, (unsigned)expectedChunkSize_);
@@ -332,6 +339,10 @@ void OtaReceiver::handleChunk(const char* topic, const uint8_t* payload, size_t 
                          (unsigned)bytesReceived_);
             publishComplete("verified", nullptr);
             resetSession();
+            // Прошивка была НЕ наша: перезагружается контроллер, а мы остаёмся
+            // работать. Значит нужно вернуть продукт к обычной жизни — иначе
+            // экран так и висит с надписью об обновлении, а телеметрия молчит.
+            if (link_) link_->notifyOtaAbort();
         }
         return;
     }
@@ -446,27 +457,8 @@ void OtaReceiver::handleChunk(const char* topic, const uint8_t* payload, size_t 
                      (unsigned)bytesReceived_);
         publishComplete("verified", nullptr);
 
-        // Дать стеку реально ОТПРАВИТЬ рапорт перед перезагрузкой.
-        //
-        // Здесь стоял delay(200) с расчётом на PubSubClient, у которого
-        // publish() синхронный. Библиотека давно другая — espMqttClient
-        // асинхронный: publish лишь кладёт пакет в очередь, а отправка идёт
-        // из loop(). delay() цикл не крутит, поэтому рапорт уезжал в никуда:
-        // портал не узнавал об успехе и через таймаут писал FAILED на
-        // прошивке, которая на самом деле успешно встала. Проверено замером
-        // на брокере — сообщения не было вовсе.
-        //
-        // Крутим loop, а не спим (так же сделано в revoke_ack).
-        if (mqtt_) {
-            const uint32_t until = HAL_MILLIS() + 800;
-            while (HAL_MILLIS() < until) {
-                mqtt_->loop();
-                HAL_DELAY_MS(10);
-            }
-        }
-
         resetSession();
-        ESP.restart();
+        flushAndRestart();
     }
 }
 
@@ -832,16 +824,50 @@ void OtaReceiver::handleOtaCommitNow() {
     }
     HAL_LOG_INFO("OTA", "Boot partition set → flushing MQTT, then restart");
     WorkTimeTracker::instance().flush();
-    // То же, что в solo-ветке: publish асинхронный, отправка идёт из loop().
-    // Спать перед перезагрузкой бессмысленно — крутим цикл.
+    flushAndRestart();
+}
+
+void OtaReceiver::flushAndRestart() {
+    // 1. Дать стеку реально ОТПРАВИТЬ рапорт о завершении.
+    //
+    // Здесь когда-то стоял delay(200) с расчётом на PubSubClient, у которого
+    // publish() синхронный. Библиотека давно другая — espMqttClient
+    // асинхронный: publish лишь кладёт пакет в очередь, а отправка идёт из
+    // loop(). delay() цикл не крутит, поэтому рапорт уезжал в никуда: портал
+    // не узнавал об успехе и через таймаут писал FAILED на прошивке, которая
+    // на самом деле успешно встала. Проверено замером на брокере — сообщения
+    // не было вовсе. Поэтому крутим loop, а не спим.
     if (mqtt_) {
-        const uint32_t until = HAL_MILLIS() + 800;
+        uint32_t until = HAL_MILLIS() + 800;
+        while (HAL_MILLIS() < until) {
+            mqtt_->loop();
+            HAL_DELAY_MS(10);
+        }
+
+        // 2. Закрыть сессию по-человечески: DISCONNECT тоже уходит из loop(),
+        // так что после вызова добираем цикл, иначе брокер увидит обрыв TCP и
+        // опубликует LWT «оффлайн» на устройстве, которое просто ушло в ребут.
+        mqtt_->disconnect();
+        until = HAL_MILLIS() + 150;
         while (HAL_MILLIS() < until) {
             mqtt_->loop();
             HAL_DELAY_MS(10);
         }
     }
+
+    // 3. Погасить радио перед сбросом — ради этого всё и затевалось.
+    // ESP.restart() при живом Wi-Fi оставляет PHY в состоянии, из которого
+    // следующая загрузка к точке не цепляется; дальше 20-секундный таймаут
+    // EspTouchProvisioner уводит устройство в режим настройки, и вернуть его
+    // может только человек с кабелем. Штатное выключение STA снимает причину.
+    WiFi.disconnect(/*wifioff=*/true);
+    WiFi.mode(WIFI_OFF);
+    HAL_DELAY_MS(100);
+
+    HAL_LOG_INFO("OTA", "Radio off, restarting");
     ESP.restart();
+    // ESP.restart() не возвращается, но компилятор об этом не знает.
+    while (true) HAL_DELAY_MS(1000);
 }
 
 uint32_t OtaReceiver::fnv1a32(const char* s) {

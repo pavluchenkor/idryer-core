@@ -4,6 +4,9 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include "esp_heap_caps.h"
+#include "../radio_busy.h"
+// Только ради BSSID/канала в логе подключения — см. ниже.
+#include <WiFi.h>
 
 namespace idryer {
 namespace cloud {
@@ -63,7 +66,17 @@ void CloudStateMachine::handleWifiConnecting() {
     if (wifi_->isConnected()) {
         char ip[IDRYER_MAX_IP_LEN];
         wifi_->getLocalIP(ip, sizeof(ip));
+        // BSSID и канал — не формальность: в доме с несколькими точками на одном
+        // SSID плата вольна выбрать не самую громкую, и тогда RSSI скачет от
+        // включения к включению безо всякой связи с настройками радио. Без
+        // адреса точки такие замеры сравнивать нельзя.
+#if defined(ESP32) || defined(ESP_PLATFORM)
+        HAL_LOG_INFO("CLOUD", "WiFi connected, IP: %s, RSSI: %d dBm, AP: %s ch %d, SSID: %s",
+                     ip, wifi_->getRSSI(), WiFi.BSSIDstr().c_str(), WiFi.channel(),
+                     WiFi.SSID().c_str());
+#else
         HAL_LOG_INFO("CLOUD", "WiFi connected, IP: %s, RSSI: %d dBm", ip, wifi_->getRSSI());
+#endif
 
         if (!identity_.hasSerialNumber() || (config_.waitForMcuSerial && !serialVerified_)) {
             setState(CloudState::WaitingForMcuSerial);
@@ -120,7 +133,16 @@ void CloudStateMachine::tryActivate() {
     const char* mcu = (mcuSerial_[0] != '\0') ? mcuSerial_ : nullptr;
     HAL_LOG_INFO("CLOUD", "binding-v3: activating with pairing token (serial=%s mcu=%s)",
                  identity_.serialNumber, mcu ? mcu : "-");
-    ActivateResult r = api_->activate(pendingPairingToken_, identity_.serialNumber, mcu);
+    // Привязка — синхронный HTTPS к порталу: DNS, TCP, TLS-рукопожатие. Скан
+    // эфира, затеянный ради выбора точки получше, уводит радио с канала на
+    // пару секунд и рвёт рукопожатие — привязка срывается на ровном месте.
+    // Отметка снимается сама на выходе из блока, включая все ранние возвраты
+    // ниже по функции.
+    ActivateResult r;
+    {
+        idryer::RadioBusyGuard radioGuard;
+        r = api_->activate(pendingPairingToken_, identity_.serialNumber, mcu);
+    }
 
     if (r.success && r.deviceToken[0] != '\0') {
         identity_.setToken(r.deviceToken);
@@ -223,6 +245,15 @@ void CloudStateMachine::handleMqttConnecting() {
     // handshake продвигается внутри mqtt_->loop() — качаем его каждый тик.
     if (mqttInitialized_) mqtt_->loop();
 
+    // Окно рукопожатия закрыто ограниченное время, а не до самого успеха.
+    // Держать его на всю паузу backoff (до mqttRetryMaxMs) нельзя: пока
+    // брокер недоступен, устройство неделями оставалось бы с закрытым радио и
+    // ни разу не осмотрело бы эфир. А не осмотрев — не ушло бы с плохой точки,
+    // из-за которой брокер и недоступен. Поэтому окно живёт только пока идёт
+    // сама попытка; в паузах между попытками радио свободно.
+    if (mqttRadioHeld_ && HAL_MILLIS() - mqttRadioHeldMs_ >= kMqttHandshakeGuardMs)
+        releaseMqttRadio();
+
     if (mqtt_->isConnected()) {
         HAL_LOG_INFO("CLOUD", "MQTT connected!");
         mqttRetryCurrentMs_ = config_.mqttRetryIntervalMs; // сброс backoff
@@ -270,6 +301,17 @@ void CloudStateMachine::handleMqttConnecting() {
         const char* key = getMqttKey(); // binding-v3: deviceId (UUID); legacy fallback внутри
         mqtt_->begin(key, identity_.token);
         mqttInitialized_ = true;
+    }
+
+    // Дальше — DNS, TCP, TLS-рукопожатие и MQTT CONNECT. Скан эфира, уводящий
+    // радио с канала на пару секунд, срывает попытку и удваивает паузу до
+    // следующей: одно неудачное совпадение уводит устройство в офлайн на
+    // минуты. Отметку ставим перед попыткой и снимаем по успеху, по уходу из
+    // состояния или по таймауту окна выше.
+    if (!mqttRadioHeld_) {
+        idryer::radioBusyBegin();
+        mqttRadioHeld_   = true;
+        mqttRadioHeldMs_ = HAL_MILLIS();
     }
     // Диагностика heap перед mbedtls handshake — включать при подозрениях на
     // фрагментацию .bss, ломающую TLS.
@@ -409,9 +451,21 @@ const char* CloudStateMachine::getMqttKey() const {
     return (mqttKey_[0] != '\0') ? mqttKey_ : identity_.serialNumber;
 }
 
+// Снять отметку «идёт рукопожатие с брокером», если она стоит. Отдельной
+// функцией, потому что снимать её приходится из нескольких мест: по успеху, по
+// уходу из состояния и по таймауту окна.
+void CloudStateMachine::releaseMqttRadio() {
+    if (!mqttRadioHeld_) return;
+    idryer::radioBusyEnd();
+    mqttRadioHeld_ = false;
+}
+
 void CloudStateMachine::setState(CloudState newState) {
     if (state_ == newState) return;
     CloudState oldState = state_;
+    // Уходим из попытки подключения — окно закрыто в любом случае, чем бы она
+    // ни кончилась. Без этого счётчик занятости остался бы поднятым навсегда.
+    if (oldState == CloudState::MqttConnecting) releaseMqttRadio();
     state_ = newState;
     HAL_LOG_INFO("CLOUD", "State: %s -> %s", cloudStateToString(oldState), cloudStateToString(newState));
     if (stateCallback_) stateCallback_(oldState, newState, stateCallbackCtx_);

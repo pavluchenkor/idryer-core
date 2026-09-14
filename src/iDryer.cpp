@@ -393,7 +393,19 @@ bool Link::begin() {
         impl_->wifiStore.load(ssid, sizeof(ssid), pass, sizeof(pass));
     if (haveWifiCreds) {
         impl_->wifi.begin(ssid, pass);
-        WiFi.begin(ssid, pass);
+        // Креды кладём в стек, но заход НЕ начинаем (последний аргумент).
+        //
+        // Обычный WiFi.begin(ssid, pass) сразу стучится в сеть, а выбор точки
+        // стек делает сам и делает плохо. Через несколько секунд
+        // EspTouchProvisioner::bootRetry() сканирует эфир и заходит уже в
+        // лучшую точку — но ранний заход к этому моменту успевает завершиться
+        // и выигрывает гонку. Измерено 13.09.2026: выбрали точку на −68 dBm,
+        // подключились к −84.
+        //
+        // Без раннего захода хозяин подключения на загрузке ровно один —
+        // bootRetry(), который сначала выбирает точку и только потом стучится.
+        // Цена — первая попытка уходит на kBootRetryMs позже.
+        WiFi.begin(ssid, pass, /*channel=*/0, /*bssid=*/nullptr, /*connect=*/false);
     }
 
     // Второй источник кредов рядом с Improv — по воздуху, из мобильного
@@ -576,14 +588,24 @@ void Link::checkLowMemory() {
     const uint32_t largest =
         (uint32_t)heap_caps_get_largest_free_block(MALLOC_CAP_DEFAULT);
 
+    // Кроме самого большого куска смотрим свободную кучу и её минимум за всё
+    // время работы: по одному снимку не видно, деградирует память или просела
+    // однократно.
+    const uint32_t freeNow =
+        (uint32_t)heap_caps_get_free_size(MALLOC_CAP_DEFAULT);
+    const uint32_t freeMin =
+        (uint32_t)heap_caps_get_minimum_free_size(MALLOC_CAP_DEFAULT);
+
     if (!lowMemReported_ && largest < LOW_MEM_THRESHOLD) {
         lowMemReported_ = true;
         POST_ERROR(ERRSEV_WARNING, 0, ERRSRC_CORE, ERRC_LOW_MEMORY,
                    "largest free block low", (int32_t)largest);
-        HAL_LOG_WARN("MEM", "low memory: largest free block %u", (unsigned)largest);
+        HAL_LOG_WARN("MEM", "low memory: largest=%u free=%u min free ever=%u",
+                     (unsigned)largest, (unsigned)freeNow, (unsigned)freeMin);
     } else if (lowMemReported_ && largest > LOW_MEM_THRESHOLD * 2) {
         lowMemReported_ = false;
-        HAL_LOG_INFO("MEM", "memory recovered: largest free block %u", (unsigned)largest);
+        HAL_LOG_INFO("MEM", "memory recovered: largest=%u free=%u min free ever=%u",
+                     (unsigned)largest, (unsigned)freeNow, (unsigned)freeMin);
     }
 }
 
@@ -753,10 +775,15 @@ void Link::loop() {
             }
         }
     }
-#else
-    // В dev-режиме Improv-ветки выше нет — провижининг крутим отсюда.
-    idryer::EspTouchProvisioner::instance().loop();
 #endif
+    // Провижинеру цикл нужен и после подключения. Ветка выше работает только
+    // пока логи выключены, а включаются они в момент подъёма Wi-Fi и уходят в
+    // return — то есть дальше вызова не было вовсе. Вместе с ним не работали
+    // переподключение после разрыва, выбор точки с лучшим сигналом и осмотр
+    // эфира при просадке: связь восстанавливал автореконнект стека, цепляясь
+    // к произвольной точке. В dev-режиме Improv-ветки нет — этот вызов
+    // единственный и там.
+    idryer::EspTouchProvisioner::instance().loop();
 
     impl_->runtime.loop();
     // Шина ошибок ESP-стороны: без этого вызова события в ней просто копятся.

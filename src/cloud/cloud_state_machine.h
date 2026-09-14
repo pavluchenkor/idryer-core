@@ -205,6 +205,9 @@ private:
     void handleOnline();
     void setState(CloudState newState);
 
+    /// @brief Снять отметку «идёт рукопожатие с брокером», если она стоит.
+    void releaseMqttRadio();
+
     IWifiManager*     wifi_;
     ICredentialStore* store_;
     HttpApi*          api_;
@@ -223,6 +226,17 @@ private:
     /// Подряд идущие отказы авторизации MQTT (reason 4/5) — только для лога:
     /// по §4 устройство на них не реагирует, а ждёт REVOKE. Сетевые сбрасывают.
     uint8_t  authRejectStreak_     = 0;
+
+    // Отметка «радио занято рукопожатием с брокером» сейчас поднята нами, и
+    // когда именно она была поднята. Окно ограничено по времени — см.
+    // kMqttHandshakeGuardMs и handleMqttConnecting().
+    bool     mqttRadioHeld_   = false;
+    uint32_t mqttRadioHeldMs_ = 0;
+
+    /// Сколько держим радио закрытым под одну попытку подключения к брокеру.
+    /// Заведомо больше нормального DNS+TCP+TLS+CONNECT (обычно 1–3 с) и
+    /// заведомо меньше паузы backoff, чтобы в паузах радио было свободно.
+    static constexpr uint32_t kMqttHandshakeGuardMs = 10000;
 
     bool mqttInitialized_    = false;
     bool unclaimedNotified_  = false;

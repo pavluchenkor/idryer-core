@@ -1,6 +1,12 @@
 #include "device_publisher.h"
 #include <string.h>
 
+#if defined(ESP32) || defined(ESP_PLATFORM)
+#include "../hal/hal_types.h"
+#include <esp_heap_caps.h>
+#endif
+
+
 namespace idryer {
 
 // ── Private helpers ───────────────────────────────────────────────────────────
@@ -49,10 +55,35 @@ bool DevicePublisher::publishConfig(JsonDocument& doc) {
 }
 
 uint16_t DevicePublisher::publishConfigChunk(const char* json, size_t len, bool first) {
+#if defined(ESP32) || defined(ESP_PLATFORM)
+    // Порог по памяти. Копии кусков лежат в куче, пока их не заберёт сеть. На
+    // слабом сигнале клиент не успевает читать, куча уходит в ноль, и каждый
+    // следующий кусок ждёт по полминуты: устройство перестаёт отвечать брокеру и
+    // пропадает с портала. Лучше оборвать передачу сразу — клиент повторит
+    // запрос, когда связь станет лучше.
+    const uint32_t freeHeap = (uint32_t)heap_caps_get_free_size(MALLOC_CAP_DEFAULT);
+    if (freeHeap < kMinHeapForConfig) {
+        HAL_LOG_WARN("MENU", "config transfer aborted: low heap (%u bytes free)",
+                     (unsigned)freeHeap);
+        return 0;
+    }
+#endif
+
     // В локальный WS отдаём те же куски: клиент в LAN собирает их так же, как
     // портал.
     wsPublishRaw("config", json, len);
-    return mqtt_->publishConfigChunk(json, len, first);
+
+
+    const uint16_t id = mqtt_->publishConfigChunk(json, len, first);
+
+
+    // Каналы независимы, а отправитель меню прекращает передачу по нулю. Пока
+    // возвращали ответ брокера, отказ MQTT на середине обрывал и локального
+    // клиента: телефон в той же сети получал 11 кусков из 28 и выбрасывал
+    // недособранное. Локальный клиент на связи — кусок доставлен, идём дальше;
+    // неудачу MQTT разбираем по его собственному логу.
+    if (id == 0 && isLocalConnected()) return 1;
+    return id;
 }
 
 uint16_t DevicePublisher::publishConfigRaw(const char* json, size_t len) {

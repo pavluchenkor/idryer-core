@@ -212,6 +212,21 @@ public:
      *  first=true заодно стирает устаревший retained-снимок на топике. */
     uint16_t publishConfigChunk(const char* json, size_t length, bool first);
 
+    /** Почему брокер не принял кусок конфига. Причины разные по последствиям:
+     *  связи нет — ждать нечего, очередь переполнена — кусок имеет смысл
+     *  повторить. Продукт кладёт это в событие, чтобы причина была видна не
+     *  только в serial. */
+    enum class ChunkError : uint8_t { None, NotConnected, OutboxFull };
+    ChunkError lastChunkError() const { return lastChunkError_; }
+    const char* lastChunkErrorText() const {
+        switch (lastChunkError_) {
+            case ChunkError::None:         return "ok";
+            case ChunkError::NotConnected: return "broker offline";
+            case ChunkError::OutboxFull:   return "outbox full";
+        }
+        return "unknown";
+    }
+
     /**
      * @brief Publishes a JSON string to @c idryer/{serial}/config/delta.
      *
@@ -236,6 +251,8 @@ public:
     void setAddTimestamp(bool enabled) { addTimestamp_ = enabled; }
 
 private:
+    ChunkError lastChunkError_ = ChunkError::None;
+    bool       skipRestOfConfig_ = false;   ///< очередь переполнена — дожимаем передачу без MQTT
 #if MQTT_USE_TLS
     espMqttClientSecure mqttClient_{espMqttClientTypes::UseInternalTask::NO};
 #else
@@ -256,6 +273,9 @@ private:
     bool initialized_ = false;
     bool addTimestamp_ = true; // авто-добавлять timestamp в publish (см. setAddTimestamp)
     uint8_t lastDisconnectReason_ = 0;
+    /// Когда установилось текущее соединение — чтобы в логе разрыва было видно,
+    /// сколько оно прожило. 0 — соединения нет.
+    uint32_t connectedAtMs_ = 0;
 
     void onMqttConnect(bool sessionPresent);
     void onMqttMessage(const espMqttClientTypes::MessageProperties& props,
