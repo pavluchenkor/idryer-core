@@ -83,7 +83,17 @@ public:
     bool isProvisioned() const { return provisioned_; }
 
     /// @brief Экран настройки: вызывается при каждом входе в режим.
-    void onNotice(NoticeCallback cb, void* ctx) { noticeCb_ = cb; noticeCtx_ = ctx; }
+    ///
+    /// Если режим уже поднят, колбэк зовётся сразу. Иначе продукт, который
+    /// зарегистрировал его после @c Link::begin(), не узнаёт о режиме вовсе:
+    /// на устройстве без сохранённой сети режим стартует внутри begin(), и
+    /// экран настройки не появляется именно там, где он нужнее всего — на
+    /// новом устройстве. Ровно так и было в idryer-touch (проверено
+    /// 14.09.2026).
+    void onNotice(NoticeCallback cb, void* ctx) {
+        noticeCb_ = cb; noticeCtx_ = ctx;
+        if (cb && active_) cb(ctx, noticeShown_);
+    }
 
     /// @brief Wi-Fi поднялся — продукт убирает экран настройки.
     void onConnected(ConnectedCallback cb, void* ctx) { connectedCb_ = cb; connectedCtx_ = ctx; }
@@ -261,6 +271,9 @@ private:
     // игнорирует (см. комментарий в обработчике DISCONNECTED).
     volatile bool needConnect_ = false;
 
+    // С каким текстом режим поднят сейчас. Нужен, чтобы колбэк, заданный уже
+    // после старта режима, получил то же самое, что получил бы вовремя.
+    Notice            noticeShown_  = Notice::Listening;
     NoticeCallback    noticeCb_     = nullptr;
     void*             noticeCtx_    = nullptr;
     ConnectedCallback connectedCb_  = nullptr;

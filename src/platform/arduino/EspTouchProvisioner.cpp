@@ -146,13 +146,15 @@ void EspTouchProvisioner::start() {
     gotCredentials_    = false;
     fallbackStartedMs_ = millis();
 
+    // «Проверьте пароль» показываем только там, где это единственное
+    // оставшееся объяснение: сеть уже была задана и ни разу не пустила.
+    // Запоминаем выбор до проверки колбэка: продукт мог ещё не
+    // зарегистрироваться, и тогда onNotice() покажет это же при регистрации.
+    noticeShown_ = (everConnected_ || !credentialsPresent_)
+                       ? Notice::Listening
+                       : Notice::CheckPassword;
     if (noticeCb_) {
-        // «Проверьте пароль» показываем только там, где это единственное
-        // оставшееся объяснение: сеть уже была задана и ни разу не пустила.
-        const Notice notice = (everConnected_ || !credentialsPresent_)
-                                  ? Notice::Listening
-                                  : Notice::CheckPassword;
-        noticeCb_(noticeCtx_, notice);
+        noticeCb_(noticeCtx_, noticeShown_);
     }
 }
 
