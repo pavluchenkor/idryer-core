@@ -14,6 +14,7 @@ device_smoke_test.py — универсальный smoke-тест для люб
 
 import argparse
 import json
+import os
 import sys
 import time
 
@@ -24,20 +25,54 @@ except ImportError:
     sys.exit(2)
 
 
+# Учётка брокера. Задаётся один раз из main() и используется всеми клиентами:
+# боевой и stage-брокеры анонимных подписчиков не пускают (в dev-auth конфиге
+# allow_anonymous false), и без логина все проверки падали с «нет сообщения»,
+# хотя устройство исправно публиковало.
+_AUTH = {"user": None, "password": None}
+
+
 def _new_client(client_id=""):
     try:
-        return mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, client_id=client_id)
+        c = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, client_id=client_id)
     except AttributeError:
-        return mqtt.Client(client_id=client_id)
+        c = mqtt.Client(client_id=client_id)
+    if _AUTH["user"]:
+        c.username_pw_set(_AUTH["user"], _AUTH["password"])
+    return c
+
+
+def _start(client, broker, port, topics=()):
+    """Подключиться, дождаться рукопожатия и подписаться.
+
+    Подписка — из on_connect, а не сразу после connect(). paho отправляет
+    SUBSCRIBE только по установленному соединению, а connect() лишь начинает
+    рукопожатие: подписка до запуска сетевого цикла молча терялась, и все
+    проверки падали с «нет сообщения» при исправном устройстве. Через
+    on_connect подписка переживает и переподключение.
+    """
+    connected = []
+
+    def on_connect(c, u, flags, rc, props=None):
+        connected.append(rc)
+        for t in topics:
+            c.subscribe(t, qos=1)
+
+    client.on_connect = on_connect
+    client.connect(broker, port, keepalive=20)
+    client.loop_start()
+
+    deadline = time.time() + 10
+    while not connected and time.time() < deadline:
+        time.sleep(0.05)
+    return bool(connected)
 
 
 def _collect(broker, port, topics, timeout):
     """Subscribe and return {topic: payload_str} for the first message on each topic."""
     received = {}
-    done = threading.Event() if False else None  # не используем threading — простой poll
 
     client = _new_client("smoke_collect")
-    client.connect(broker, port, keepalive=10)
 
     def on_message(c, u, msg):
         t = msg.topic
@@ -45,10 +80,8 @@ def _collect(broker, port, topics, timeout):
             received[t] = msg.payload.decode("utf-8", errors="replace")
 
     client.on_message = on_message
-    for t in topics:
-        client.subscribe(t)
+    _start(client, broker, port, topics)
 
-    client.loop_start()
     deadline = time.time() + timeout
     while time.time() < deadline:
         if all(t in received for t in topics):
@@ -61,8 +94,7 @@ def _collect(broker, port, topics, timeout):
 
 def _publish(broker, port, topic, payload):
     client = _new_client("smoke_pub")
-    client.connect(broker, port, keepalive=10)
-    client.loop_start()
+    _start(client, broker, port)
     info = client.publish(topic, payload, qos=0)
     info.wait_for_publish(timeout=5)
     client.loop_stop()
@@ -80,8 +112,12 @@ def test_info(serial, broker, port, timeout):
         return False, "нет сообщения"
     try:
         d = json.loads(msgs[topic])
-        fw = d.get("firmware", d.get("fw", "?"))
-        return True, f"fw={fw}"
+        # Имя поля — из контракта (messages.info). Прежние "firmware"/"fw" в
+        # payload не встречаются вовсе, поэтому версия всегда показывалась как
+        # "?" — оставлены запасными вариантами на случай старых прошивок.
+        fw = d.get("firmwareVersion", d.get("firmware", d.get("fw", "?")))
+        model = d.get("model") or d.get("deviceType") or ""
+        return True, f"fw={fw}" + (f" {model}" if model else "")
     except Exception:
         return True, "получено (не JSON)"
 
@@ -106,16 +142,13 @@ def test_get_config(serial, broker, port, timeout):
     # Subscribe first, then publish
     received = {}
     client = _new_client("smoke_cfg")
-    client.connect(broker, port, keepalive=10)
 
     def on_message(c, u, msg):
         if msg.topic not in received:
             received[msg.topic] = msg.payload.decode("utf-8", errors="replace")
 
     client.on_message = on_message
-    client.subscribe(cfg_topic)
-    client.loop_start()
-    time.sleep(0.3)
+    _start(client, broker, port, [cfg_topic])
 
     pub_ts = time.time()
     client.publish(cmd_topic, "{}", qos=0)
@@ -154,8 +187,15 @@ def main():
     ap.add_argument("--broker",  default="192.168.1.27")
     ap.add_argument("--port",    type=int, default=1883)
     ap.add_argument("--timeout", type=float, default=10.0, help="Seconds per test")
+    ap.add_argument("--user",     default="", help="Broker username (брокер с авторизацией)")
+    ap.add_argument("--password", default="", help="Broker password")
     ap.add_argument("--only",    default="", help="Comma-separated test names to run")
     args = ap.parse_args()
+
+    # Логин можно не передавать открытой строкой — скрипт возьмёт его из
+    # окружения (IDRYER_MQTT_USER / IDRYER_MQTT_PASSWORD).
+    _AUTH["user"] = args.user or os.environ.get("IDRYER_MQTT_USER", "")
+    _AUTH["password"] = args.password or os.environ.get("IDRYER_MQTT_PASSWORD", "")
 
     only = set(args.only.split(",")) if args.only else set()
     tests = [(n, fn) for n, fn in TESTS if not only or n in only]
