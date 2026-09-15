@@ -342,6 +342,25 @@ void copyCStr(const char* src, char* dst, size_t dstSize)
     dst[len] = '\0';
 }
 
+/// Распаковать пару «текущая/целевая» из device.<node>.info.temp.
+///
+/// Новая прошивка Bambu кладёт обе температуры в одно целое: младшее слово —
+/// текущая, старшее — целевая (0 = нагрев выключен). Так устроены и `bed`, и
+/// `ctc` (камера). Возвращает false, если узла нет — тогда вызывающий читает
+/// прежние поля верхнего уровня.
+bool unpackDeviceTemp(JsonObjectConst device, const char* node,
+                      float& current, float& target)
+{
+    if (device.isNull()) return false;
+    JsonVariantConst raw = device[node]["info"]["temp"];
+    if (raw.isNull()) return false;
+
+    const uint32_t packed = raw.as<uint32_t>();
+    current = (float)(packed & 0xFFFFu);
+    target  = (float)((packed >> 16) & 0xFFFFu);
+    return true;
+}
+
 } // namespace
 
 void BambuClient::handleReportMessage(const char* topic, const uint8_t* payload, unsigned int length)
@@ -408,6 +427,30 @@ void BambuClient::handleReportMessage(const char* topic, const uint8_t* payload,
         if (v != printerStatus_.totalLayers) { printerStatus_.totalLayers = v; changed = true; }
     }
 
+    // Температуры. Новая прошивка Bambu перенесла их в блок `device`, упаковав
+    // пару «текущая/целевая» в одно число: младшее слово — текущая, старшее —
+    // целевая. Старые поля верхнего уровня при этом могут не прийти вовсе,
+    // поэтому сначала читаем `device`, а `*_temper` оставляем как запасной
+    // путь для прошивок, где нового блока нет. Разбор совпадает с тем, что
+    // делает интеграция Home Assistant (pybambu, PrinterModel.print_update).
+    JsonObjectConst device = print["device"].as<JsonObjectConst>();
+
+    float packedCurrent = NAN;
+    float packedTarget  = NAN;
+    if (unpackDeviceTemp(device, "bed", packedCurrent, packedTarget)) {
+        if (packedCurrent != printerStatus_.bedTemp) { printerStatus_.bedTemp = packedCurrent; changed = true; }
+        if (packedTarget != printerStatus_.bedTarget) { printerStatus_.bedTarget = packedTarget; changed = true; }
+    } else {
+        if (print.containsKey("bed_temper")) {
+            float t = print["bed_temper"].as<float>();
+            if (t != printerStatus_.bedTemp) { printerStatus_.bedTemp = t; changed = true; }
+        }
+        if (print.containsKey("bed_target_temper")) {
+            float t = print["bed_target_temper"].as<float>();
+            if (t != printerStatus_.bedTarget) { printerStatus_.bedTarget = t; changed = true; }
+        }
+    }
+
     if (print.containsKey("nozzle_temper")) {
         float t = print["nozzle_temper"].as<float>();
         if (t != printerStatus_.nozzleTemp) { printerStatus_.nozzleTemp = t; changed = true; }
@@ -416,24 +459,32 @@ void BambuClient::handleReportMessage(const char* topic, const uint8_t* payload,
         float t = print["nozzle_target_temper"].as<float>();
         if (t != printerStatus_.nozzleTarget) { printerStatus_.nozzleTarget = t; changed = true; }
     }
-    if (print.containsKey("bed_temper")) {
-        float t = print["bed_temper"].as<float>();
-        if (t != printerStatus_.bedTemp) { printerStatus_.bedTemp = t; changed = true; }
-    }
-    if (print.containsKey("bed_target_temper")) {
-        float t = print["bed_target_temper"].as<float>();
-        if (t != printerStatus_.bedTarget) { printerStatus_.bedTarget = t; changed = true; }
-    }
-    if (print.containsKey("chamber_temper")) {
-        float t = print["chamber_temper"].as<float>();
-        if (t != printerStatus_.chamberTemp) { printerStatus_.chamberTemp = t; changed = true; }
-    }
-    if (print.containsKey("chamber_target")) {
-        float t = print["chamber_target"].as<float>();
-        if (t != printerStatus_.chamberTarget) {
-            printerStatus_.chamberTarget = t;
+
+    // Камера: `device.ctc` у новых прошивок, `chamber_*` у прежних. Без этой
+    // ветки владелец принтера с новой прошивкой не получал бы температуру
+    // камеры вовсе — поля верхнего уровня оттуда ушли.
+    if (unpackDeviceTemp(device, "ctc", packedCurrent, packedTarget)) {
+        if (packedCurrent != printerStatus_.chamberTemp) {
+            printerStatus_.chamberTemp = packedCurrent;
+            changed = true;
+        }
+        if (packedTarget != printerStatus_.chamberTarget) {
+            printerStatus_.chamberTarget = packedTarget;
             changed = true;
             keyChanged = true;
+        }
+    } else {
+        if (print.containsKey("chamber_temper")) {
+            float t = print["chamber_temper"].as<float>();
+            if (t != printerStatus_.chamberTemp) { printerStatus_.chamberTemp = t; changed = true; }
+        }
+        if (print.containsKey("chamber_target")) {
+            float t = print["chamber_target"].as<float>();
+            if (t != printerStatus_.chamberTarget) {
+                printerStatus_.chamberTarget = t;
+                changed = true;
+                keyChanged = true;
+            }
         }
     }
 

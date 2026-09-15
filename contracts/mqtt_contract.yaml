@@ -1499,7 +1499,8 @@ messages:
             "units[i].target.humidity": "%RH (если присутствует)"
             "units[i].target.duration": "minutes (соответствует Device.targetDurationMins)"
             "units[i].elapsedTime": "seconds — время текущего юнит-сегмента"
-            "units[i].progressPercent": "uint8 0..100, optional. Внешний прогресс (Bambu mc_percent, Moonraker virtual_chamber и т.п.). Absent если у режима нет внешнего источника прогресса (manual heat, Storage). UI приоритизирует это поле над elapsed/duration."
+            "units[i].progressPercent": "uint8 0..100, optional. Внешний прогресс печати (Bambu mc_percent, Moonraker display_status.progress). Absent если у режима нет внешнего источника прогресса (нагрев по своему таймеру, Storage) — тогда UI считает прогресс сам из target.duration и elapsedTime. UI приоритизирует это поле над elapsed/duration."
+            "units[i].remainingSeconds": "uint32, optional. Остаток печати по данным принтера (Bambu mc_remaining_time, минуты → секунды). Показывать текстом; строить по нему полосу нельзя — начало печати устройству неизвестно (нагрев мог включиться на середине). Moonraker поля не имеет: Klipper отдаёт только прошедшее время (print_stats.print_duration), ETA слайсера в статус не попадает."
             "units[i].profileTotalElapsed": "seconds — суммарное время с начала PROFILE (все этапы)"
             "units[i].totalRemaining": "seconds — для PROFILE: до конца профиля"
             "units[i].currentStage": "только PROFILE"
@@ -3390,13 +3391,22 @@ bambu_lan_mqtt:
           nozzle_target_temper: "number"
           bed_temper: "number"
           bed_target_temper: "number"
-          chamber_temper: "number"
-          chamber_target: "number"
+          chamber_temper: "number — прежние прошивки"
+          chamber_target: "number — прежние прошивки"
+          device:
+            bed.info.temp: "number — новые прошивки: low word текущая, high word целевая"
+            ctc.info.temp: "number — новые прошивки, камера: low word текущая, high word целевая"
+
           ams:
             tray_now: "number (если 254 → используется vt_tray)"
             ams: "array<{tray: array<{tray_type, tray_info_idx}>}>"
             vt_tray: "object (tray_type, tray_info_idx) — внешняя катушка"
-      note: "Парсер читает только указанные поля; остальное в report'е не используется."
+      note: >
+        Парсер читает только указанные поля; остальное в report'е не используется.
+        Температуры стола и камеры приходят в двух формах: новые прошивки кладут
+        пару «текущая/целевая» упакованной в device.<bed|ctc>.info.temp, прежние —
+        отдельными полями верхнего уровня. Читается device, при его отсутствии —
+        прежние поля.
 
   notes:
     - "Подключение инициируется только когда BambuConfig.enabled=true и заполнены ip/lan_access_code/serial."
