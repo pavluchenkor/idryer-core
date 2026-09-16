@@ -83,34 +83,6 @@ void ArduinoWifiManager::begin(const char *ssid, const char *password) {
                    txActual, txActual / 4, (txActual % 4) * 25);
 
   HAL_LOG_INFO("WIFI", "Initialized with SSID: %s (tx power %d)", ssid_, txActual);
-
-#if defined(IDRYER_ESPTOUCH_LOG) || defined(IDRYER_DEV_REPL)
-  // Разовый снимок эфира — только для стенда. Показывает, сколько точек с нашим
-  // именем сети видно и насколько они отличаются по уровню: без этого списка
-  // невозможно понять, плохо ли ловит плата или она просто выбрала не ту точку.
-  // Скан задерживает старт на секунду-две, поэтому в боевую сборку не попадает
-  // (флаг ставится только в env стенда) и делается один раз за загрузку.
-  static bool s_airLogged = false;
-  if (!s_airLogged) {
-    s_airLogged = true;
-    const int n = WiFi.scanNetworks(/*async=*/false, /*show_hidden=*/true);
-    // Имя сети на этом шаге может быть ещё не заполнено (begin(nullptr) при
-    // сохранённых credentials) — тогда помечать «нашу» точку нечем, и пометки
-    // просто нет. Сравнивать с пустой строкой нельзя: под неё попадают все
-    // скрытые сети, и метка начинает врать.
-    const bool haveSsid = ssid_[0] != '\0';
-    WIFI_EARLY_LOG("[WIFI] air: %d networks visible%s%s%s\n", n,
-                   haveSsid ? ", looking for \"" : " (our SSID not known yet)",
-                   haveSsid ? ssid_ : "", haveSsid ? "\"" : "");
-    for (int i = 0; i < n; ++i) {
-      const bool ours = haveSsid && (WiFi.SSID(i) == String(ssid_));
-      WIFI_EARLY_LOG("[WIFI]   %s rssi=%4d ch=%2d bssid=%s ssid=\"%s\"\n",
-                     ours ? "OURS" : "    ", WiFi.RSSI(i), WiFi.channel(i),
-                     WiFi.BSSIDstr(i).c_str(), WiFi.SSID(i).c_str());
-    }
-    WiFi.scanDelete();
-  }
-#endif
 }
 
 bool ArduinoWifiManager::connect() {

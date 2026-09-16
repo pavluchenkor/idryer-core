@@ -341,11 +341,10 @@ void EspTouchProvisioner::roamScanFinish() {
     esp_wifi_disconnect();
 }
 
-bool EspTouchProvisioner::pinBestAp() {
+bool EspTouchProvisioner::pinBestApStart() {
     wifi_config_t cfg = {};
     if (esp_wifi_get_config(WIFI_IF_STA, &cfg) != ESP_OK) return false;
     if (cfg.sta.ssid[0] == '\0') return false;   // имя сети ещё не известно
-    const String want((const char*)cfg.sta.ssid);
 
     // Остановить попытку, которая уже идёт. Без этого вся работа впустую:
     // запущенное подключение конфигурацию больше не перечитывает, и выбранная
@@ -353,21 +352,48 @@ bool EspTouchProvisioner::pinBestAp() {
     // к −62 dBm, подключение к −82). Заодно скан не будет соперничать с
     // подключением за радио — иначе он возвращает ошибку вместо списка.
     esp_wifi_disconnect();
-    delay(50);
 
-    // Скан синхронный и со скрытыми сетями: делается только когда связи нет,
-    // то есть рвать нечего.
-    const int n = WiFi.scanNetworks(/*async=*/false, /*show_hidden=*/true);
-    // Скан не состоялся — это не «сети не видно». Отрицательное значение
-    // возвращается, когда радио занято: например, поднят SmartConfig и его
-    // сниффер гоняет каналы. Раньше эти два случая не различались, и неудачный
-    // скан молча ронял выбор точки на стек — тот садился куда попало
-    // (измерено 14.09.2026: −88 dBm при доступных −66). Привязку в этом случае
-    // не трогаем: прошлый выбор остаётся в силе, а заход повторится.
-    if (n < 0) {
-        ESPTOUCH_LOG("[WIFI] pick AP: scan unavailable (%d), keeping previous choice\n", n);
+    // Скрытые сети берём: имя точки нашей сети может не отдаваться в маяке, а
+    // подключаться к ней всё равно нужно.
+    const int16_t started = WiFi.scanNetworks(/*async=*/true, /*show_hidden=*/true);
+    // Скан не состоялся — это не «сети не видно». Отказ приходит, когда радио
+    // занято: например, поднят SmartConfig и его сниффер гоняет каналы. Раньше
+    // эти два случая не различались, и неудачный скан молча ронял выбор точки
+    // на стек — тот садился куда попало (измерено 14.09.2026: −88 dBm при
+    // доступных −66). Привязку в этом случае не трогаем: прошлый выбор
+    // остаётся в силе, а заход повторится.
+    if (started == WIFI_SCAN_FAILED) {
+        ESPTOUCH_LOG("[WIFI] pick AP: scan unavailable, keeping previous choice\n");
         return false;
     }
+    pinScanRunning_   = true;
+    pinScanStartedMs_ = millis();
+    return true;
+}
+
+// Режим шифрования точки словом: WPA2 и WPA3/mixed ведут себя при заходе
+// по-разному (mixed требует PMF), и по одному номеру причины отказа их не
+// различить — поэтому пишем прямо в строку выбора.
+static const char* authName(wifi_auth_mode_t m) {
+    switch (m) {
+        case WIFI_AUTH_OPEN:            return "open";
+        case WIFI_AUTH_WEP:             return "wep";
+        case WIFI_AUTH_WPA_PSK:         return "wpa";
+        case WIFI_AUTH_WPA2_PSK:        return "wpa2";
+        case WIFI_AUTH_WPA_WPA2_PSK:    return "wpa/wpa2";
+        case WIFI_AUTH_WPA2_ENTERPRISE: return "wpa2-ent";
+        case WIFI_AUTH_WPA3_PSK:        return "wpa3";
+        case WIFI_AUTH_WPA2_WPA3_PSK:   return "wpa2/wpa3";
+        default:                        return "?";
+    }
+}
+
+// Результат скана готов — выбрать точку и записать её в конфигурацию стека.
+void EspTouchProvisioner::pinBestApApply(int n) {
+    wifi_config_t cfg = {};
+    if (esp_wifi_get_config(WIFI_IF_STA, &cfg) != ESP_OK) { WiFi.scanDelete(); return; }
+    const String want((const char*)cfg.sta.ssid);
+
     int best = -1;
     int bestRssi = -128;
     int seenOurs = 0;          // сколько точек нашей сети вообще слышно
@@ -395,20 +421,59 @@ bool EspTouchProvisioner::pinBestAp() {
         ESPTOUCH_LOG("[WIFI] pick AP: \"%s\" not visible among %d networks\n",
                      want.c_str(), n);
         WiFi.scanDelete();
-        return false;
+        return;
     }
 
     memcpy(cfg.sta.bssid, WiFi.BSSID(best), 6);
     cfg.sta.bssid_set = true;
     cfg.sta.channel   = (uint8_t)WiFi.channel(best);
     const esp_err_t err = esp_wifi_set_config(WIFI_IF_STA, &cfg);
-    ESPTOUCH_LOG("[WIFI] pick AP: %s rssi=%d ch=%d (best of %d in \"%s\") -> %s\n",
-                 WiFi.BSSIDstr(best).c_str(), bestRssi, WiFi.channel(best), n,
+    ESPTOUCH_LOG("[WIFI] pick AP: %s rssi=%d ch=%d auth=%s (best of %d in \"%s\") -> %s\n",
+                 WiFi.BSSIDstr(best).c_str(), bestRssi, WiFi.channel(best),
+                 authName(WiFi.encryptionType(best)), n,
                  want.c_str(), esp_err_to_name(err));
     WiFi.scanDelete();
-    if (err != ESP_OK) return false;
+    if (err != ESP_OK) return;
     apPinned_ = true;
-    return true;
+}
+
+// Ожидание результата скана. Пока он идёт, цикл крутится как обычно — ради
+// этого скан и сделан асинхронным.
+void EspTouchProvisioner::pinScanTick() {
+    const int16_t done = WiFi.scanComplete();
+    if (done < 0) {
+        if (millis() - pinScanStartedMs_ < kScanTimeoutMs) return;
+        // Сторож: скан не завершился. Освобождаем состояние и всё равно
+        // заходим — иначе подключение не случится вовсе.
+        ESPTOUCH_LOG("[WIFI] pick AP: scan timeout, connecting as is\n");
+        WiFi.scanDelete();
+        pinScanRunning_ = false;
+        pinScanConnect();
+        return;
+    }
+    pinScanRunning_ = false;
+    pinBestApApply(done);
+    pinScanConnect();
+}
+
+// Заход в сеть после выбора точки. Отдельным шагом, потому что между выбором и
+// заходом теперь проходит время: скан идёт в фоне.
+void EspTouchProvisioner::pinScanConnect() {
+    wifi_config_t cur = {};
+    if (esp_wifi_get_config(WIFI_IF_STA, &cur) == ESP_OK)
+        ESPTOUCH_LOG("[WIFI] sta cfg: scan_method=%d sort_method=%d "
+                     "bssid_set=%d channel=%d ssid=\"%s\"\n",
+                     (int)cur.sta.scan_method, (int)cur.sta.sort_method,
+                     (int)cur.sta.bssid_set, (int)cur.sta.channel,
+                     (const char*)cur.sta.ssid);
+    lastConnectMs_ = millis();
+    // Отметку попытки ставим и здесь: её таймер отсчитывался от начала скана, а
+    // скан занимает секунды — иначе следующий bootRetry() дёргал esp_wifi_connect()
+    // сразу после этого захода, получал ESP_ERR_WIFI_CONN и врал счётчиком попыток.
+    lastBootTryMs_ = lastConnectMs_;
+    const esp_err_t err = esp_wifi_connect();
+    ESPTOUCH_LOG("[WIFI] connect after AP pick -> %s\n", esp_err_to_name(err));
+    if (err != ESP_OK) needConnect_ = true;   // повторим общим путём
 }
 
 bool EspTouchProvisioner::isBanned(const uint8_t bssid[6]) const {
@@ -438,9 +503,9 @@ void EspTouchProvisioner::banAp(const uint8_t bssid[6]) {
                  (unsigned)(kApBanMs / 1000));
 }
 
-void EspTouchProvisioner::retireFailedAp() {
+bool EspTouchProvisioner::retireFailedAp() {
     wifi_config_t cfg = {};
-    if (esp_wifi_get_config(WIFI_IF_STA, &cfg) != ESP_OK) return;
+    if (esp_wifi_get_config(WIFI_IF_STA, &cfg) != ESP_OK) return false;
     if (cfg.sta.bssid_set) {
         banAp(cfg.sta.bssid);
         cfg.sta.bssid_set = false;
@@ -449,9 +514,9 @@ void EspTouchProvisioner::retireFailedAp() {
     }
     apPinned_   = false;
     apPinFails_ = 0;               // счётчик пойдёт заново, уже на новую точку
-    // Целимся в следующую по уровню. Не вышло (сети не слышно или скан не
-    // состоялся) — заход уйдёт по имени сети, как было раньше.
-    pinBestAp();
+    // Целимся в следующую по уровню. Не вышло (скан не состоялся) — заход
+    // уйдёт по имени сети, как было раньше.
+    return pinBestApStart();
 }
 
 void EspTouchProvisioner::unpinAp() {
@@ -611,6 +676,10 @@ void EspTouchProvisioner::loop() {
         return;
     }
 
+    // Выбор точки идёт в фоне — ждём результат, ничего другого не затевая:
+    // скан занимает радио, а заход всё равно должен уйти на выбранную точку.
+    if (pinScanRunning_) { pinScanTick(); return; }
+
     if (provisioned_) {
         driveConnect();
         return;
@@ -662,9 +731,11 @@ void EspTouchProvisioner::bootRetry() {
     // попыткой, может быть ещё в работе, а скан его прерывает — так подключение
     // уезжало с 6-й секунды на 12-ю. Признак «нужен новый выбор» — снятая
     // привязка: её сбрасывает разрыв связи.
-    if (apPinFails_ >= kApPinFails) retireFailedAp();
-    else if (!apPinned_)            pinBestAp();
-    
+    // Скан асинхронный, поэтому заход уходит не отсюда, а из pinScanTick(),
+    // когда результат готов.
+    if (apPinFails_ >= kApPinFails) { if (retireFailedAp()) return; }
+    else if (!apPinned_ && pinBestApStart()) return;
+
     // Подключение при сохранённом пароле делает именно этот вызов — на
     // конфигурации, которая уже лежит в стеке. Печатаем её перед попыткой:
     // scan_method=1 — полный обход каналов, 0 — быстрый скан (стек берёт первую
@@ -762,10 +833,11 @@ void EspTouchProvisioner::driveConnect() {
         needConnect_   = false;
         lastConnectMs_ = millis();
         // Тот же выбор точки, что и на загрузке: разрыв — подходящий момент
-        // пересмотреть, какая точка сейчас слышна лучше.
-        if (apPinFails_ >= kApPinFails) retireFailedAp();
-        else if (!apPinned_)            pinBestAp();
-                const esp_err_t err = esp_wifi_connect();
+        // пересмотреть, какая точка сейчас слышна лучше. Скан асинхронный —
+        // если он запущен, заход сделает pinScanTick().
+        if (apPinFails_ >= kApPinFails) { if (retireFailedAp()) return; }
+        else if (!apPinned_ && pinBestApStart()) return;
+        const esp_err_t err = esp_wifi_connect();
         if (err != ESP_OK) {
             ESPTOUCH_LOG("[WIFI] connect -> %s (reason=%u)\n",
                          esp_err_to_name(err), (unsigned)lastReason_);
