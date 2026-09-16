@@ -78,6 +78,18 @@ void LocalAccess::begin(const char* deviceName, const char* deviceToken)
     });
     ws_->begin();
 
+    // Пинг клиента: у локального сервера лимит в одно соединение, а слот
+    // освобождается только по событию отключения. Телефон, пропавший без
+    // штатного закрытия (уснул, сменил сеть, приложение убили), оставлял
+    // полуоткрытый сокет — устройство считало слот занятым и молча отбивало
+    // всех новых, до перезагрузки по питанию.
+    //
+    // 1500 мс на ответ — с запасом не под сеть (она локальная), а под
+    // собственный loop: во время публикации меню кусками он подвисает, и
+    // слишком жёсткий таймаут отключал бы живого клиента. Два промаха подряд
+    // — мёртвый уходит примерно за 13 секунд.
+    ws_->enableHeartbeat(10000, 1500, 2);
+
     const bool mdnsOk = MDNS.begin(deviceName_);
     if (mdnsOk) {
         MDNS.addService("_idryer", "_tcp", 81);
@@ -149,6 +161,12 @@ void LocalAccess::onWsEvent(uint8_t num, uint8_t type, uint8_t* payload, size_t 
         HAL_LOG_INFO("WS", ">>> CONNECTED #%d from %s", num, ws_->remoteIP(num).toString().c_str());
         if (connectedClient_ >= 0 && connectedClient_ != num) {
             HAL_LOG_WARN("WS", "Rejecting #%d — already have #%d", num, connectedClient_);
+            // Называем причину до закрытия: молчаливый обрыв клиент не отличит
+            // от отвергнутого токена и покажет человеку неверную ошибку.
+            // Пишем прямо по номеру нового клиента — sendDoc адресует
+            // connectedClient_, то есть того, кто слот и занимает.
+            char busy[] = "{\"type\":\"auth_fail\",\"reason\":\"busy\"}";
+            ws_->sendTXT(num, busy, sizeof(busy) - 1);
             ws_->disconnect(num);
             return;
         }
