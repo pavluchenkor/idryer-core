@@ -2635,7 +2635,7 @@ mqtt_only:
         "actions[].params[].id": "string [a-z0-9_]{1..24} — ключ в args"
         "actions[].params[].purpose": "string [a-z0-9_]{1..24}, опционально — смысл параметра для потребителя (см. card_param_purposes)"
         "actions[].params[].type": '"number" | "stages"'
-        "actions[].params[].limits": "[min, max] — одинаково для всех юнитов, либо [[min, max], …] — по юниту (индекс = номер юнита)"
+        "actions[].params[].limits": "[min, max] — одинаково для всех юнитов, либо [[min, max], …] — по юниту (индекс = номер юнита). Для type=stages — пределы температуры каждой стадии, опционально"
         "actions[].params[].step": "number, для type=number"
         "actions[].params[].default": "number — стартовое значение поля, либо массив по юнитам"
         "actions[].params[].unit": "string ≤8"
