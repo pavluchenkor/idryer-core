@@ -2599,8 +2599,16 @@ mqtt_only:
         layout:
           - ["temp", "co2"]
           - ["set_temp", "calibrate"]
+        actions:
+          - id: "drying"
+            mode: "DRYING"
+            action: "card.drying"
+            params:
+              - { id: "temperature", purpose: "target_temperature", type: "number", limits: [30, 90], step: 1, default: 50, unit: "°C" }
+              - { id: "duration", purpose: "duration", type: "number", limits: [0, 2880], step: 1, default: [240, 180], unit: "min" }
+          - { id: "stop", mode: "IDLE", action: "card.stop" }
       fields:
-        v: "uint — версия схемы манифеста (сейчас 1)"
+        v: "uint — версия схемы манифеста: 1 — только entities/layout, 2 — плюс actions"
         entities: "array — сущности карточки, порядок = порядок авто-рендера (слой 1)"
         "entities[].id": "string [a-z0-9_]{1..24}, уникален в манифесте"
         "entities[].type": '"sensor" | "binary_sensor" | "number" | "select" | "button"'
@@ -2614,14 +2622,39 @@ mqtt_only:
         "entities[].min/max/step": "number — границы для type=number"
         "entities[].options": "string[] — варианты для type=select"
         layout: "array of string[] , опционально — заводская разметка (слой 2): ряды из id сущностей; не упомянутые id рендерятся ниже авто-списком"
+        actions: |
+          array, опционально (v2) — операции прибора. Действие переводит юнит в режим
+          `mode` (значение status.units[].mode); карточка по этому режиму сама решает,
+          что показать: форму запуска (прибор в IDLE) или блок сессии с остановкой
+          (прибор в режиме действия). Действий запуска несколько — карточка выводит
+          переключатель режимов; одно — сразу форму. Остановка — действие с mode IDLE.
+        "actions[].id": "string [a-z0-9_]{1..24}, уникален среди actions"
+        "actions[].mode": "string [A-Z_]{1..20} — режим юнита после действия (unit_modes_per_product)"
+        "actions[].action": "string — invoke-action; SDK генерирует card.{id}. Команда: commands/invoke {action, args, unitId}, args — значения params по их id"
+        "actions[].params": "array, ≤6 — параметры запуска. Операционные: действуют на один запуск и в EEPROM прибора не пишутся"
+        "actions[].params[].id": "string [a-z0-9_]{1..24} — ключ в args"
+        "actions[].params[].purpose": "string [a-z0-9_]{1..24}, опционально — смысл параметра для потребителя (см. card_param_purposes)"
+        "actions[].params[].type": '"number" | "stages"'
+        "actions[].params[].limits": "[min, max] — одинаково для всех юнитов, либо [[min, max], …] — по юниту (индекс = номер юнита)"
+        "actions[].params[].step": "number, для type=number"
+        "actions[].params[].default": "number — стартовое значение поля, либо массив по юнитам"
+        "actions[].params[].unit": "string ≤8"
       limits:
-        - "entities ≤ 32; layout ≤ 16 рядов по ≤ 4 id; портал обрезает сверх лимита"
+        - "entities ≤ 32; layout ≤ 16 рядов по ≤ 4 id; actions ≤ 8, params ≤ 6 на действие; портал обрезает сверх лимита"
+        - "размер: манифест публикуется одним сообщением, не чанками — retained хранит только последнее сообщение топика"
         - "label/unit: printable ASCII; портал экранирует при рендере"
         - "команды контролов идут ТОЛЬКО в commands/invoke этого же устройства (payload {action, args, unitId, timestamp}) — чужие топики недостижимы by design"
     notes:
       - "Потребители: портал (EntityDeviceCard), мобильное приложение; позже — генератор HA discovery (value_template из path, command_template из action)."
       - "Устройства без манифеста: портал строит карточку fallback'ом из units[].capabilities (/info) + deviceType."
       - "Retained: новый подписчик получает манифест сразу; SDK перепубликует при изменении декларации."
+      - "limits/default параметров, привязанных к пункту меню, SDK берёт из меню при сборке манифеста и перепубликует манифест, когда меню меняется. Меню при этом остаётся источником только этих чисел: карточка в меню не пишет."
+    card_param_purposes:
+      target_temperature: "целевая температура запуска, °C"
+      target_humidity: "целевая влажность запуска, %"
+      duration: "длительность запуска, мин; 0 — без ограничения"
+      stages: "стадии профиля: [{temperature, ramp, hold}], ramp/hold в секундах"
+      start_stage: "номер стадии, с которой начать профиль (с нуля)"
   - suffix: commands/bind_ack
     full_topic: "idryer/{serial}/commands/bind_ack"
     direction: backend_to_device
