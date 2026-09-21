@@ -249,15 +249,16 @@ bool CardBuilder::layoutRow(const char* a, const char* b, const char* c, const c
 // ── manifest JSON ────────────────────────────────────────────────────────────
 
 // Авто-сенсор из capability_vocabulary: без label (портал переводит по
-// device_class сам, как для своих продуктов).
+// device_class сам, как для своих продуктов). @p source — топик данных.
 static void addAutoSensor(JsonArray& arr, const char* id, const char* deviceClass,
-                          const char* unit, const char* path, bool binary = false) {
+                          const char* unit, const char* path, bool binary = false,
+                          const char* source = "telemetry") {
     JsonObject e = arr.createNestedObject();
     e["id"]           = id;
     e["type"]         = binary ? "binary_sensor" : "sensor";
     e["device_class"] = deviceClass;
     if (unit && unit[0]) e["unit"] = unit;
-    e["source"] = "telemetry";
+    e["source"] = source;
     e["path"]   = path;
 }
 
@@ -279,6 +280,16 @@ void CardBuilder::buildJson(JsonDocument& doc, const iDryer::Config& cfg) const 
         addAutoSensor(arr, "fan", "fan", nullptr, "units[0].fanStatus", /*binary=*/true);
     if (cfg.hasServo)
         addAutoSensor(arr, "servo", "servo", nullptr, "units[0].servoOpen", /*binary=*/true);
+    // Вес идёт своим топиком weights: массив {sensorId, value, unitId}.
+    if (cfg.hasWeight)
+        addAutoSensor(arr, "weight", "weight", "g", "weights", /*binary=*/false, "weights");
+    // RFID-ридер: значения на карточке нет, сущность говорит «ридер у камеры есть».
+    if (cfg.hasRfid) {
+        JsonObject e = arr.createNestedObject();
+        e["id"]     = "rfid";
+        e["type"]   = "rfid";
+        e["source"] = "rfid";
+    }
 
     // ── Объявленные продуктом сущности ──
     for (uint8_t i = 0; i < count_; ++i) {
