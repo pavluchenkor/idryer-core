@@ -141,8 +141,14 @@ CardBuilder::ActionRef& CardBuilder::ActionRef::ceiling(uint16_t menuId) {
     return *this;
 }
 
-CardBuilder::ActionRef& CardBuilder::ActionRef::stages(const char* id, const char* purpose) {
-    if (Param* p = b_->addParam_(idx_, id, purpose)) p->type = ParamStages;
+CardBuilder::ActionRef& CardBuilder::ActionRef::stages(const char* id, const char* purpose,
+                                                       uint16_t tempMenuId) {
+    if (Param* p = b_->addParam_(idx_, id, purpose)) {
+        p->type   = ParamStages;
+        p->menuId = tempMenuId;
+        // Без пункта меню предел задаёт только ceiling(): снизу не ограничено.
+        p->min = 0; p->max = 1000; p->step = 1;
+    }
     return *this;
 }
 
@@ -178,7 +184,7 @@ uint32_t CardBuilder::fingerprint_(uint8_t unitsCount) const {
         const Action& a = actions_[i];
         for (uint8_t k = 0; k < a.paramCount; ++k) {
             const Param& p = a.params[k];
-            if (p.type != ParamNumber || (p.menuId == NO_MENU && p.ceilId == NO_MENU)) continue;
+            if (p.menuId == NO_MENU && p.ceilId == NO_MENU) continue;
             for (uint8_t u = 0; u < unitsCount; ++u) {
                 float v[4];
                 const bool ok = resolve_(p, u, v[0], v[1], v[2], v[3], nullptr);
@@ -197,6 +203,11 @@ void CardBuilder::pollMenu(uint8_t unitsCount) {
         menuFingerprint_ = fp;
         dirty_ = true;
     }
+}
+
+void CardBuilder::markPublished(uint8_t unitsCount) {
+    if (actionCount_ > 0) menuFingerprint_ = fingerprint_(unitsCount);
+    dirty_ = false;
 }
 
 bool CardBuilder::layoutRow(const char* a, const char* b, const char* c, const char* d) {
@@ -317,53 +328,54 @@ void CardBuilder::buildJson(JsonDocument& doc, const iDryer::Config& cfg) const 
         JsonArray params = o.createNestedArray("params");
         for (uint8_t k = 0; k < a.paramCount; ++k) {
             const Param& p = a.params[k];
-            if (p.type == ParamStages) {
-                JsonObject po = params.createNestedObject();
-                po["id"] = p.id;
-                if (p.purpose[0]) po["purpose"] = p.purpose;
-                po["type"] = "stages";
-                continue;
-            }
-            // Пределы и значения по юнитам. Совпали у всех — скаляром.
-            float mn[iDryer::MAX_UNITS], mx[iDryer::MAX_UNITS], df[iDryer::MAX_UNITS];
-            float st = p.step;
-            const char* unitStr = nullptr;
-            bool ok = true;
-            for (uint8_t u = 0; u < units && ok; ++u) {
-                ok = resolve_(p, u, mn[u], mx[u], st, df[u], &unitStr);
-            }
-            // Меню ещё не прочитано — параметр без пределов не публикуем.
-            if (!ok) continue;
-
-            bool sameLimits = true, sameDefault = true;
-            for (uint8_t u = 1; u < units; ++u) {
-                if (mn[u] != mn[0] || mx[u] != mx[0]) sameLimits = false;
-                if (df[u] != df[0]) sameDefault = false;
-            }
-
             JsonObject po = params.createNestedObject();
             po["id"] = p.id;
             if (p.purpose[0]) po["purpose"] = p.purpose;
-            po["type"] = "number";
-            JsonArray lim = po.createNestedArray("limits");
-            if (sameLimits) {
-                lim.add(mn[0]); lim.add(mx[0]);
-            } else {
-                for (uint8_t u = 0; u < units; ++u) {
-                    JsonArray pair = lim.createNestedArray();
-                    pair.add(mn[u]); pair.add(mx[u]);
-                }
+            po["type"] = p.type == ParamStages ? "stages" : "number";
+            // Меню ещё не прочитано — число без пределов не публикуем.
+            if (hasLimits_(p) && !emitLimits_(po, p, units, p.type == ParamNumber) &&
+                p.type == ParamNumber) {
+                params.remove(params.size() - 1);
             }
-            po["step"] = st;
-            if (sameDefault) {
-                po["default"] = df[0];
-            } else {
-                JsonArray d = po.createNestedArray("default");
-                for (uint8_t u = 0; u < units; ++u) d.add(df[u]);
-            }
-            if (unitStr && unitStr[0]) po["unit"] = unitStr;
         }
     }
+}
+
+bool CardBuilder::emitLimits_(JsonObject po, const Param& p, uint8_t units,
+                              bool withDefault) const {
+    // Пределы и значения по юнитам. Совпали у всех — скаляром.
+    float mn[iDryer::MAX_UNITS], mx[iDryer::MAX_UNITS], df[iDryer::MAX_UNITS];
+    float st = p.step;
+    const char* unitStr = nullptr;
+    for (uint8_t u = 0; u < units; ++u) {
+        if (!resolve_(p, u, mn[u], mx[u], st, df[u], &unitStr)) return false;
+    }
+    bool sameLimits = true, sameDefault = true;
+    for (uint8_t u = 1; u < units; ++u) {
+        if (mn[u] != mn[0] || mx[u] != mx[0]) sameLimits = false;
+        if (df[u] != df[0]) sameDefault = false;
+    }
+
+    JsonArray lim = po.createNestedArray("limits");
+    if (sameLimits) {
+        lim.add(mn[0]); lim.add(mx[0]);
+    } else {
+        for (uint8_t u = 0; u < units; ++u) {
+            JsonArray pair = lim.createNestedArray();
+            pair.add(mn[u]); pair.add(mx[u]);
+        }
+    }
+    if (withDefault) {
+        po["step"] = st;
+        if (sameDefault) {
+            po["default"] = df[0];
+        } else {
+            JsonArray d = po.createNestedArray("default");
+            for (uint8_t u = 0; u < units; ++u) d.add(df[u]);
+        }
+    }
+    if (unitStr && unitStr[0]) po["unit"] = unitStr;
+    return true;
 }
 
 // ── invoke routing ───────────────────────────────────────────────────────────
@@ -390,12 +402,23 @@ bool CardBuilder::handleInvokeAction(const char* action, JsonObjectConst data,
         if (!a.cb) return true;
 
         // Числа — в пределах юнита, пропущенные — значением по умолчанию.
-        // Стадии передаются как пришли: их сверяет продукт при сборке команды.
+        // У стадий в пределы юнита зажимается температура каждой стадии.
         DynamicJsonDocument out(2048);
         for (uint8_t k = 0; k < a.paramCount; ++k) {
             const Param& p = a.params[k];
             if (p.type == ParamStages) {
-                out[p.id] = args[p.id];
+                JsonArray dst = out.createNestedArray(p.id);
+                float mn = 0, mx = 1000, st, df;
+                if (hasLimits_(p) && !resolve_(p, unit, mn, mx, st, df, nullptr)) return true;
+                for (JsonObjectConst s : args[p.id].as<JsonArrayConst>()) {
+                    JsonObject d = dst.createNestedObject();
+                    float t = s["temperature"] | 0.0f;
+                    if (t < mn) t = mn;
+                    if (t > mx) t = mx;
+                    d["temperature"] = t;
+                    d["ramp"] = s["ramp"];
+                    d["hold"] = s["hold"];
+                }
                 continue;
             }
             float mn, mx, st, df;

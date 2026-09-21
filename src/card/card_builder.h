@@ -101,7 +101,10 @@ public:
         /// (потолок, например air_max_temp) для того же юнита.
         ActionRef& ceiling(uint16_t menuId);
         /// Параметр-список стадий профиля: [{temperature, ramp, hold}].
-        ActionRef& stages(const char* id, const char* purpose = "stages");
+        /// @p tempMenuId — пункт меню с пределами температуры стадии; вместе
+        /// с ceiling() даёт limits температуры каждой стадии для юнита.
+        ActionRef& stages(const char* id, const char* purpose = "stages",
+                          uint16_t tempMenuId = NO_MENU);
 
     private:
         friend class CardBuilder;
@@ -129,6 +132,10 @@ public:
     /// Декларация менялась с последней публикации (loop перепубликует retained).
     bool dirty() const { return dirty_; }
     void clearDirty() { dirty_ = false; }
+
+    /// Манифест опубликован: запомнить состояние меню, из которого он собран,
+    /// чтобы следующая сверка не сочла его устаревшим.
+    void markPublished(uint8_t unitsCount);
 
     /// Собрать манифест: авто-сенсоры из cfg.has* + объявленные + layout.
     void buildJson(JsonDocument& doc, const iDryer::Config& cfg) const;
@@ -192,6 +199,11 @@ private:
     uint32_t   menuFingerprint_ = 0;
 
     Param* addParam_(int8_t actionIdx, const char* id, const char* purpose);
+    /// limits (и default для чисел) по юнитам; false — меню ещё не прочитано.
+    bool emitLimits_(JsonObject po, const Param& p, uint8_t units, bool withDefault) const;
+    static bool hasLimits_(const Param& p) {
+        return p.type == ParamNumber || p.menuId != NO_MENU || p.ceilId != NO_MENU;
+    }
     /// Пределы, шаг и значение по умолчанию параметра для юнита.
     bool resolve_(const Param& p, uint8_t unit, float& mn, float& mx,
                   float& st, float& df, const char** unitStr) const;

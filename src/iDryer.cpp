@@ -1028,7 +1028,7 @@ void Link::publishCardNow() {
     free(buf);
     if (ok) {
         impl_->cardPublished = true;
-        impl_->card.clearDirty();
+        impl_->card.markPublished(impl_->cfg.unitsCount);
     }
 }
 
