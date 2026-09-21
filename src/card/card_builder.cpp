@@ -141,6 +141,36 @@ CardBuilder::ActionRef& CardBuilder::ActionRef::ceiling(uint16_t menuId) {
     return *this;
 }
 
+CardBuilder::ActionRef& CardBuilder::ActionRef::select(const char* id, const char* purpose,
+                                                       const char* const* options,
+                                                       uint8_t count, const char* def) {
+    if (Param* p = b_->addParam_(idx_, id, purpose)) {
+        p->type     = ParamSelect;
+        p->options  = options;
+        p->optCount = options ? count : 0;
+        p->defStr   = def ? def : (p->optCount ? options[0] : nullptr);
+    }
+    return *this;
+}
+
+CardBuilder::ActionRef& CardBuilder::ActionRef::color(const char* id, const char* purpose,
+                                                      const char* def) {
+    if (Param* p = b_->addParam_(idx_, id, purpose)) {
+        p->type   = ParamColor;
+        p->defStr = def;
+    }
+    return *this;
+}
+
+static bool isHexColor(const char* s) {
+    if (!s || s[0] != '#' || strlen(s) != 7) return false;
+    for (uint8_t i = 1; i < 7; ++i) {
+        const char c = s[i];
+        if (!((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F'))) return false;
+    }
+    return true;
+}
+
 CardBuilder::ActionRef& CardBuilder::ActionRef::deviceClass(const char* dc) {
     if (idx_ < 0) return *this;
     copyStr(b_->actions_[idx_].deviceClass, sizeof(Action::deviceClass), dc);
@@ -375,7 +405,15 @@ void CardBuilder::buildJson(JsonDocument& doc, const iDryer::Config& cfg) const 
             JsonObject po = params.createNestedObject();
             po["id"] = p.id;
             if (p.purpose[0]) po["purpose"] = p.purpose;
-            po["type"] = p.type == ParamStages ? "stages" : "number";
+            static const char* const kTypes[] = { "number", "stages", "select", "color" };
+            po["type"] = kTypes[p.type];
+            if (p.type == ParamSelect) {
+                JsonArray opts = po.createNestedArray("options");
+                for (uint8_t n = 0; n < p.optCount; ++n) opts.add(p.options[n]);
+            }
+            if ((p.type == ParamSelect || p.type == ParamColor) && p.defStr) {
+                po["default"] = p.defStr;
+            }
             // Меню ещё не прочитано — число без пределов не публикуем.
             if (hasLimits_(p) && !emitLimits_(po, p, units, p.type == ParamNumber) &&
                 p.type == ParamNumber) {
@@ -493,6 +531,22 @@ bool CardBuilder::handleInvokeAction(const char* action, JsonObjectConst data,
                     d["ramp"] = s["ramp"];
                     d["hold"] = s["hold"];
                 }
+                continue;
+            }
+            if (p.type == ParamSelect) {
+                // Только объявленный вариант; чужое — значение по умолчанию.
+                const char* v = args[p.id] | (const char*)nullptr;
+                const char* pick = p.defStr;
+                for (uint8_t n = 0; v && n < p.optCount; ++n) {
+                    if (strcmp(p.options[n], v) == 0) { pick = p.options[n]; break; }
+                }
+                if (pick) out[p.id] = pick;
+                continue;
+            }
+            if (p.type == ParamColor) {
+                const char* v = args[p.id] | (const char*)nullptr;
+                const char* pick = isHexColor(v) ? v : p.defStr;
+                if (pick) out[p.id] = (char*)pick;   // копия: строка из входного документа
                 continue;
             }
             float mn, mx, st, df;

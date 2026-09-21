@@ -111,6 +111,13 @@ public:
         /// с ceiling() даёт limits температуры каждой стадии для юнита.
         ActionRef& stages(const char* id, const char* purpose = "stages",
                           uint16_t tempMenuId = NO_MENU);
+        /// Выбор из списка @p options (строки со статическим временем жизни —
+        /// хранятся указатели). Прибор отбросит значение не из списка.
+        ActionRef& select(const char* id, const char* purpose,
+                          const char* const* options, uint8_t count,
+                          const char* def = nullptr);
+        /// Цвет #RRGGBB.
+        ActionRef& color(const char* id, const char* purpose, const char* def = "#FFFFFF");
         /// Место действия на карточке: "identify" — вызов прибора,
         /// "clear_errors" — сброс ошибок (постоянные кнопки шапки).
         ActionRef& deviceClass(const char* dc);
@@ -177,7 +184,7 @@ private:
         OnSelect onSelect = nullptr;
     };
 
-    enum ParamType : uint8_t { ParamNumber, ParamStages };
+    enum ParamType : uint8_t { ParamNumber, ParamStages, ParamSelect, ParamColor };
 
     struct Param {
         char     id[24];
@@ -187,6 +194,10 @@ private:
         uint16_t menuId = NO_MENU;
         uint16_t ceilId = NO_MENU;
         float    min = 0, max = 0, step = 1, def = 0;
+        // select / color: варианты и значение по умолчанию (статические строки).
+        const char* const* options = nullptr;
+        uint8_t     optCount = 0;
+        const char* defStr = nullptr;
     };
 
 #ifndef IDRYER_CARD_MAX_ACTIONS
