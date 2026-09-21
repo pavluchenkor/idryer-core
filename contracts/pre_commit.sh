@@ -20,7 +20,7 @@ fi
 
 # Skip if nothing relevant in this commit.
 STAGED_RELEVANT=$(git diff --cached --name-only 2>/dev/null \
-    | grep -E "^contracts/(mqtt_contract\.yaml|_generated/|gen_.*\.py|validate_contract\.py|mqtt_contract\.schema\.json|regen\.sh)$" \
+    | grep -E "^(contracts/(mqtt_contract\.yaml|_generated/|gen_.*\.py|validate_contract\.py|check_publisher_parity\.py|mqtt_contract\.schema\.json|regen\.sh)|src/local_access/device_publisher\.cpp)$" \
     || true)
 if [ -z "$STAGED_RELEVANT" ]; then
     exit 0
@@ -59,6 +59,16 @@ for f in "${GENERATED[@]}"; do
         exit 1
     fi
 done
+
+# 3) Чётность каналов: всё, что публикуется, уходит и в локальный WS, и в MQTT.
+#    Приложение рисует карточку из одних и тех же данных в обоих режимах, и
+#    разъехавшиеся каналы вылезают не сразу — у человека просто нет части
+#    данных в локальном режиме.
+if ! python3 "$CONTRACTS_DIR/check_publisher_parity.py"; then
+    echo
+    echo "Fix the publisher above, then commit again."
+    exit 1
+fi
 
 echo
 echo "✅ Contracts pipeline OK — commit proceeding."

@@ -117,7 +117,8 @@ bool DevicePublisher::publishWeights(JsonDocument& doc) {
 }
 
 bool DevicePublisher::publishRfidWriteResult(JsonDocument& doc) {
-    // Local WS этот ответ не нужен — это специфичная backend-корреляция.
+    // parity: mqtt-only — специфичная backend-корреляция запроса и ответа,
+    // локальному клиенту этот ответ не нужен.
     return mqtt_->publishRfidWriteResult(doc);
 }
 
