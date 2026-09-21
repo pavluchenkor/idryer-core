@@ -76,10 +76,16 @@ public:
     /// заполнены значением по умолчанию.
     using OnAction = void (*)(uint8_t unit, JsonObjectConst args);
 
-    /// Пункт меню глазами карточки: пределы, шаг и текущее значение для юнита.
+    /// Языки заголовков меню во всех продуктах — порядок title в menu yaml.
+    static constexpr uint8_t NAME_LANGS = 2;
+    static constexpr const char* NAME_LANG_CODES[NAME_LANGS] = { "ru", "en" };
+
+    /// Пункт меню глазами карточки: пределы, шаг и текущее значение для юнита,
+    /// заголовок — чтобы назвать человеку, чем срезан предел.
     struct MenuValue {
         float min = 0, max = 0, step = 1, value = 0;
         const char* unit = nullptr;
+        const char* name[NAME_LANGS] = { nullptr, nullptr };
     };
     /// Чтение пункта меню. false — пункта нет или он не числовой.
     using MenuReader = bool (*)(uint16_t menuId, uint8_t unit, MenuValue& out);
@@ -204,9 +210,12 @@ private:
     static bool hasLimits_(const Param& p) {
         return p.type == ParamNumber || p.menuId != NO_MENU || p.ceilId != NO_MENU;
     }
-    /// Пределы, шаг и значение по умолчанию параметра для юнита.
+    /// Пределы, шаг и значение по умолчанию параметра для юнита. @p capName
+    /// (NAME_LANGS строк) — заголовок ограничителя, если ceiling() срезал
+    /// верхний предел; иначе все nullptr.
     bool resolve_(const Param& p, uint8_t unit, float& mn, float& mx,
-                  float& st, float& df, const char** unitStr) const;
+                  float& st, float& df, const char** unitStr,
+                  const char** capName = nullptr) const;
     uint32_t fingerprint_(uint8_t unitsCount) const;
 
     static constexpr uint8_t MAX_ENTITIES  = 16;

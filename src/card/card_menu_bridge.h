@@ -30,6 +30,10 @@ inline bool read(uint16_t id, uint8_t unit, CardBuilder::MenuValue& out) {
     out.value = g_menu_cache.getFloat(id, unit);
     // Единица — английская форма: манифест уходит на портал как есть.
     out.unit  = (MENU_LANG_COUNT > 1 && m->unit[1]) ? m->unit[1] : m->unit[0];
+    // Заголовок на всех языках меню — порядок совпадает с NAME_LANG_CODES.
+    for (uint8_t i = 0; i < CardBuilder::NAME_LANGS && i < MENU_LANG_COUNT; ++i) {
+        out.name[i] = m->title[i];
+    }
     return true;
 }
 

@@ -153,9 +153,11 @@ CardBuilder::ActionRef& CardBuilder::ActionRef::stages(const char* id, const cha
 }
 
 bool CardBuilder::resolve_(const Param& p, uint8_t unit, float& mn, float& mx,
-                           float& st, float& df, const char** unitStr) const {
+                           float& st, float& df, const char** unitStr,
+                           const char** capName) const {
     mn = p.min; mx = p.max; st = p.step; df = p.def;
     if (unitStr) *unitStr = p.unit[0] ? p.unit : nullptr;
+    if (capName) for (uint8_t i = 0; i < NAME_LANGS; ++i) capName[i] = nullptr;
     if (p.menuId != NO_MENU) {
         MenuValue v;
         if (!menuReader_ || !menuReader_(p.menuId, unit, v)) return false;
@@ -164,7 +166,11 @@ bool CardBuilder::resolve_(const Param& p, uint8_t unit, float& mn, float& mx,
     }
     if (p.ceilId != NO_MENU) {
         MenuValue c;
-        if (menuReader_ && menuReader_(p.ceilId, unit, c) && c.value < mx) mx = c.value;
+        if (menuReader_ && menuReader_(p.ceilId, unit, c) && c.value < mx) {
+            mx = c.value;
+            // Строки заголовка — статические строки меню продукта.
+            if (capName) for (uint8_t i = 0; i < NAME_LANGS; ++i) capName[i] = c.name[i];
+        }
     }
     if (mx < mn) mx = mn;
     if (df < mn) df = mn;
@@ -345,10 +351,11 @@ bool CardBuilder::emitLimits_(JsonObject po, const Param& p, uint8_t units,
                               bool withDefault) const {
     // Пределы и значения по юнитам. Совпали у всех — скаляром.
     float mn[iDryer::MAX_UNITS], mx[iDryer::MAX_UNITS], df[iDryer::MAX_UNITS];
+    const char* cap[iDryer::MAX_UNITS][NAME_LANGS];
     float st = p.step;
     const char* unitStr = nullptr;
     for (uint8_t u = 0; u < units; ++u) {
-        if (!resolve_(p, u, mn[u], mx[u], st, df[u], &unitStr)) return false;
+        if (!resolve_(p, u, mn[u], mx[u], st, df[u], &unitStr, cap[u])) return false;
     }
     bool sameLimits = true, sameDefault = true;
     for (uint8_t u = 1; u < units; ++u) {
@@ -375,6 +382,35 @@ bool CardBuilder::emitLimits_(JsonObject po, const Param& p, uint8_t units,
         }
     }
     if (unitStr && unitStr[0]) po["unit"] = unitStr;
+
+    // Чем срезан верхний предел — название для человека, без ссылок на меню.
+    auto capped = [&cap](uint8_t u) {
+        for (uint8_t i = 0; i < NAME_LANGS; ++i) if (cap[u][i]) return true;
+        return false;
+    };
+    bool anyCap = false, sameCap = true;
+    for (uint8_t u = 0; u < units; ++u) {
+        if (capped(u)) anyCap = true;
+        for (uint8_t i = 0; i < NAME_LANGS; ++i) {
+            if (cap[u][i] != cap[0][i]) sameCap = false;
+        }
+    }
+    if (anyCap) {
+        auto names = [](JsonObject o, const char* const* n) {
+            for (uint8_t i = 0; i < NAME_LANGS; ++i) {
+                if (n[i] && n[i][0]) o[NAME_LANG_CODES[i]] = n[i];
+            }
+        };
+        if (sameCap) {
+            names(po.createNestedObject("max_by"), cap[0]);
+        } else {
+            JsonArray by = po.createNestedArray("max_by");
+            for (uint8_t u = 0; u < units; ++u) {
+                if (capped(u)) names(by.createNestedObject(), cap[u]);
+                else           by.add(nullptr);
+            }
+        }
+    }
     return true;
 }
 
