@@ -2583,6 +2583,10 @@ mqtt_only:
       «что показать и чем управлять» для авто-карточки портала/приложения
       (слой 1) и опциональная заводская разметка (слой 2). Позволяет стороннему
       устройству получить рабочую карточку без правок портала.
+      Правило: каждая возможность прибора (Config.has*) — авто-сущность, SDK
+      генерирует её сам; source — топик, из которого приходят её данные.
+      hasWeight → sensor weight (source weights, path "weights" — массив
+      {sensorId, value, unitId}); hasRfid → rfid (source rfid, без значения).
       Сенсоры из capability_vocabulary SDK генерирует сам из Config.has*;
       кастомные сенсоры и контролы продукт объявляет через Link::card()
       (CardBuilder). Значения кастомных сенсоров продукт кладёт в telemetry
@@ -2612,11 +2616,11 @@ mqtt_only:
         v: "uint — версия схемы манифеста: 1 — только entities/layout, 2 — плюс actions"
         entities: "array — сущности карточки, порядок = порядок авто-рендера (слой 1)"
         "entities[].id": "string [a-z0-9_]{1..24}, уникален в манифесте"
-        "entities[].type": '"sensor" | "binary_sensor" | "number" | "select" | "button"'
+        "entities[].type": '"sensor" | "binary_sensor" | "number" | "select" | "button" | "rfid" (у камеры есть RFID-ридер; значения нет)'
         "entities[].device_class": "string, опционально — семантика в стиле HA (temperature/humidity/weight/power_factor/…); задаёт иконку/формат на портале"
         "entities[].label": "string, printable ASCII ≤32 — подпись; для словарных device_class может отсутствовать (портал берёт свой перевод)"
         "entities[].unit": "string ≤8 — единица измерения (для sensor/number)"
-        "entities[].source": '"telemetry" | "status" — откуда читать значение (sensor/binary_sensor)'
+        "entities[].source": '"telemetry" | "status" | "weights" | "rfid" — топик, из которого приходят данные сущности'
         "entities[].path": "string — JSON-путь к значению внутри source-payload, например units[0].co2ppm"
         "entities[].action": "string — invoke-action контрола (number/select/button); SDK генерирует card.{id}"
         "entities[].arg": "string — имя аргумента в args для number/select (значение контрола)"
