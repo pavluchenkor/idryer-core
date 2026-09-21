@@ -2607,6 +2607,7 @@ mqtt_only:
               - { id: "temperature", purpose: "target_temperature", type: "number", limits: [30, 90], step: 1, default: 50, unit: "°C" }
               - { id: "duration", purpose: "duration", type: "number", limits: [0, 2880], step: 1, default: [240, 180], unit: "min" }
           - { id: "stop", mode: "IDLE", action: "card.stop" }
+          - { id: "find", device_class: "identify", action: "card.find" }
       fields:
         v: "uint — версия схемы манифеста: 1 — только entities/layout, 2 — плюс actions"
         entities: "array — сущности карточки, порядок = порядок авто-рендера (слой 1)"
@@ -2628,8 +2629,11 @@ mqtt_only:
           что показать: форму запуска (прибор в IDLE) или блок сессии с остановкой
           (прибор в режиме действия). Действий запуска несколько — карточка выводит
           переключатель режимов; одно — сразу форму. Остановка — действие с mode IDLE.
+          Действие без mode режим не меняет (вызов прибора, сброс ошибок).
         "actions[].id": "string [a-z0-9_]{1..24}, уникален среди actions"
-        "actions[].mode": "string [A-Z_]{1..20} — режим юнита после действия (unit_modes_per_product)"
+        "actions[].mode": "string [A-Z_]{1..20}, опционально — режим юнита после действия (unit_modes_per_product); нет — действие режим не меняет"
+        "actions[].device_class": "string, опционально — место действия на карточке: identify (вызов прибора), clear_errors (сброс ошибок) — постоянные кнопки шапки; нет такого действия — кнопки нет"
+        "actions[].name": "{lang: text}, опционально — название действия на языках прибора; карточка берёт свой перевод по mode, а name — когда mode ей незнаком"
         "actions[].action": "string — invoke-action; SDK генерирует card.{id}. Команда: commands/invoke {action, args, unitId}, args — значения params по их id"
         "actions[].params": "array, ≤6 — параметры запуска. Операционные: действуют на один запуск и в EEPROM прибора не пишутся"
         "actions[].params[].id": "string [a-z0-9_]{1..24} — ключ в args"
