@@ -2633,7 +2633,9 @@ mqtt_only:
           что показать: форму запуска (прибор в IDLE) или блок сессии с остановкой
           (прибор в режиме действия). Действий запуска несколько — карточка выводит
           переключатель режимов; одно — сразу форму. Остановка — действие с mode IDLE.
-          Действие без mode режим не меняет (вызов прибора, сброс ошибок).
+          Действие без mode режим не меняет (вызов прибора, сброс ошибок) — так
+          же объявляет операции прибор без status: карточка не узнает его режим.
+          Действие без mode с параметрами карточка рисует своей формой.
         "actions[].id": "string [a-z0-9_]{1..24}, уникален среди actions"
         "actions[].mode": "string [A-Z_]{1..20}, опционально — режим юнита после действия (unit_modes_per_product); нет — действие режим не меняет"
         "actions[].device_class": "string, опционально — место действия на карточке: identify (вызов прибора), clear_errors (сброс ошибок) — постоянные кнопки шапки; нет такого действия — кнопки нет"
@@ -2642,10 +2644,11 @@ mqtt_only:
         "actions[].params": "array, ≤6 — параметры запуска. Операционные: действуют на один запуск и в EEPROM прибора не пишутся"
         "actions[].params[].id": "string [a-z0-9_]{1..24} — ключ в args"
         "actions[].params[].purpose": "string [a-z0-9_]{1..24}, опционально — смысл параметра для потребителя (см. card_param_purposes)"
-        "actions[].params[].type": '"number" | "stages"'
+        "actions[].params[].type": '"number" | "stages" | "select" | "color"'
         "actions[].params[].limits": "[min, max] — одинаково для всех юнитов, либо [[min, max], …] — по юниту (индекс = номер юнита). Для type=stages — пределы температуры каждой стадии, опционально"
         "actions[].params[].step": "number, для type=number"
-        "actions[].params[].default": "number — стартовое значение поля, либо массив по юнитам"
+        "actions[].params[].default": "number — стартовое значение поля, либо массив по юнитам; для select — один из options, для color — #RRGGBB"
+        "actions[].params[].options": "string[] ≤8, для type=select — допустимые значения (прибор отбросит чужое)"
         "actions[].params[].unit": "string ≤8"
         "actions[].params[].max_by": |
           опционально — чем срезан верхний предел: названия ограничителя по языкам
@@ -2666,6 +2669,8 @@ mqtt_only:
       target_temperature: "целевая температура запуска, °C"
       target_humidity: "целевая влажность запуска, %"
       duration: "длительность запуска, мин; 0 — без ограничения"
+      effect: "эффект подсветки (select)"
+      rgb_color: "цвет #RRGGBB (color)"
       stages: "стадии профиля: [{temperature, ramp, hold}], ramp/hold в секундах"
       start_stage: "номер стадии, с которой начать профиль (с нуля)"
   - suffix: commands/bind_ack
