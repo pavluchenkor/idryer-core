@@ -34,9 +34,9 @@ bool DevicePublisher::publishInfo(const char* json) {
     return mqtt_->publishInfoJson(json);
 }
 
-bool DevicePublisher::publishCard(JsonDocument& doc) {
-    wsPublish("card", doc);
-    return mqtt_->publishCard(doc);
+bool DevicePublisher::publishCardRaw(const char* json, size_t len) {
+    wsPublishRaw("card", json, len);
+    return mqtt_->publishCardRaw(json, len);
 }
 
 bool DevicePublisher::publishTelemetry(JsonDocument& doc) {

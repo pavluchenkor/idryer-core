@@ -186,10 +186,14 @@ bool MqttClient::publishInfoJson(const char* json) {
     return mqttClient_.publish(topic, /*qos=*/1, IDRYER_RETAINED_INFO, json) != 0;
 }
 
-bool MqttClient::publishCard(JsonDocument& json) {
+bool MqttClient::publishCardRaw(const char* json, size_t length) {
     // Манифест сущностей карточки: retained + QoS 1 — «оглавление» устройства,
     // новый подписчик должен получить его сразу.
-    return publishJson(IDRYER_TOPIC_CARD, json, /*qos=*/1, IDRYER_RETAINED_CARD);
+    if (!mqttClient_.connected() || !json || length == 0) return false;
+    const char* topic = makeTopic(IDRYER_TOPIC_CARD);
+    HAL_LOG_INFO("MQTT", "→ card: %u bytes", (unsigned)length);
+    return mqttClient_.publish(topic, /*qos=*/1, IDRYER_RETAINED_CARD,
+                               reinterpret_cast<const uint8_t*>(json), length) != 0;
 }
 
 bool MqttClient::publishTelemetry(JsonDocument& json) {

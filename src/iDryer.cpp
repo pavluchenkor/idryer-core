@@ -259,6 +259,8 @@ struct Link::Impl {
     // Entity manifest карточки (топик card, retained).
     idryer::CardBuilder card;
     bool cardPublished = false;      ///< опубликован ли манифест в этом коннекте
+    uint32_t lastCardPollMs = 0;     ///< последняя сверка меню для параметров действий
+    uint32_t lastCardTryMs  = 0;     ///< последняя попытка публикации манифеста
 
     // Auto-publish throttling (millis).
     uint32_t lastTelemetryMs = 0;
@@ -823,7 +825,17 @@ void Link::loop() {
     // Entity manifest (retained): публикуем после MQTT-коннекта и
     // перепубликуем, если продукт изменил декларацию (card().dirty()).
     if (impl_->pub.isMqttConnected()) {
-        if (!impl_->cardPublished || impl_->card.dirty()) publishCardNow();
+        // Параметры действий берут пределы из меню: меню или число юнитов
+        // сменились — манифест перепубликуется.
+        if (now - impl_->lastCardPollMs >= 1000) {
+            impl_->lastCardPollMs = now;
+            impl_->card.pollMenu(impl_->cfg.unitsCount);
+        }
+        if ((!impl_->cardPublished || impl_->card.dirty()) &&
+            now - impl_->lastCardTryMs >= 2000) {
+            impl_->lastCardTryMs = now;
+            publishCardNow();
+        }
     } else {
         impl_->cardPublished = false;
     }
@@ -988,10 +1000,33 @@ idryer::CardBuilder& Link::card() {
 }
 
 void Link::publishCardNow() {
-    // 2048: до 16 объявленных сущностей + авто-сенсоры + layout с запасом.
-    DynamicJsonDocument doc(2048);
+    // Сборка и сериализация в куче: с действиями манифест сушилки ~1.7 КБ,
+    // публикуется редко (коннект, изменение декларации или меню). Документ
+    // сушилки занимает ~2.7 КБ пула на трёх юнитах; 4 КБ — с запасом и меньше
+    // самого большого блока кучи touch (~7.6 КБ при LVGL).
+    DynamicJsonDocument doc(4096);
+    if (doc.capacity() == 0) {
+        HAL_LOG_ERROR("CARD", "no memory for manifest document");
+        return;   // повтор из loop()
+    }
     impl_->card.buildJson(doc, impl_->cfg);
-    if (impl_->pub.publishCard(doc)) {
+    if (doc.overflowed()) {
+        // Декларация не помещается — повтор не поможет, ждём её изменения.
+        HAL_LOG_ERROR("CARD", "manifest overflows %u bytes", (unsigned)doc.capacity());
+        impl_->cardPublished = true;
+        impl_->card.clearDirty();
+        return;
+    }
+    const size_t len = measureJson(doc);
+    char* buf = static_cast<char*>(malloc(len + 1));
+    if (!buf) {
+        HAL_LOG_ERROR("CARD", "no memory for manifest (%u bytes)", (unsigned)len);
+        return;
+    }
+    serializeJson(doc, buf, len + 1);
+    const bool ok = impl_->pub.publishCardRaw(buf, len);
+    free(buf);
+    if (ok) {
         impl_->cardPublished = true;
         impl_->card.clearDirty();
     }
@@ -1274,7 +1309,7 @@ void Link::dispatchCommand(const char* command, JsonObjectConst data, bool fromL
     if (strcmp(command, "invoke") == 0) {
         const char* action = data["action"].as<const char*>();
         if (action && strncmp(action, "card.", 5) == 0) {
-            if (!impl_->card.handleInvokeAction(action, data["args"])) {
+            if (!impl_->card.handleInvokeAction(action, data, impl_->cfg.unitsCount)) {
                 HAL_LOG_WARN("LINK", "unknown card action: %s", action);
             }
             return;

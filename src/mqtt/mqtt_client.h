@@ -146,7 +146,9 @@ public:
     bool publishInfoJson(const char* json);
 
     /// @brief Publishes to @c idryer/{serial}/card (retained, QoS 1) — entity manifest.
-    bool publishCard(JsonDocument& json);
+    /// Одним сообщением из готового буфера: манифест с действиями больше
+    /// буфера publishJson, а куски retained не хранит (остаётся последний).
+    bool publishCardRaw(const char* json, size_t length);
 
     /// @brief Publishes to @c idryer/{serial}/telemetry (QoS 0).
     bool publishTelemetry(JsonDocument& json);
