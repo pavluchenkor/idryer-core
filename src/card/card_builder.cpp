@@ -87,7 +87,7 @@ bool CardBuilder::select(const char* id, const char* label,
 // ── actions (v2) ─────────────────────────────────────────────────────────────
 
 CardBuilder::ActionRef CardBuilder::action(const char* id, const char* mode, OnAction cb) {
-    if (!id || !id[0] || !mode || !mode[0]) return ActionRef(this, -1);
+    if (!id || !id[0]) return ActionRef(this, -1);
     int8_t idx = -1;
     // Повторная регистрация того же id — замена, как у сущностей.
     for (uint8_t i = 0; i < actionCount_; ++i) {
@@ -138,6 +138,24 @@ CardBuilder::ActionRef& CardBuilder::ActionRef::ceiling(uint16_t menuId) {
     if (idx_ < 0) return *this;
     Action& a = b_->actions_[idx_];
     if (a.paramCount > 0) a.params[a.paramCount - 1].ceilId = menuId;
+    return *this;
+}
+
+CardBuilder::ActionRef& CardBuilder::ActionRef::deviceClass(const char* dc) {
+    if (idx_ < 0) return *this;
+    copyStr(b_->actions_[idx_].deviceClass, sizeof(Action::deviceClass), dc);
+    b_->dirty_ = true;
+    return *this;
+}
+
+CardBuilder::ActionRef& CardBuilder::ActionRef::name(const char* lang, const char* text) {
+    if (idx_ < 0 || !lang) return *this;
+    for (uint8_t i = 0; i < NAME_LANGS; ++i) {
+        if (strcmp(NAME_LANG_CODES[i], lang) == 0) {
+            b_->actions_[idx_].name[i] = text;
+            b_->dirty_ = true;
+        }
+    }
     return *this;
 }
 
@@ -324,8 +342,17 @@ void CardBuilder::buildJson(JsonDocument& doc, const iDryer::Config& cfg) const 
     for (uint8_t i = 0; i < actionCount_; ++i) {
         const Action& a = actions_[i];
         JsonObject o = acts.createNestedObject();
-        o["id"]   = a.id;
-        o["mode"] = a.mode;
+        o["id"] = a.id;
+        if (a.mode[0])        o["mode"] = a.mode;
+        if (a.deviceClass[0]) o["device_class"] = a.deviceClass;
+        bool named = false;
+        for (uint8_t n = 0; n < NAME_LANGS; ++n) if (a.name[n] && a.name[n][0]) named = true;
+        if (named) {
+            JsonObject nm = o.createNestedObject("name");
+            for (uint8_t n = 0; n < NAME_LANGS; ++n) {
+                if (a.name[n] && a.name[n][0]) nm[NAME_LANG_CODES[n]] = a.name[n];
+            }
+        }
         char action[32];
         snprintf(action, sizeof(action), "card.%s", a.id);
         o["action"] = action;

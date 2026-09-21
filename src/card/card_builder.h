@@ -111,6 +111,12 @@ public:
         /// с ceiling() даёт limits температуры каждой стадии для юнита.
         ActionRef& stages(const char* id, const char* purpose = "stages",
                           uint16_t tempMenuId = NO_MENU);
+        /// Место действия на карточке: "identify" — вызов прибора,
+        /// "clear_errors" — сброс ошибок (постоянные кнопки шапки).
+        ActionRef& deviceClass(const char* dc);
+        /// Название действия на языке @p lang ("ru", "en"). @p text — строка
+        /// со статическим временем жизни (литерал): хранится указатель.
+        ActionRef& name(const char* lang, const char* text);
 
     private:
         friend class CardBuilder;
@@ -120,8 +126,9 @@ public:
     };
 
     /// Действие: переводит юнит в режим @p mode (строка status.units[].mode).
-    /// Остановка — действие с mode "IDLE". Нажатие на карточке → invoke
-    /// card.{id} {args, unitId} → @p cb.
+    /// Остановка — действие с mode "IDLE"; nullptr — режим не меняется (вызов
+    /// прибора, сброс ошибок). Нажатие на карточке → invoke card.{id}
+    /// {args, unitId} → @p cb.
     ActionRef action(const char* id, const char* mode, OnAction cb);
 
     /// Сверить пункты меню, к которым привязаны параметры, с последней
@@ -183,7 +190,7 @@ private:
     };
 
 #ifndef IDRYER_CARD_MAX_ACTIONS
-#define IDRYER_CARD_MAX_ACTIONS 6
+#define IDRYER_CARD_MAX_ACTIONS 8
 #endif
 #ifndef IDRYER_CARD_MAX_PARAMS
 #define IDRYER_CARD_MAX_PARAMS 4
@@ -194,6 +201,8 @@ private:
     struct Action {
         char     id[24];
         char     mode[20];
+        char     deviceClass[20];
+        const char* name[NAME_LANGS] = { nullptr, nullptr };
         Param    params[MAX_PARAMS];
         uint8_t  paramCount = 0;
         OnAction cb = nullptr;
