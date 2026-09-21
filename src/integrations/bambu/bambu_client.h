@@ -167,7 +167,7 @@ private:
 
     // PubSubClient принимает сырой function pointer. Статический мост
     // маршрутизирует на текущий инстанс клиента. Ограничение: один
-    // BambuClient одновременно — у нас так и есть, в LinkIntegrationsManager.
+    // BambuClient одновременно — в LinkIntegrationsManager так и есть.
     static BambuClient*     instance_;
     static void             staticMqttCallback(char* topic, uint8_t* payload, unsigned int length);
 };

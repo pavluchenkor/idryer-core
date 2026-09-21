@@ -168,7 +168,7 @@ void OtaReceiver::handleAnnounce(JsonObjectConst data) {
     //
     // Wait  → отвечаем «занят», портал откладывает (это не провал).
     // Allow → работа декоративная (подсветка) и сама не закончится никогда;
-    //         продукт останавливает её по сигналу и мы грузимся.
+    //         продукт останавливает её по сигналу, и загрузка начинается.
     if (link_ && link_->anyUnitActive()) {
         if (link_->otaInterruptPolicy() == iDryer::OtaInterrupt::Wait) {
             safeCopy(commandId_, sizeof(commandId_), commandId);
@@ -299,12 +299,12 @@ void OtaReceiver::handleChunk(const char* topic, const uint8_t* payload, size_t 
 
     // Sequential ordering: ждём строго chunkIdx == chunksReceived_.
     //
-    // Дубликат приходит, когда наш отчёт о приёме до портала не доехал и он
+    // Дубликат приходит, когда отчёт о приёме до портала не доехал и портал
     // прислал тот же кусок заново. Записывать нечего — но и МОЛЧАТЬ нельзя:
     // портал ждёт ровно отчёта, повторяет впустую и через несколько попыток
-    // роняет сессию, хотя кусок давно принят (стенд: приняли 139, портал
-    // пять раз слал 138 в тишину и сдался). Отвечаем текущим прогрессом —
-    // портал видит, что мы ушли дальше, и продолжает.
+    // роняет сессию, хотя кусок давно принят (стенд: принят 139, портал
+    // пять раз слал 138 в тишину и сдался). Ответ текущим прогрессом
+    // показывает порталу, что приём ушёл дальше, и он продолжает.
     if (chunkIdx < chunksReceived_) {
         HAL_LOG_DEBUG("OTA", "chunk %u duplicate (have %u) — re-sending progress",
                       chunkIdx, chunksReceived_);
@@ -339,8 +339,8 @@ void OtaReceiver::handleChunk(const char* topic, const uint8_t* payload, size_t 
                          (unsigned)bytesReceived_);
             publishComplete("verified", nullptr);
             resetSession();
-            // Прошивка была НЕ наша: перезагружается контроллер, а мы остаёмся
-            // работать. Значит нужно вернуть продукт к обычной жизни — иначе
+            // Обновлялась прошивка продукта: перезагружается контроллер, Link
+            // продолжает работу. Продукт возвращается в обычный режим — иначе
             // экран так и висит с надписью об обновлении, а телеметрия молчит.
             if (link_) link_->notifyOtaAbort();
         }
@@ -503,9 +503,8 @@ void OtaReceiver::publishCheckUpdateForMcu(uint32_t mcuVersion) {
     // board выпарсивается из mcuHardwareVersion (Hello.hardwareVersion).
     // Формат строки от RP: "rp2040-vN-XX", где XX — суффикс адреса SHT31
     // (44 или 45 — то что в портале хранится как board="0x44"/"0x45").
-    // Старые прошивки шлют "rp2040-v1" без суффикса — в этом случае поле
-    // board не отправляется, backend выбирает по productId+controllerType+
-    // version (поведение как раньше).
+    // Прошивки без суффикса шлют "rp2040-v1" — в этом случае поле board не
+    // отправляется, backend выбирает по productId+controllerType+version.
     const char* hw = link_ ? link_->mcuHardwareVersion() : nullptr;
     if (hw && hw[0]) {
         const char* dash = strrchr(hw, '-');
@@ -711,7 +710,7 @@ bool OtaReceiver::pushChunkToRp(uint16_t chunkIdx, const uint8_t* data, size_t l
 
     // Retry-loop: один битый/потерянный UART-фрагмент (CRC-дроп, overrun) делает
     // chunk неполным. RP отвечает status=4 (retry), либо ack не приходит (timeout)
-    // — пересылаем ТОТ ЖЕ chunk целиком. Данные у нас в (data,len), backend не
+    // — пересылаем ТОТ ЖЕ chunk целиком. Данные остаются в (data,len), backend не
     // вовлечён. Дубликат уже принятого chunk RP ack'ает как ok (idempotency).
     constexpr int      MAX_RETRIES   = 5;
     constexpr uint32_t ACK_TIMEOUT_MS = 2000;  // 115200 baud, ~4КБ chunk ≈ 350мс + RP write
@@ -810,10 +809,10 @@ void OtaReceiver::handleOtaCommitNow() {
         HAL_LOG_WARN("OTA", "OtaCommitNow ignored: no espVerifiedPending");
         return;
     }
-    // ВОТ ТЕПЕРЬ устанавливаем boot-флаг: Update.end(true) внутри зовёт
-    // esp_ota_set_boot_partition. До этого момента данные лежали в OTA-
-    // партиции, sha проверена, но bootloader продолжал выбирать старый
-    // раздел при любом reset. Теперь — переключаемся синхронно с RP.
+    // Здесь устанавливается boot-флаг: Update.end(true) внутри зовёт
+    // esp_ota_set_boot_partition. До этого момента данные лежат в OTA-
+    // партиции, sha проверена, но bootloader выбирает старый раздел при
+    // любом reset. Переключение идёт синхронно с RP.
     if (!Update.end(/*evenIfRemaining=*/true)) {
         HAL_LOG_ERROR("OTA", "Update.end on commit failed: %s — NOT rebooting",
                       Update.errorString());
@@ -830,13 +829,11 @@ void OtaReceiver::handleOtaCommitNow() {
 void OtaReceiver::flushAndRestart() {
     // 1. Дать стеку реально ОТПРАВИТЬ рапорт о завершении.
     //
-    // Здесь когда-то стоял delay(200) с расчётом на PubSubClient, у которого
-    // publish() синхронный. Библиотека давно другая — espMqttClient
-    // асинхронный: publish лишь кладёт пакет в очередь, а отправка идёт из
-    // loop(). delay() цикл не крутит, поэтому рапорт уезжал в никуда: портал
-    // не узнавал об успехе и через таймаут писал FAILED на прошивке, которая
-    // на самом деле успешно встала. Проверено замером на брокере — сообщения
-    // не было вовсе. Поэтому крутим loop, а не спим.
+    // espMqttClient асинхронный: publish() лишь кладёт пакет в очередь, а
+    // отправка идёт из loop(). Пауза цикл не крутит, поэтому здесь крутится
+    // loop. Без него рапорт не уходит: портал не узнаёт об успехе и через
+    // таймаут пишет FAILED на прошивке, которая успешно встала (проверено
+    // замером на брокере — сообщения не было вовсе).
     if (mqtt_) {
         uint32_t until = HAL_MILLIS() + 800;
         while (HAL_MILLIS() < until) {

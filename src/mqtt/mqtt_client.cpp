@@ -250,9 +250,9 @@ uint16_t MqttClient::publishConfigChunk(const char* json, size_t length, bool fi
     }
     const char* topic = makeTopic(IDRYER_TOPIC_CONFIG);
 
-    // Первым делом стираем retained-снимок на топике: раньше там лежал полный
-    // конфиг, и новый подписчик получал бы устаревшее меню от прошлой версии
-    // прошивки. Пустая retained-публикация — штатный способ очистки.
+    // Первым делом стирается retained-снимок на топике: иначе новый подписчик
+    // получит устаревшее меню от прошлой версии прошивки. Пустая
+    // retained-публикация — штатный способ очистки.
     if (first) {
         mqttClient_.publish(topic, /*qos=*/0, /*retain=*/true,
                             reinterpret_cast<const uint8_t*>(""), 0);
@@ -384,10 +384,9 @@ void MqttClient::onMqttMessage(const espMqttClientTypes::MessageProperties& prop
     // всегда приезжает в 2-3 вызова. EMC_RX_BUFFER_SIZE тут ни при чём: это
     // размер одного чтения из сокета, а не гарантия целостности сообщения.
     //
-    // Раньше здесь стоял дроп всего, что пришло не целиком, — и OTA работала
-    // лотереей: кусок принимался, только если сегменты случайно легли удачно.
-    // Теперь собираем фрагменты по index/total, которые библиотека для этого
-    // и передаёт.
+    // Фрагменты собираются по index/total, которые библиотека для этого и
+    // передаёт. Без сборки кусок принимался бы, только если сегменты случайно
+    // легли удачно.
     static uint8_t s_asm_buf[OTA_CHUNK_ASSEMBLY_SIZE];
     static char    s_asm_topic[TOPIC_BUFFER_SIZE];
     static size_t  s_asm_len = 0;

@@ -283,11 +283,11 @@ inline size_t menu_buildFullJson(char* buf, size_t bufSize) {
     if (!buf || bufSize < 256) return 0;
 
     // DynamicJsonDocument в куче (locally allocated). Освобождается при выходе
-    // из функции. Раньше был static StaticJsonDocument<MENU_JSON_DOC_CAP> в .bss
-    // — он съедал постоянно ~22КБ на DRYER и блокировал TLS-handshake mbedtls.
+    // из функции: статический буфер того же размера занимал бы ~22КБ в .bss
+    // постоянно и блокировал TLS-handshake mbedtls.
     DynamicJsonDocument doc(MENU_JSON_DOC_CAP);
 
-    // units/lang теперь обычные пункты меню (предпоследний/последний)
+    // units/lang — обычные пункты меню (предпоследний/последний)
     doc["v"] = g_menu_cache.revision;
 
     if (MENU_META_COUNT >= 2) {

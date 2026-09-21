@@ -56,8 +56,8 @@ bool ArduinoHttpClient::postJson(const char* url, const char* body, JsonDocument
     }
 
     if (httpCode < 200 || httpCode >= 300) {
-        // Тело ошибки отдаём вызывающему, если оно разобралось: раньше оно
-        // выбрасывалось, и устройство не отличало «отказано» от «сеть моргнула».
+        // Тело ошибки отдаётся вызывающему, если оно разобралось: без него
+        // устройство не отличает «отказано» от «сеть моргнула».
         if (payload.length() > 0) deserializeJson(response, payload);
         HAL_LOG_ERROR("HTTP", "POST %s failed: %d body=%s", url, httpCode,
                       payload.length() > 0 ? payload.c_str() : "<empty>");

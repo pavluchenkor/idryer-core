@@ -305,7 +305,7 @@ struct Link::Impl {
 
 Link::Link(const Config& cfg) {
     // Static local — живёт в .bss, нет heap allocation.
-    // Конструктор приватного Impl доступен здесь т.к. мы внутри Link.
+    // Конструктор приватного Impl доступен здесь: код находится внутри Link.
     static Impl s_impl(cfg);
     impl_ = &s_impl;
 
@@ -329,8 +329,8 @@ bool Link::begin() {
     Serial.begin(115200);
 
     // Accumulated work-time counter — читаем из NVS до того как продукт
-    // что-либо запустит. Любой ребут (включая OTA) теперь сохраняет общее
-    // время работы устройства. См. work_time_tracker.h.
+    // что-либо запустит. Любой ребут (включая OTA) сохраняет общее время
+    // работы устройства. См. work_time_tracker.h.
     idryer::WorkTimeTracker::instance().begin();
 
 #ifdef IDRYER_DEV_REPL
@@ -498,8 +498,7 @@ bool Link::begin() {
     }, impl_);
 
     // Шина ошибок ESP-стороны: без обработчика всё, что в неё кладут, тихо
-    // пропадает. Раньше проводку делал только iHeater-link, а touch и link не
-    // делали вовсе. Ставим обработчик по умолчанию здесь; продукт может
+    // пропадает. Обработчик по умолчанию ставится здесь; продукт может
     // переопределить его своим error_set_handler() уже после begin().
     error_set_handler([](const ErrorEvent* ev) {
         Link* self = s_selfForErrors;
@@ -776,13 +775,12 @@ void Link::loop() {
         }
     }
 #endif
-    // Провижинеру цикл нужен и после подключения. Ветка выше работает только
-    // пока логи выключены, а включаются они в момент подъёма Wi-Fi и уходят в
-    // return — то есть дальше вызова не было вовсе. Вместе с ним не работали
+    // Провижинеру цикл нужен и после подключения: на нём держатся
     // переподключение после разрыва, выбор точки с лучшим сигналом и осмотр
-    // эфира при просадке: связь восстанавливал автореконнект стека, цепляясь
-    // к произвольной точке. В dev-режиме Improv-ветки нет — этот вызов
-    // единственный и там.
+    // эфира при просадке. Без него связь восстанавливает автореконнект стека,
+    // цепляясь к произвольной точке. Ветка выше уходит в return, как только
+    // включаются логи (в момент подъёма Wi-Fi), поэтому вызов стоит отдельно.
+    // В dev-режиме Improv-ветки нет — этот вызов единственный и там.
     idryer::EspTouchProvisioner::instance().loop();
 
     impl_->runtime.loop();
@@ -802,8 +800,9 @@ void Link::loop() {
     // Интеграции (Bambu по MQTT, Moonraker по WebSocket, Home Assistant) на
     // время загрузки прошивки не крутим: это отдельные соединения и свой
     // трафик в том же канале, по которому едет прошивка, плюс лишняя работа в
-    // цикле — а мы за него и боремся. После срыва загрузки они оживают сами,
-    // после успешной — устройство перезагружается.
+    // цикле, который на время загрузки должен оставаться свободным. После
+    // срыва загрузки они оживают сами, после успешной — устройство
+    // перезагружается.
     if (!impl_->otaActive) impl_->intManager.loop();
 
     // Lazy: mDNS/WS только после WiFi (lwIP requirement).
@@ -847,10 +846,8 @@ void Link::loop() {
             if (isActiveUnitMode(status.mode[i])) { anyActive = true; break; }
         }
 
-        // Ноль в поле Config = «взять значение из контракта». Продукт больше
-        // не обязан помнить эти числа: раньше каждый вписывал их руками, и они
-        // разъезжались (idryer-touch публиковался в восемнадцать раз чаще, чем
-        // просит контракт). Своё значение задать по-прежнему можно — это
+        // Ноль в поле Config = «взять значение из контракта». Продукт не
+        // обязан помнить эти числа; задать своё значение можно — это
         // осознанное решение, а не обязанность.
         uint32_t telemetryPeriod = impl_->cfg.telemetryPeriodMs
                                        ? impl_->cfg.telemetryPeriodMs
@@ -884,7 +881,7 @@ void Link::loop() {
         // их события продукт публикует сам через publishStatusNow().
         // statusDisabled — продукт вовсе не публикует статус (Storage: у него
         // нет ни режимов, ни уставок). Отдельный флаг, потому что нулевой
-        // период теперь означает «взять из контракта».
+        // период означает «взять из контракта».
         if (!impl_->cfg.statusDisabled) {
             bool statusChanged = false;
             for (uint8_t i = 0; i < impl_->cfg.unitsCount && i < MAX_UNITS; ++i) {
@@ -1002,7 +999,7 @@ void Link::publishCardNow() {
 
 void Link::publishTelemetryNow() {
     const Config& cfg = impl_->cfg;
-    // 640: 4 юнита × ~7 полей (включая servoOpen) с запасом; 512 было впритык.
+    // 640: 4 юнита × ~7 полей (включая servoOpen) с запасом.
     StaticJsonDocument<640> doc;
 
     JsonArray units = doc.createNestedArray("units");
@@ -1078,9 +1075,8 @@ void Link::publishStatusNow() {
         // поэтому номер переживает перезагрузку Link (OTA, eraseClaimAndRestart)
         // и не рвёт живую сессию в БД. Локальный счётчик остаётся фолбэком для
         // продуктов, которые status.sessionNum не заполняют (шлют 0).
-        // Phase 5: добавили Heating, LightAnimation, Profile. Generic-проверка
-        // (isActiveUnitMode) вместо whitelist, чтобы новые mode'ы автоматически
-        // попадали в session-tracking без правки SDK.
+        // Активность режима определяется generic-проверкой (isActiveUnitMode),
+        // а не списком: новые mode'ы попадают в session-tracking без правки SDK.
         const bool wasActive = isActiveUnitMode(impl_->lastModeForSn[i]);
         const bool isActive  = isActiveUnitMode(status.mode[i]);
         if (isActive && !wasActive) impl_->sessionNum[i]++;

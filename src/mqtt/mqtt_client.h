@@ -30,7 +30,7 @@ public:
 #define IDRYER_MQTT_KEEPALIVE   30
 #define TOPIC_BUFFER_SIZE       128
 
-// Буфер сборки фрагментированных payload'ов. Самое большое, что нам присылают,
+// Буфер сборки фрагментированных payload'ов. Самое большое входящее сообщение
 // — OTA-кусок (4 КБ, см. DEFAULT_CHUNK_SIZE на бэкенде); запас на случай, если
 // размер куска поднимут. Меньше делать нельзя: не поместившееся сообщение
 // будет отброшено целиком.
@@ -51,7 +51,7 @@ namespace idryer {
  * @brief MQTT client for iDryer devices.
  *
  * Wraps @c espMqttClient (loop-режим, без внутренней FreeRTOS-задачи — вся
- * работа в главном цикле, как раньше с PubSubClient) and manages connection
+ * работа в главном цикле) and manages connection
  * and message routing. All topic names are built from the device serial
  * number automatically.
  *
