@@ -87,22 +87,15 @@ alias contract='python3 contracts/show.py'
 
 ## Добавить новое устройство
 
-Полный воркфлоу (fork → yaml → regen → firmware → dashboard-карточка → UIKit → PR):
+Карточку устройства на портале и в приложении строит **card-манифест**, который публикует
+прошивка (`Link::card()`, retained-топик `card`, контракт `mqtt_only[suffix=card]`).
+Новому типу устройства код портала и приложения не нужен:
 
-→ **[docs/en/09-add-product/02-add-widget.md](../docs/en/09-add-product/02-add-widget.md)** (актуальная версия)
-→ **[docs/ru/09-add-product/02-add-widget.md](../docs/ru/09-add-product/02-add-widget.md)** (устарела, см. EN)
+→ **[docs/ru/09-add-product/02-add-widget.md](../docs/ru/09-add-product/02-add-widget.md)** — карточка из манифеста
+→ **[docs/ru/09-add-product/01-add-new-product.md](../docs/ru/09-add-product/01-add-new-product.md)** — каркас прошивки
 
-«Виджет» в этом коде — это **карточка устройства на дашборде портала**,
-product-specific React-компонент в `iDryerPortal/frontend-v2/src/components/dashboard/cards/`.
-Контракт не описывает JSX; нет widget-registry, нет генерируемых React-файлов.
-
-Сейчас в портале есть карточки:
-- `HeaterCard` — `IHEATER_LINK`
-- `StorageCard` — `STORAGE_LINK`
-- `IDryerCard` — fallback для устройств без своей карточки
-
-Добавление карточки под новый тип устройства — задача на стороне портала
-(см. документ по ссылке выше).
+Реестра виджетов нет: поле `widget` в `canonical_roles` портал и приложение не читают.
+Роли используются для подписей пунктов меню.
 
 Краткая схема:
 
@@ -120,8 +113,9 @@ mqtt_contract.yaml
               └─► canonical_roles.dart             (mobile)
 ```
 
-Портал потребляет `mqtt-api.types.ts` и подбирает карточку по `deviceType`
-в `src/components/dashboard/DeviceDashboardCard.tsx`.
+Портал потребляет `mqtt-api.types.ts`. Саму карточку даёт card-манифест устройства:
+`DeviceDashboardCard.tsx` рисует `EntityDeviceCard` для типов, которые не являются продуктами
+iDryer, и `IDryerCard` для `DRYER` (с теми же действиями из манифеста).
 
 ## Pipeline
 

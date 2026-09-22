@@ -86,21 +86,15 @@ alias contract='python3 contracts/show.py'
 
 ## Add a New Device
 
-Full workflow (fork -> yaml -> regen -> firmware -> dashboard card -> UIKit -> PR):
+The device card on the portal and in the app is built from the **card manifest** the
+firmware publishes (`Link::card()`, retained topic `card`, contract `mqtt_only[suffix=card]`).
+A new device type needs no portal or app code:
 
--> **[docs/en/09-add-product/02-add-widget.md](../docs/en/09-add-product/02-add-widget.md)** (source of truth)
--> **[docs/ru/09-add-product/02-add-widget.md](../docs/ru/09-add-product/02-add-widget.md)** (outdated, see EN)
+-> **[docs/en/09-add-product/02-add-widget.md](../docs/en/09-add-product/02-add-widget.md)** — device card from the manifest
+-> **[docs/en/09-add-product/01-add-new-product.md](../docs/en/09-add-product/01-add-new-product.md)** — firmware skeleton
 
-A "widget" in this codebase is a **device card on the portal dashboard** — a product-specific
-React component in `iDryerPortal/frontend-v2/src/components/dashboard/cards/`. The contract
-has no opinion on JSX; there is no widget registry and no generated React files.
-
-Dashboard cards currently in the portal:
-- `HeaterCard` — `IHEATER_LINK`
-- `StorageCard` — `STORAGE_LINK`
-- `IDryerCard` — fallback for devices without a dedicated card
-
-Adding a card for a new device type is a portal-side task (see the page linked above).
+There is no widget registry: the `widget` field of `canonical_roles` is not read by the portal
+or the app. Roles are used for menu item labels.
 
 Short flow:
 
@@ -118,8 +112,9 @@ mqtt_contract.yaml
               +-> canonical_roles.dart             (mobile)
 ```
 
-The portal then consumes `mqtt-api.types.ts` and renders the device with the appropriate card
-(switched by `deviceType` in `src/components/dashboard/DeviceDashboardCard.tsx`).
+The portal consumes `mqtt-api.types.ts`. The card itself comes from the device's card manifest:
+`DeviceDashboardCard.tsx` picks `EntityDeviceCard` for device types that are not iDryer products,
+and `IDryerCard` for `DRYER` (with the same manifest actions).
 
 ## Pipeline
 

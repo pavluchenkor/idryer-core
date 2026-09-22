@@ -329,8 +329,8 @@ inline size_t menu_buildFullJson(char* buf, size_t bufSize) {
         }
 
         // Каноническая роль для портала (semantic role). Поле widget намеренно
-        // НЕ публикуется: виджет = product-specific карточка дашборда, не часть
-        // меню (см. ___capabilities_and_menu_as_protocol.md).
+        // НЕ публикуется: карточку устройства описывает card-манифест, не меню
+        // (iDryerPortal/CARD_MANIFEST.md).
         if (meta->role) {
             item["r"] = meta->role;
         }

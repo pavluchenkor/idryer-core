@@ -122,7 +122,6 @@ The library is the foundation of every device in the ecosystem. The protocol con
 | `contracts/` | Protocol contract, generators, YAML navigation |
 | `examples/` | Ready-to-build examples, from minimal to complete |
 | `menu/` | The menu described as a protocol |
-| `CARD-MANIFEST` | Dynamic device cards for the portal |
 
 ## License
 

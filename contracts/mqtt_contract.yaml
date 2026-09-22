@@ -337,23 +337,24 @@ rules:
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Статус миграции на menu_protocol_v1: iHeater Link и Storage Link — мигрированы
-# (set + invoke, canonical roles). Dryer (iDryer V3) остаётся на legacy-топиках
-# commands/drying|storage|profile|stop и т.п. — см. messages с этими suffix.
+# (set + invoke, canonical roles). Dryer (iDryer V3) без действий в card-манифесте
+# остаётся на legacy-топиках commands/drying|storage|profile|stop и т.п. — см.
+# messages с этими suffix. Прошивка с действиями в card-манифесте получает
+# операции как commands/invoke card.{id} (см. mqtt_only[suffix=card]).
 # ─────────────────────────────────────────────────────────────────────────────
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Канонические роли — закрытый словарь menu_protocol_v1
-# Подробности — ___capabilities_and_menu_as_protocol.md §8
+# Как роли используются порталом и приложением — iDryerPortal/CARD_MANIFEST.md §1
 # ─────────────────────────────────────────────────────────────────────────────
 canonical_roles:
   # Каждая роль описывает:
   #   type        — тип данных (float/uint/bool/action)
   #   unit        — единица измерения (опционально, для UI)
-  #   widget      — примитив рендера пункта МЕНЮ на портале/в приложении:
-  #                   slider | number | toggle | select | button | hidden
-  #                   (composite-виджеты отменены — виджет = карточка устройства
-  #                    на дашборде, продуктовый React-компонент, не часть меню;
-  #                    RfidWriter — единственный оставшийся legacy для RFID-потока)
+  #   widget      — справочное поле: slider | number | toggle | select | button | hidden.
+  #                   Портал и приложение его не читают — пункт меню рисуется по
+  #                   своему типу (tog/val/act/sub); menu_gen.py выводит его в списке
+  #                   ролей при ошибке. Карточку устройства описывает card-манифест.
   #   labels      — переводы названия для портала (по коду языка ISO 639-1)
   #                   портал показывает labels[currentLang], fallback → en
   #                   если роль неизвестна — портал берёт n: от устройства
