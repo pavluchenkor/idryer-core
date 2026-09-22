@@ -8,13 +8,16 @@ gen_scaffold.py — генератор PlatformIO-проекта из device_pro
 
 Что генерирует для каждого профиля:
     contracts/_generated/scaffolds/{profile}/
-        src/main.cpp          — composition root с заполненным Config и TODO-комментариями
-        include/secrets.h     — шаблон credentials
-        platformio.ini        — минимальный рабочий env
-        README.md             — 5 шагов «как запустить»
+        src/main.cpp          — устройство на iDryer::Link: Config из профиля,
+                                действия карточки по режимам юнита, TODO
+        platformio.ini        — окружения prod и stage
+        README.md             — как запустить
+
+Wi-Fi и привязку ядро поднимает само (приложение iDryer, Improv), поэтому
+ни паролей сети, ни secrets.h в заготовке нет.
 
 Источник правды:
-    mqtt_contract.yaml → device_profiles + capability_vocabulary + invoke_actions
+    mqtt_contract.yaml → device_profiles + capability_vocabulary + unit_modes_per_product
 """
 
 from __future__ import annotations
@@ -26,266 +29,152 @@ import yaml
 
 HERE = Path(__file__).parent
 
+# Режим юнита на проводе → UnitMode фасада.
+UNIT_MODE_ENUM = {
+    "IDLE": "Idle",
+    "DRYING": "Drying",
+    "STORAGE": "Storage",
+    "PROFILE": "Profile",
+    "HEATING": "Heating",
+    "LIGHT_ANIMATION": "LightAnimation",
+}
+
+# Параметры действия запуска для режима: подсказка, пределы — TODO продукта.
+START_PARAMS = {
+    "DRYING": [
+        '.param("temperature", "target_temperature", 30, 90, 1, 50, "°C")',
+        '.param("duration", "duration", 0, 2880, 10, 240, "min")',
+    ],
+    "HEATING": [
+        '.param("temperature", "target_temperature", 30, 70, 1, 45, "°C")',
+        '.param("duration", "duration", 0, 720, 10, 120, "min")',
+    ],
+    "LIGHT_ANIMATION": [
+        '.select("effect", "effect", kEffects, 2, "solid")',
+        '.color("color", "rgb_color", "#FFFFFF")',
+    ],
+}
+
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
-def _to_class_name(profile_name: str) -> str:
-    """storage_link → StorageLink"""
-    return "".join(w.capitalize() for w in profile_name.split("_"))
-
-
-def _device_type_enum(profile_name: str) -> str:
-    """Map profile name to idryer::DeviceType enum value."""
+def _device_type_enum(profile: dict) -> str:
+    """device_profiles.*.device_type → iDryer::DeviceType."""
     mapping = {
         "storage_link": "StorageLink",
         "iheater_link": "IHeaterLink",
-        "dryer_v3":     "Dryer",
+        "dryer": "Dryer",
     }
-    return mapping.get(profile_name, "Unknown")
+    return mapping.get(profile.get("device_type", ""), "Unknown")
 
 
-def _collect_invoke_hints(profile_name: str, doc: dict) -> list[str]:
-    """Return lines of code comments listing available invoke actions."""
-    invoke_actions = doc.get("invoke_actions") or {}
-    product_actions = invoke_actions.get(profile_name) or []
-    if not product_actions:
-        return []
-    lines = ["    // Actions available for this profile (from invoke_actions in mqtt_contract.yaml):"]
-    for act in product_actions:
-        name = act.get("name", "?")
-        purpose = act.get("purpose", "").strip().split("\n")[0][:80]
-        args = act.get("args") or {}
-        arg_names = ", ".join(args.keys()) if args else "—"
-        lines.append(f"    //   {name}  (args: {arg_names})  — {purpose}")
-    lines.append("    // Example dispatch:")
-    if product_actions:
-        first = product_actions[0].get("name", "my.action")
-        lines.append(f'    // if (strcmp(action, "{first}") == 0) {{ /* TODO */ return true; }}')
-    return lines
+def _config_flag(cap: str, entry: dict) -> str:
+    """air_temp → hasAirTemp (или config_flag из словаря)."""
+    return entry.get("config_flag") or "has" + "".join(p.capitalize() for p in cap.split("_"))
 
 
-def _capabilities_json_lines(capabilities: list[str], vocab: dict) -> list[str]:
-    """Generate doc["capabilities"]["led"] = true; lines for buildInfoJson."""
-    if not capabilities:
-        return []
-    lines = ["        JsonObject caps = doc.createNestedObject(\"capabilities\");"]
-    for cap in capabilities:
-        entry = vocab.get(cap) or {}
-        json_key = entry.get("json_key", cap)
-        lines.append(f'        caps["{json_key}"] = true;')
-    return lines
+def _start_mode(profile_name: str, doc: dict) -> str | None:
+    modes = ((doc.get("unit_modes_per_product") or {}).get(profile_name) or {}).get("active") or []
+    return modes[0] if modes else None
 
 
 # ── Generators ───────────────────────────────────────────────────────────────
 
-def gen_main_cpp(profile_name: str, capabilities: list[str], doc: dict) -> str:
+def gen_main_cpp(profile_name: str, profile: dict, doc: dict) -> str:
     vocab = doc.get("capability_vocabulary") or {}
-    class_name = _to_class_name(profile_name)
-    device_type = _device_type_enum(profile_name)
+    capabilities: list[str] = profile.get("capabilities") or []
     today = datetime.date.today().isoformat()
     caps_str = ", ".join(capabilities) if capabilities else "none"
+    modes = ((doc.get("unit_modes_per_product") or {}).get(profile_name) or {}).get("active") or []
+    start_mode = _start_mode(profile_name, doc)
 
-    # ── Config capability flags ──────────────────────────────────────────────
-    cap_flag_lines: list[str] = []
-    for cap in capabilities:
-        entry = vocab.get(cap) or {}
-        flag  = entry.get("config_flag", "has" + "".join(p.capitalize() for p in cap.split("_")))
-        desc  = entry.get("description", cap)
-        cap_flag_lines.append(f"    .{flag:<22} = true,   // {desc}")
-    for cap, entry in vocab.items():
-        if cap not in capabilities:
-            flag = entry.get("config_flag", "has" + "".join(p.capitalize() for p in cap.split("_")))
-            cap_flag_lines.append(f"    .{flag:<22} = false,  // (not in this profile)")
-
-    # ── buildInfoJson capabilities ───────────────────────────────────────────
-    caps_json_lines = _capabilities_json_lines(capabilities, vocab)
-    if not caps_json_lines:
-        caps_json_lines = ["        // No capabilities — add them here."]
-
-    # ── invoke hints ─────────────────────────────────────────────────────────
-    invoke_hint_lines = _collect_invoke_hints(profile_name, doc)
-    if not invoke_hint_lines:
-        invoke_hint_lines = ["    // No invoke actions defined for this profile yet."]
-
-    # Build output line-by-line to avoid dedent/indentation issues.
-    L = []
+    L: list[str] = []
     def w(line: str = "") -> None:
         L.append(line)
 
-    w(f"// ============================================================================")
+    w("// ============================================================================")
     w(f"// SCAFFOLD: {profile_name}")
     w(f"// Generated {today} by contracts/gen_scaffold.py from mqtt_contract.yaml")
-    w(f"//")
-    w(f"// HOW TO START:")
-    w(f"//   1. Copy this directory to your PlatformIO project root.")
-    w(f"//   2. Copy include/secrets.h.example → include/secrets.h, fill WiFi credentials.")
-    w(f"//   3. Fill in the TODO sections below with your hardware logic.")
-    w(f"//   4. Run: pio run -e {profile_name}-prod")
-    w(f"//   5. Flash, connect Improv (or use hardcoded SSID), claim on portal.idryer.org.")
-    w(f"//")
+    w("//")
+    w("// HOW TO START:")
+    w("//   1. Copy this directory; put idryer-core into lib/idryer-core")
+    w("//      (a copy, a git submodule or a symbolic link).")
+    w("//   2. Fill in the TODO sections with your hardware logic.")
+    w(f"//   3. pio run -e {profile_name}-prod -t upload")
+    w("//   4. Wi-Fi and pairing: the iDryer app, \"Connect a new device\".")
+    w("//")
     w(f"// Capabilities: {caps_str}")
-    w(f"// ============================================================================")
+    w(f"// Unit modes:   {', '.join(modes) if modes else 'none'}")
+    w("// ============================================================================")
     w()
     w("#include <Arduino.h>")
-    w("#include <WiFi.h>")
-    w("#include <ArduinoJson.h>")
-    w("#include <idryer_core.h>")
-    w("#include <secrets.h>")
+    w("#include <iDryer.h>")
     w()
-    w("// ── Config ────────────────────────────────────────────────────────────────────")
-    w(f"// Flags generated from device_profiles.{profile_name} in mqtt_contract.yaml.")
-    w("// After adding a new capability: edit mqtt_contract.yaml → run contracts/regen.sh.")
-    w("static const idryer::Config CFG = {")
-    w(f"    .deviceType        = idryer::DeviceType::{device_type},")
-    w(f"    .unitsCount        = 1,")
-    w(f"    // Peripheral capabilities:")
-    for line in cap_flag_lines:
-        w(line)
-    w("    // Basic air sensors (set true if your hardware has them):")
-    w("    .hasAirTemp        = false,  // TODO: SHT31, DHT22, etc.")
-    w("    .hasAirHumidity    = false,")
-    w("    .hasHeaterTemp     = false,")
-    w("    // Cloud integrations (set true if you need them):")
-    w("    .allowBambu        = false,")
-    w("    .allowMoonraker    = false,")
-    w("    .allowHa           = false,")
-    w("    // Publish periods: leave unset — the SDK takes them from the")
-    w("    // contract (publish_defaults in mqtt_contract.yaml). Set a field")
-    w("    // only if your product really needs a different rate; the contract")
-    w("    // values are the ones the portal expects.")
-    w("    // Identity shown on portal:")
-    w('    .hardwareVersion   = "1.0",')
-    w('    .firmwareVersion   = "0.1.0",')
-    w(f'    .model             = "{profile_name}",')
+    w(f"// Flags from device_profiles.{profile_name} in mqtt_contract.yaml.")
+    w("static const iDryer::Config CFG = {")
+    w(f"    .deviceType      = iDryer::DeviceType::{_device_type_enum(profile)},")
+    w("    .unitsCount      = 1,   // TODO: number of units (chambers)")
+    # Порядок полей — как в Config (словарь идёт в порядке объявления флагов).
+    for cap, entry in vocab.items():
+        if cap in capabilities:
+            flag = _config_flag(cap, entry or {})
+            desc = (entry or {}).get("description", cap)
+            w(f"    .{flag:<15} = true,   // {desc}")
+    if profile.get("ota_interrupt"):
+        w(f"    .otaInterrupt    = iDryer::OTA_INTERRUPT_{profile_name.upper()},")
+    w('    .hardwareVersion = "1.0",')
+    w('    .firmwareVersion = "0.1.0",')
+    w(f'    .model           = "{profile_name}",')
     w("};")
+    w("static iDryer::Link s_link(CFG);")
     w()
-    w("// ── IProfile implementation ──────────────────────────────────────────────────")
-    w(f"class {class_name}Profile : public idryer::IProfile {{")
-    w("public:")
-    w("    void onOnline() override {")
-    w("        // Called once when device reaches Online state.")
-    w("        // TODO: load config from NVS, apply to hardware (pins, PWM, etc.).")
-    w("    }")
-    w()
-    w("    void loop() override {")
-    w("        // Called every IdryerRuntime::loop().")
-    w("        // TODO: read sensors, fill telemetry, call s_runtime.publishTelemetry()")
-    w("        //   static uint32_t t = 0;")
-    w("        //   if (millis() - t > CFG.telemetryPeriodMs) {")
-    w("        //       t = millis();")
-    w("        //       idryer::Telemetry tel = {};")
-    w("        //       tel.airTempC[0]       = myTempSensor.read();")
-    w("        //       tel.airHumidityPct[0] = myHumSensor.read();")
-    w("        //       s_runtime.publishTelemetry(tel);")
-    w("        //   }")
-    w("    }")
-    w()
-    w("    void getConfig(JsonDocument& out) override {")
-    w("        // Snapshot of current config → published to idryer/{serial}/config.")
-    w("        // TODO: serialize your menu/NVS state here.")
-    w('        out["v"] = 1;')
-    w("    }")
-    w()
-    w("    bool applyConfig(int id, int val) override {")
-    w("        // Apply parameter from commands/set (id = menu item id, val = new value).")
-    w("        // TODO: switch(id) { case MENU_ID_BRIGHTNESS: applyBrightness(val); break; }")
-    w("        (void)id; (void)val;")
-    w("        return true;")
-    w("    }")
-    w()
-    w("    void buildInfoJson(char* buf, size_t len) const override {")
-    w("        // Published to idryer/{serial}/info → portal reads capabilities,")
-    w("        // builds DynamicCard widgets automatically.")
-    w("        StaticJsonDocument<512> doc;")
-    w(f'        doc["deviceType"]      = "{profile_name}";')
-    w('        doc["firmwareVersion"] = CFG.firmwareVersion;')
-    w('        doc["hardwareVersion"] = CFG.hardwareVersion;')
-    for line in caps_json_lines:
-        w(line)
-    w("        char ts[32];")
-    w("        idryer::MqttClient::getIsoTimestamp(ts);")
-    w('        doc["timestamp"] = ts;')
-    w("        serializeJson(doc, buf, len);")
-    w("    }")
-    w("};")
-    w()
-    w("// ── Platform layer ────────────────────────────────────────────────────────────")
-    w("static idryer::ArduinoWifiStore       s_wifiStore;")
-    w("static idryer::ArduinoWifiManager     s_wifi;")
-    w("static idryer::ArduinoCredentialStore s_credentials;")
-    w("static idryer::ArduinoHttpClient      s_http;")
-    w()
-    w("// ── Cloud stack ───────────────────────────────────────────────────────────────")
-    w("static idryer::cloud::HttpApi           s_api(&s_http, IDRYER_API_BASE);")
-    w("static idryer::MqttClient               s_mqtt;")
-    w("static idryer::cloud::CloudStateMachine s_cloud(&s_wifi, &s_credentials, &s_api, &s_mqtt);")
-    w("static idryer::ActionDispatcher         s_dispatcher;")
-    w()
-    w("// ── Product layer ─────────────────────────────────────────────────────────────")
-    w(f"static {class_name}Profile   s_profile;")
-    w("static idryer::IdryerRuntime  s_runtime(&s_cloud, &s_dispatcher, &s_profile, &s_mqtt);")
-    w()
-    w("// ── Command handler ──────────────────────────────────────────────────────────")
-    w("static void handleCommand(const char* cmd, JsonObjectConst data) {")
-    w('    const char* action = data["action"] | "";')
-    w()
-    w('    if (strcmp(cmd, "get_config") == 0 ||')
-    w('        (strcmp(cmd, "invoke") == 0 && strcmp(action, "device.getConfig") == 0))')
-    w("    {")
-    w("        StaticJsonDocument<256> doc;")
-    w("        s_profile.getConfig(doc);")
-    w("        s_mqtt.publishConfig(doc);")
-    w("        return;")
-    w("    }")
-    w('    if (strcmp(cmd, "invoke") == 0) { s_dispatcher.handleInvoke(data); return; }')
-    w('    if (strcmp(cmd, "set")    == 0) { s_dispatcher.handleSet(data);    return; }')
-    w("    // TODO: add product-specific commands here:")
-    w('    // if (strcmp(cmd, "my_command") == 0) { ... return; }')
-    w("}")
-    w()
-    w("// ── ActionDispatcher callbacks ────────────────────────────────────────────────")
-    w("static bool onInvoke(const char* action, JsonObjectConst args, void* /*ctx*/) {")
-    for line in invoke_hint_lines:
-        w(line)
-    w("    (void)action; (void)args;")
-    w("    return false;")
-    w("}")
-    w()
-    w("static void onSet(JsonObjectConst data, void* /*ctx*/) {")
-    w('    int id  = data["id"]  | -1;')
-    w('    int val = data["val"] | -1;')
-    w("    if (id < 0 || val < 0) return;")
-    w("    s_profile.applyConfig(id, val);")
-    w("}")
-    w()
-    w("// ── Setup / Loop ──────────────────────────────────────────────────────────────")
+    if start_mode == "LIGHT_ANIMATION":
+        w('static const char* const kEffects[] = { "solid", "breathe" };')
+        w()
+    if start_mode:
+        w("// Card action: start. Numbers in args are already clamped to the limits.")
+        w("static void onStart(uint8_t unit, JsonObjectConst args) {")
+        w("    // TODO: start the hardware with args.")
+        w("    (void)args;")
+        w(f"    s_link.status.mode[unit] = iDryer::UnitMode::{UNIT_MODE_ENUM.get(start_mode, 'Unknown')};")
+        w("    s_link.publishStatusNow();")
+        w("}")
+        w()
+        w("// Card action: stop.")
+        w("static void onStop(uint8_t unit, JsonObjectConst) {")
+        w("    // TODO: stop the hardware.")
+        w("    s_link.status.mode[unit] = iDryer::UnitMode::Idle;")
+        w("    s_link.publishStatusNow();")
+        w("}")
+        w()
     w("void setup() {")
-    w("    Serial.begin(115200);")
-    w("    idryer::hal::initArduinoHal(&Serial);")
-    w()
-    w("    // WiFi: NVS credentials take priority over secrets.h defaults.")
-    w("    char ssid[64], pass[64];")
-    w("    if (s_wifiStore.load(ssid, sizeof(ssid), pass, sizeof(pass))) {")
-    w("        s_wifi.begin(ssid, pass);")
-    w("    } else {")
-    w("        s_wifiStore.save(WIFI_SSID, WIFI_PASSWORD);")
-    w("        s_wifi.begin(WIFI_SSID, WIFI_PASSWORD);")
-    w("    }")
-    w()
-    w("    s_credentials.seedSerialFromMac();")
-    w("    s_cloud.setUnclaimedCallback([](void*) { s_cloud.requestClaim(); }, nullptr);")
-    w()
-    w("    s_dispatcher.setInvokeHandler(onInvoke, nullptr);")
-    w("    s_dispatcher.setSetCallback(onSet, nullptr);")
-    w()
-    w("    s_runtime.setCommandHandler(handleCommand);")
-    w("    s_runtime.begin();")
+    w("    s_link.begin();")
+    w("    // Unlinking in the app or on the portal: erase the secret, wait for pairing.")
+    w('    s_link.onCommand("revoke", [](JsonObjectConst) { s_link.handleRevoke(); });')
+    if start_mode:
+        w()
+        w("    // Card actions: the mode after the action and its start parameters.")
+        w("    // TODO: limits of your device.")
+        w("    auto& card = s_link.card();")
+        params = START_PARAMS.get(start_mode, [])
+        w(f'    card.action("start", "{start_mode}", onStart)' + ("" if params else ";"))
+        for i, p in enumerate(params):
+            w(f"        {p}" + (";" if i == len(params) - 1 else ""))
+        w('    card.action("stop", "IDLE", onStop);')
+    w("    // More on the card: docs/*/09-add-product/02-add-widget.md")
     w("}")
     w()
     w("void loop() {")
-    w("    s_runtime.loop();")
+    w("    s_link.loop();")
+    tele = [(cap, (vocab.get(cap) or {}).get("telemetry_field")) for cap in capabilities]
+    tele = [(cap, f) for cap, f in tele if f]
+    if tele:
+        w()
+        w("    // TODO: read the hardware; the core publishes telemetry itself.")
+        w("    // NAN in a float field means no data: the field is not sent.")
+        for cap, field in tele:
+            w(f"    // s_link.telemetry.{field}[0] = ...;   // {cap}")
     w("}")
-
     return "\n".join(L) + "\n"
 
 
@@ -294,113 +183,77 @@ def gen_platformio_ini(profile_name: str) -> str:
         ; PlatformIO config for {profile_name}
         ; Generated by contracts/gen_scaffold.py
         ;
-        ; Before building:
-        ;   1. Set upload_port / monitor_port for your device.
-        ;   2. Adjust STORAGE_LED_PIN / STORAGE_I2C_* if applicable.
+        ; The core lives in lib/idryer-core; its library.json brings MQTT,
+        ; ArduinoJson, WebSockets and Improv. lib_deps: your sensor libraries only.
 
         [platformio]
         default_envs = {profile_name}-prod
 
         [env]
-        platform  = espressif32
-        board     = esp32-c3-devkitm-1
-        framework = arduino
-        upload_port   = /dev/cu.usbmodem101
-        monitor_port  = /dev/cu.usbmodem101
+        platform      = espressif32
+        board         = esp32-c3-devkitm-1
+        framework     = arduino
         monitor_speed = 115200
-        monitor_raw   = yes
+        ; ESPAsyncTCP is the ESP8266 transport from espMqttClient dependencies:
+        ; it does not build on ESP32.
+        lib_ignore = ESPAsyncTCP
 
-        lib_deps =
-          bblanchon/ArduinoJson @ ^6.21.3
-          knolleary/PubSubClient @ ^2.8
-          https://github.com/jnthas/Improv-WiFi-Library.git
-          links2004/WebSockets @ ^2.4.0
-
+        ; Board without USB-UART (ESP32-C3 SuperMini): Serial over USB.
         [flags_usb_cdc]
         build_flags =
           -DARDUINO_USB_MODE=1
           -DARDUINO_USB_CDC_ON_BOOT=1
-          -DDEBUG_SERIAL=Serial
-          -Iinclude
 
         [flags_prod]
         build_flags =
-          -DCORE_DEBUG_LEVEL=0
-          -DIDRYER_API_BASE=\\"https://portal.idryer.org/api\\"
-          -DMQTT_BROKER=\\"mqtt.idryer.org\\"
+          -DIDRYER_API_BASE='"https://portal.idryer.org/api"'
+          -DMQTT_BROKER='"mqtt.idryer.org"'
           -DMQTT_PORT=8883
           -DMQTT_USE_TLS=1
 
         [flags_stage]
         build_flags =
-          -DCORE_DEBUG_LEVEL=3
-          -DIDRYER_API_BASE=\\"https://staging.idryer.org/api\\"
-          -DMQTT_BROKER=\\"staging.idryer.org\\"
+          -DIDRYER_API_BASE='"https://staging.idryer.org/api"'
+          -DMQTT_BROKER='"staging.idryer.org"'
           -DMQTT_PORT=1884
           -DMQTT_USE_TLS=0
 
-        [{profile_name}-prod]
-        extra_scripts =
-          pre:../../idryer-core/extra_scripts/pre_gen_menu.py
+        [env:{profile_name}-prod]
         build_flags =
           ${{flags_usb_cdc.build_flags}}
           ${{flags_prod.build_flags}}
 
-        [{profile_name}-stage]
-        extra_scripts =
-          pre:../../idryer-core/extra_scripts/pre_gen_menu.py
+        [env:{profile_name}-stage]
         build_flags =
           ${{flags_usb_cdc.build_flags}}
           ${{flags_stage.build_flags}}
-          -DIDRYER_DEV_REPL=1
         """)
 
 
-def gen_secrets_h() -> str:
-    return textwrap.dedent("""\
-        // secrets.h — copy to include/secrets.h and fill in your values.
-        // Keep this file OUT of git (.gitignore: include/secrets.h).
-        #pragma once
-
-        #define WIFI_SSID     "your-ssid"
-        #define WIFI_PASSWORD "your-password"
-
-        #ifndef IDRYER_API_BASE
-        #define IDRYER_API_BASE "https://portal.idryer.org/api"
-        #endif
-        """)
-
-
-def gen_readme(profile_name: str, capabilities: list[str]) -> str:
+def gen_readme(profile_name: str, profile: dict) -> str:
+    capabilities: list[str] = profile.get("capabilities") or []
     caps_str = ", ".join(capabilities) if capabilities else "none"
     return textwrap.dedent(f"""\
         # {profile_name}
 
-        Auto-generated scaffold. Capabilities: **{caps_str}**.
+        Auto-generated scaffold on `iDryer::Link`. Capabilities: **{caps_str}**.
 
         ## Quick start
 
-        1. Copy `include/secrets.h.example` → `include/secrets.h`, fill WiFi credentials.
-        2. Open in VS Code with PlatformIO extension.
-        3. Fill `TODO` sections in `src/main.cpp` with your hardware logic.
-        4. Build and flash: `pio run -e {profile_name}-prod --target upload`
-        5. Claim the device on [portal.idryer.org](https://portal.idryer.org).
+        1. Copy this directory and put idryer-core into `lib/idryer-core`
+           (a copy, a git submodule or a symbolic link).
+        2. Fill the `TODO` sections in `src/main.cpp` with your hardware logic.
+        3. Build and flash: `pio run -e {profile_name}-prod -t upload`.
+        4. Wi-Fi and pairing: in the iDryer app tap **Connect a new device**,
+           pass the network on the **Wi-Fi** step and pair on the **Pairing** step.
 
-        ## Adding a new capability
+        The firmware has no network password and no account data: the core
+        gets both from the app.
 
-        1. Add entry to `capability_vocabulary` in `contracts/mqtt_contract.yaml`.
-        2. Run `cd contracts && bash regen.sh`.
-        3. Set the new `has*` flag in `CFG` inside `src/main.cpp`.
-        4. Flash the device — the portal picks up the new capability from `/info`.
+        ## Next
 
-        ## Business logic
-
-        Business logic (e.g. "if temp > 45 turn on fan") goes in the `loop()` method
-        of `{_to_class_name(profile_name)}Profile`. The yaml only describes the interface
-        (what is published/accepted), not the device's internal behaviour.
-
-        If you want the threshold to be user-configurable from the portal, expose it as
-        a menu item and read it from NVS in `applyConfig()`.
+        - Quick start: `docs/en/02-quickstart/`.
+        - Device card, actions and parameters: `docs/en/09-add-product/02-add-widget.md`.
         """)
 
 
@@ -411,13 +264,11 @@ def generate_profile(profile_name: str, profile: dict, doc: dict, out_root: Path
 
     out_dir = out_root / profile_name
     (out_dir / "src").mkdir(parents=True, exist_ok=True)
-    (out_dir / "include").mkdir(parents=True, exist_ok=True)
 
     files = {
-        out_dir / "src" / "main.cpp":           gen_main_cpp(profile_name, capabilities, doc),
-        out_dir / "platformio.ini":              gen_platformio_ini(profile_name),
-        out_dir / "include" / "secrets.h.example": gen_secrets_h(),
-        out_dir / "README.md":                   gen_readme(profile_name, capabilities),
+        out_dir / "src" / "main.cpp": gen_main_cpp(profile_name, profile, doc),
+        out_dir / "platformio.ini":   gen_platformio_ini(profile_name),
+        out_dir / "README.md":        gen_readme(profile_name, profile),
     }
 
     for path, content in files.items():
@@ -458,8 +309,8 @@ def main() -> None:
         generate_profile(name, profile, doc, out_root)
 
     print(f"\n✅ {len(selected)} scaffold(s) generated.")
-    print("   Copy the folder you need to your PlatformIO project.")
-    print("   Then: cp include/secrets.h.example include/secrets.h")
+    print("   Copy the folder you need to your PlatformIO project,")
+    print("   put idryer-core into lib/idryer-core.")
 
 
 if __name__ == "__main__":

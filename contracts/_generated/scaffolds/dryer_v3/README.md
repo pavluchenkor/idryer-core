@@ -1,27 +1,20 @@
 # dryer_v3
 
-Auto-generated scaffold. Capabilities: **heater, fan, weight, rfid, air_temp, air_humidity, heater_temp, servo**.
+Auto-generated scaffold on `iDryer::Link`. Capabilities: **heater, fan, weight, rfid, air_temp, air_humidity, heater_temp, servo**.
 
 ## Quick start
 
-1. Copy `include/secrets.h.example` → `include/secrets.h`, fill WiFi credentials.
-2. Open in VS Code with PlatformIO extension.
-3. Fill `TODO` sections in `src/main.cpp` with your hardware logic.
-4. Build and flash: `pio run -e dryer_v3-prod --target upload`
-5. Claim the device on [portal.idryer.org](https://portal.idryer.org).
+1. Copy this directory and put idryer-core into `lib/idryer-core`
+   (a copy, a git submodule or a symbolic link).
+2. Fill the `TODO` sections in `src/main.cpp` with your hardware logic.
+3. Build and flash: `pio run -e dryer_v3-prod -t upload`.
+4. Wi-Fi and pairing: in the iDryer app tap **Connect a new device**,
+   pass the network on the **Wi-Fi** step and pair on the **Pairing** step.
 
-## Adding a new capability
+The firmware has no network password and no account data: the core
+gets both from the app.
 
-1. Add entry to `capability_vocabulary` in `contracts/mqtt_contract.yaml`.
-2. Run `cd contracts && bash regen.sh`.
-3. Set the new `has*` flag in `CFG` inside `src/main.cpp`.
-4. Flash the device — the portal picks up the new capability from `/info`.
+## Next
 
-## Business logic
-
-Business logic (e.g. "if temp > 45 turn on fan") goes in the `loop()` method
-of `DryerV3Profile`. The yaml only describes the interface
-(what is published/accepted), not the device's internal behaviour.
-
-If you want the threshold to be user-configurable from the portal, expose it as
-a menu item and read it from NVS in `applyConfig()`.
+- Quick start: `docs/en/02-quickstart/`.
+- Device card, actions and parameters: `docs/en/09-add-product/02-add-widget.md`.

@@ -3,182 +3,70 @@
 // Generated 2026-09-22 by contracts/gen_scaffold.py from mqtt_contract.yaml
 //
 // HOW TO START:
-//   1. Copy this directory to your PlatformIO project root.
-//   2. Copy include/secrets.h.example → include/secrets.h, fill WiFi credentials.
-//   3. Fill in the TODO sections below with your hardware logic.
-//   4. Run: pio run -e storage_link-prod
-//   5. Flash, connect Improv (or use hardcoded SSID), claim on portal.idryer.org.
+//   1. Copy this directory; put idryer-core into lib/idryer-core
+//      (a copy, a git submodule or a symbolic link).
+//   2. Fill in the TODO sections with your hardware logic.
+//   3. pio run -e storage_link-prod -t upload
+//   4. Wi-Fi and pairing: the iDryer app, "Connect a new device".
 //
 // Capabilities: led, air_temp, air_humidity
+// Unit modes:   LIGHT_ANIMATION
 // ============================================================================
 
 #include <Arduino.h>
-#include <WiFi.h>
-#include <ArduinoJson.h>
-#include <idryer_core.h>
-#include <secrets.h>
+#include <iDryer.h>
 
-// ── Config ────────────────────────────────────────────────────────────────────
-// Flags generated from device_profiles.storage_link in mqtt_contract.yaml.
-// After adding a new capability: edit mqtt_contract.yaml → run contracts/regen.sh.
-static const idryer::Config CFG = {
-    .deviceType        = idryer::DeviceType::StorageLink,
-    .unitsCount        = 1,
-    // Peripheral capabilities:
-    .hasLed                 = true,   // Адресная LED-лента
-    .hasAirTemp             = true,   // Датчик температуры воздуха (SHT/DHT)
-    .hasAirHumidity         = true,   // Датчик влажности воздуха
-    .hasHeater              = false,  // (not in this profile)
-    .hasFan                 = false,  // (not in this profile)
-    .hasWeight              = false,  // (not in this profile)
-    .hasRfid                = false,  // (not in this profile)
-    .hasHeaterTemp          = false,  // (not in this profile)
-    .hasServo               = false,  // (not in this profile)
-    // Basic air sensors (set true if your hardware has them):
-    .hasAirTemp        = false,  // TODO: SHT31, DHT22, etc.
-    .hasAirHumidity    = false,
-    .hasHeaterTemp     = false,
-    // Cloud integrations (set true if you need them):
-    .allowBambu        = false,
-    .allowMoonraker    = false,
-    .allowHa           = false,
-    // Publish periods: leave unset — the SDK takes them from the
-    // contract (publish_defaults in mqtt_contract.yaml). Set a field
-    // only if your product really needs a different rate; the contract
-    // values are the ones the portal expects.
-    // Identity shown on portal:
-    .hardwareVersion   = "1.0",
-    .firmwareVersion   = "0.1.0",
-    .model             = "storage_link",
+// Flags from device_profiles.storage_link in mqtt_contract.yaml.
+static const iDryer::Config CFG = {
+    .deviceType      = iDryer::DeviceType::StorageLink,
+    .unitsCount      = 1,   // TODO: number of units (chambers)
+    .hasLed          = true,   // Адресная LED-лента
+    .hasAirTemp      = true,   // Датчик температуры воздуха (SHT/DHT)
+    .hasAirHumidity  = true,   // Датчик влажности воздуха
+    .otaInterrupt    = iDryer::OTA_INTERRUPT_STORAGE_LINK,
+    .hardwareVersion = "1.0",
+    .firmwareVersion = "0.1.0",
+    .model           = "storage_link",
 };
+static iDryer::Link s_link(CFG);
 
-// ── IProfile implementation ──────────────────────────────────────────────────
-class StorageLinkProfile : public idryer::IProfile {
-public:
-    void onOnline() override {
-        // Called once when device reaches Online state.
-        // TODO: load config from NVS, apply to hardware (pins, PWM, etc.).
-    }
+static const char* const kEffects[] = { "solid", "breathe" };
 
-    void loop() override {
-        // Called every IdryerRuntime::loop().
-        // TODO: read sensors, fill telemetry, call s_runtime.publishTelemetry()
-        //   static uint32_t t = 0;
-        //   if (millis() - t > CFG.telemetryPeriodMs) {
-        //       t = millis();
-        //       idryer::Telemetry tel = {};
-        //       tel.airTempC[0]       = myTempSensor.read();
-        //       tel.airHumidityPct[0] = myHumSensor.read();
-        //       s_runtime.publishTelemetry(tel);
-        //   }
-    }
-
-    void getConfig(JsonDocument& out) override {
-        // Snapshot of current config → published to idryer/{serial}/config.
-        // TODO: serialize your menu/NVS state here.
-        out["v"] = 1;
-    }
-
-    bool applyConfig(int id, int val) override {
-        // Apply parameter from commands/set (id = menu item id, val = new value).
-        // TODO: switch(id) { case MENU_ID_BRIGHTNESS: applyBrightness(val); break; }
-        (void)id; (void)val;
-        return true;
-    }
-
-    void buildInfoJson(char* buf, size_t len) const override {
-        // Published to idryer/{serial}/info → portal reads capabilities,
-        // builds DynamicCard widgets automatically.
-        StaticJsonDocument<512> doc;
-        doc["deviceType"]      = "storage_link";
-        doc["firmwareVersion"] = CFG.firmwareVersion;
-        doc["hardwareVersion"] = CFG.hardwareVersion;
-        JsonObject caps = doc.createNestedObject("capabilities");
-        caps["led"] = true;
-        caps["air_temp"] = true;
-        caps["air_humidity"] = true;
-        char ts[32];
-        idryer::MqttClient::getIsoTimestamp(ts);
-        doc["timestamp"] = ts;
-        serializeJson(doc, buf, len);
-    }
-};
-
-// ── Platform layer ────────────────────────────────────────────────────────────
-static idryer::ArduinoWifiStore       s_wifiStore;
-static idryer::ArduinoWifiManager     s_wifi;
-static idryer::ArduinoCredentialStore s_credentials;
-static idryer::ArduinoHttpClient      s_http;
-
-// ── Cloud stack ───────────────────────────────────────────────────────────────
-static idryer::cloud::HttpApi           s_api(&s_http, IDRYER_API_BASE);
-static idryer::MqttClient               s_mqtt;
-static idryer::cloud::CloudStateMachine s_cloud(&s_wifi, &s_credentials, &s_api, &s_mqtt);
-static idryer::ActionDispatcher         s_dispatcher;
-
-// ── Product layer ─────────────────────────────────────────────────────────────
-static StorageLinkProfile   s_profile;
-static idryer::IdryerRuntime  s_runtime(&s_cloud, &s_dispatcher, &s_profile, &s_mqtt);
-
-// ── Command handler ──────────────────────────────────────────────────────────
-static void handleCommand(const char* cmd, JsonObjectConst data) {
-    const char* action = data["action"] | "";
-
-    if (strcmp(cmd, "get_config") == 0 ||
-        (strcmp(cmd, "invoke") == 0 && strcmp(action, "device.getConfig") == 0))
-    {
-        StaticJsonDocument<256> doc;
-        s_profile.getConfig(doc);
-        s_mqtt.publishConfig(doc);
-        return;
-    }
-    if (strcmp(cmd, "invoke") == 0) { s_dispatcher.handleInvoke(data); return; }
-    if (strcmp(cmd, "set")    == 0) { s_dispatcher.handleSet(data);    return; }
-    // TODO: add product-specific commands here:
-    // if (strcmp(cmd, "my_command") == 0) { ... return; }
+// Card action: start. Numbers in args are already clamped to the limits.
+static void onStart(uint8_t unit, JsonObjectConst args) {
+    // TODO: start the hardware with args.
+    (void)args;
+    s_link.status.mode[unit] = iDryer::UnitMode::LightAnimation;
+    s_link.publishStatusNow();
 }
 
-// ── ActionDispatcher callbacks ────────────────────────────────────────────────
-static bool onInvoke(const char* action, JsonObjectConst args, void* /*ctx*/) {
-    // Actions available for this profile (from invoke_actions in mqtt_contract.yaml):
-    //   led.pulse  (args: ledIndex, ledCount, animation, color, durationSec)  — Универсальная команда управления LED-лентой Storage Link.
-    // Example dispatch:
-    // if (strcmp(action, "led.pulse") == 0) { /* TODO */ return true; }
-    (void)action; (void)args;
-    return false;
+// Card action: stop.
+static void onStop(uint8_t unit, JsonObjectConst) {
+    // TODO: stop the hardware.
+    s_link.status.mode[unit] = iDryer::UnitMode::Idle;
+    s_link.publishStatusNow();
 }
 
-static void onSet(JsonObjectConst data, void* /*ctx*/) {
-    int id  = data["id"]  | -1;
-    int val = data["val"] | -1;
-    if (id < 0 || val < 0) return;
-    s_profile.applyConfig(id, val);
-}
-
-// ── Setup / Loop ──────────────────────────────────────────────────────────────
 void setup() {
-    Serial.begin(115200);
-    idryer::hal::initArduinoHal(&Serial);
+    s_link.begin();
+    // Unlinking in the app or on the portal: erase the secret, wait for pairing.
+    s_link.onCommand("revoke", [](JsonObjectConst) { s_link.handleRevoke(); });
 
-    // WiFi: NVS credentials take priority over secrets.h defaults.
-    char ssid[64], pass[64];
-    if (s_wifiStore.load(ssid, sizeof(ssid), pass, sizeof(pass))) {
-        s_wifi.begin(ssid, pass);
-    } else {
-        s_wifiStore.save(WIFI_SSID, WIFI_PASSWORD);
-        s_wifi.begin(WIFI_SSID, WIFI_PASSWORD);
-    }
-
-    s_credentials.seedSerialFromMac();
-    s_cloud.setUnclaimedCallback([](void*) { s_cloud.requestClaim(); }, nullptr);
-
-    s_dispatcher.setInvokeHandler(onInvoke, nullptr);
-    s_dispatcher.setSetCallback(onSet, nullptr);
-
-    s_runtime.setCommandHandler(handleCommand);
-    s_runtime.begin();
+    // Card actions: the mode after the action and its start parameters.
+    // TODO: limits of your device.
+    auto& card = s_link.card();
+    card.action("start", "LIGHT_ANIMATION", onStart)
+        .select("effect", "effect", kEffects, 2, "solid")
+        .color("color", "rgb_color", "#FFFFFF");
+    card.action("stop", "IDLE", onStop);
+    // More on the card: docs/*/09-add-product/02-add-widget.md
 }
 
 void loop() {
-    s_runtime.loop();
+    s_link.loop();
+
+    // TODO: read the hardware; the core publishes telemetry itself.
+    // NAN in a float field means no data: the field is not sent.
+    // s_link.telemetry.airTempC[0] = ...;   // air_temp
+    // s_link.telemetry.airHumidityPct[0] = ...;   // air_humidity
 }
