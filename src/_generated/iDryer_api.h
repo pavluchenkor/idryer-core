@@ -41,7 +41,7 @@ enum class DeviceType : uint8_t {
     IHeaterLink = 5,
 };
 
-/// Integration channel — used for IntegrationStatus and Config.allow* flags.
+/// Integration channel — used for IntegrationStatus.
 enum class IntegrationKind : uint8_t {
     Ha,   ///< Home Assistant MQTT integration
     Bambu,   ///< Bambu Lab printer LAN MQTT
@@ -179,11 +179,6 @@ struct Config {
     bool        hasAirHumidity;       ///< Датчик влажности воздуха
     bool        hasHeaterTemp;        ///< Датчик температуры корпуса нагревателя
     bool        hasServo;             ///< Сервопривод заслонки (открыта/закрыта)
-
-    // ── Integration availability (compile-time decision) ──
-    bool        allowHa;
-    bool        allowBambu;
-    bool        allowMoonraker;
 
     // ── Auto-publish periods (ms) ──
     // Ноль в любом из полей = взять значение из контракта (константы

@@ -42,12 +42,26 @@ LinkIntegrationsManager::LinkIntegrationsManager(idryer::MqttClient* mqtt,
                                                  LinkIntegrationsStore* store)
     : mqtt_(mqtt), store_(store)
 {
+#if IDRYER_WITH_HA
     // Входящие с HA-брокера — генератору сущностей (команды и уборка).
     haClient_.mqttClient()->setMessageCallback(
         [](void* ctx, const char* topic, const char* payload) {
             auto* mgr = static_cast<LinkIntegrationsManager*>(ctx);
             if (mgr->haCard_) mgr->haCard_->handleIncoming(topic, payload);
         }, this);
+#endif
+}
+
+// Интеграция собрана в образ? Чего нет — того нет: ни клиента, ни настройки,
+// ни объявления в integrations/status.
+bool LinkIntegrationsManager::isSupported(ActiveIntegration kind)
+{
+    switch (kind) {
+    case ActiveIntegration::Ha:        return IDRYER_WITH_HA;
+    case ActiveIntegration::Bambu:     return IDRYER_WITH_BAMBU;
+    case ActiveIntegration::Moonraker: return IDRYER_WITH_MOONRAKER;
+    default:                           return true;   // None выбрать можно всегда
+    }
 }
 
 void LinkIntegrationsManager::begin()
@@ -63,14 +77,19 @@ void LinkIntegrationsManager::begin()
     store_->loadMoonraker(moonraker_);
     store_->loadCommon(selection_);
 
+#if IDRYER_WITH_BAMBU
     bambuClient_.setStateChangeCallback([](void* ctx, BambuConnectionState) {
         static_cast<LinkIntegrationsManager*>(ctx)->publishStatus();
     }, this);
+#endif
 
+#if IDRYER_WITH_MOONRAKER
     moonrakerClient_.setStateChangeCallback([](void* ctx, MoonrakerConnectionState) {
         static_cast<LinkIntegrationsManager*>(ctx)->publishStatus();
     }, this);
+#endif
 
+#if IDRYER_WITH_HA
     haClient_.setStateChangeCallback([](void* ctx, HaConnectionState s) {
         auto* mgr = static_cast<LinkIntegrationsManager*>(ctx);
         if (mgr->haCard_) {
@@ -79,6 +98,15 @@ void LinkIntegrationsManager::begin()
         }
         mgr->publishStatus();
     }, this);
+#endif
+
+    // Активная из NVS может быть от прошивки, где эта интеграция ещё собиралась.
+    if (!isSupported(selection_.active)) {
+        HAL_LOG_WARN("LINK_MGR", "active=%s не собрана в этой прошивке — сбрасываю",
+                     activeIntegrationToString(selection_.active));
+        selection_.active = ActiveIntegration::None;
+        store_->saveCommon(selection_);
+    }
 
     HAL_LOG_INFO("LINK_MGR", "begin: active=%s ha=%d bambu=%d moonraker=%d",
                  activeIntegrationToString(selection_.active),
@@ -105,6 +133,8 @@ void LinkIntegrationsManager::begin()
                  moonraker_.ssl ? 1 : 0,
                  moonraker_.apiKey[0] ? "<set>" : "<empty>");
     HAL_LOG_INFO("LINK_MGR", "  Active:    %s", activeIntegrationToString(selection_.active));
+    HAL_LOG_INFO("LINK_MGR", "  Собраны:   ha=%d bambu=%d moonraker=%d",
+                 IDRYER_WITH_HA, IDRYER_WITH_BAMBU, IDRYER_WITH_MOONRAKER);
     HAL_LOG_INFO("LINK_MGR", "─── end NVS dump ───");
 
     applyActiveIntegration();
@@ -125,6 +155,13 @@ void LinkIntegrationsManager::handleLinkIntegrationCommand(JsonObjectConst data)
         return;
     }
 
+    ActiveIntegration kind = ActiveIntegration::None;
+    if (activeIntegrationFromString(type, kind) && !isSupported(kind)) {
+        HAL_LOG_WARN("LINK_MGR", "link_integration %s: интеграция не собрана в прошивке", type);
+        return;
+    }
+
+#if IDRYER_WITH_HA
     if (strcmp(type, "ha") == 0) {
         HaConfig fresh;
         if (!parseHa(data, fresh)) {
@@ -139,7 +176,10 @@ void LinkIntegrationsManager::handleLinkIntegrationCommand(JsonObjectConst data)
             haClient_.configure(ha_);
         }
     }
-    else if (strcmp(type, "bambu") == 0) {
+    else
+#endif
+#if IDRYER_WITH_BAMBU
+    if (strcmp(type, "bambu") == 0) {
         BambuConfig fresh;
         if (!parseBambu(data, fresh)) {
             HAL_LOG_WARN("LINK_MGR", "link_integration bambu: parse failed");
@@ -153,7 +193,10 @@ void LinkIntegrationsManager::handleLinkIntegrationCommand(JsonObjectConst data)
             bambuClient_.configure(bambu_);
         }
     }
-    else if (strcmp(type, "moonraker") == 0) {
+    else
+#endif
+#if IDRYER_WITH_MOONRAKER
+    if (strcmp(type, "moonraker") == 0) {
         MoonrakerConfig fresh;
         if (!parseMoonraker(data, fresh)) {
             HAL_LOG_WARN("LINK_MGR", "link_integration moonraker: parse failed");
@@ -167,7 +210,9 @@ void LinkIntegrationsManager::handleLinkIntegrationCommand(JsonObjectConst data)
             moonrakerClient_.configure(moonraker_);
         }
     }
-    else {
+    else
+#endif
+    {
         HAL_LOG_WARN("LINK_MGR", "link_integration: unknown type='%s'", type);
         return;
     }
@@ -177,6 +222,11 @@ void LinkIntegrationsManager::handleLinkIntegrationCommand(JsonObjectConst data)
 
 void LinkIntegrationsManager::handleBambuApplyCommand(JsonObjectConst data)
 {
+#if !IDRYER_WITH_BAMBU
+    (void)data;
+    HAL_LOG_WARN("LINK_MGR", "bambu_apply: интеграция не собрана в прошивке");
+    return;
+#else
     if (selection_.active != ActiveIntegration::Bambu) {
         HAL_LOG_INFO("LINK_MGR", "bambu_apply ignored: active=%s (not bambu)",
                      activeIntegrationToString(selection_.active));
@@ -229,10 +279,16 @@ void LinkIntegrationsManager::handleBambuApplyCommand(JsonObjectConst data)
     }
 
     publishStatus();
+#endif
 }
 
 void LinkIntegrationsManager::setActive(ActiveIntegration active)
 {
+    if (!isSupported(active)) {
+        HAL_LOG_WARN("LINK_MGR", "setActive %s: интеграция не собрана в прошивке",
+                     activeIntegrationToString(active));
+        return;
+    }
     if (selection_.active == active) return;
 
     HAL_LOG_INFO("LINK_MGR", "setActive: %s -> %s",
@@ -248,9 +304,15 @@ void LinkIntegrationsManager::setActive(ActiveIntegration active)
 
 void LinkIntegrationsManager::loop()
 {
+#if IDRYER_WITH_BAMBU
     bambuClient_.loop();
+#endif
+#if IDRYER_WITH_MOONRAKER
     moonrakerClient_.loop();
+#endif
+#if IDRYER_WITH_HA
     haClient_.loop();
+#endif
 
     // integrations/status — событийный (изменение состояния/конфига интеграции
     // публикует сразу; retained + QoS 1 хранят снапшот для портала). Здесь
@@ -281,25 +343,41 @@ void LinkIntegrationsManager::setDeviceType(UartDeviceType deviceType)
 void LinkIntegrationsManager::setChamberTargetCallback(
     MoonrakerClient::ChamberTargetCallback::FnPtr fn, void* ctx)
 {
+#if IDRYER_WITH_MOONRAKER
     moonrakerClient_.setChamberTargetCallback(fn, ctx);
+#else
+    (void)fn; (void)ctx;
+#endif
 }
 
 void LinkIntegrationsManager::setMoonrakerStatusCallback(
     MoonrakerClient::StatusChangeCallback::FnPtr fn, void* ctx)
 {
+#if IDRYER_WITH_MOONRAKER
     moonrakerClient_.setStatusChangeCallback(fn, ctx);
+#else
+    (void)fn; (void)ctx;
+#endif
 }
 
 void LinkIntegrationsManager::setVirtualChamberCallback(
     MoonrakerClient::VirtualChamberCallback::FnPtr fn, void* ctx)
 {
+#if IDRYER_WITH_MOONRAKER
     moonrakerClient_.setVirtualChamberCallback(fn, ctx);
+#else
+    (void)fn; (void)ctx;
+#endif
 }
 
 void LinkIntegrationsManager::setBambuPrinterStatusCallback(
     BambuClient::PrinterStatusCallback::FnPtr fn, void* ctx)
 {
+#if IDRYER_WITH_BAMBU
     bambuClient_.setPrinterStatusCallback(fn, ctx);
+#else
+    (void)fn; (void)ctx;
+#endif
 }
 
 // =============================================================================
@@ -308,6 +386,7 @@ void LinkIntegrationsManager::setBambuPrinterStatusCallback(
 
 void LinkIntegrationsManager::applyActiveIntegration()
 {
+#if IDRYER_WITH_BAMBU
     BambuMode mode = BambuMode::Writer;
     if (deviceType_ == UartDeviceType::Heater
         || deviceType_ == UartDeviceType::IHeaterLink) {
@@ -320,18 +399,23 @@ void LinkIntegrationsManager::applyActiveIntegration()
     } else {
         bambuClient_.shutdown();
     }
+#endif
 
+#if IDRYER_WITH_MOONRAKER
     if (selection_.active == ActiveIntegration::Moonraker) {
         moonrakerClient_.configure(moonraker_);
     } else {
         moonrakerClient_.shutdown();
     }
+#endif
 
+#if IDRYER_WITH_HA
     if (selection_.active == ActiveIntegration::Ha) {
         haClient_.configure(ha_);
     } else {
         haClient_.shutdown();
     }
+#endif
 }
 
 // =============================================================================
@@ -352,14 +436,23 @@ void LinkIntegrationsManager::publishStatus()
 
     doc["active"] = activeIntegrationToString(selection_.active);
 
+    // Что прибор вообще умеет: портал и приложение рисуют только эти интеграции.
+    JsonArray supported = doc.createNestedArray("supported");
+#if IDRYER_WITH_HA
+    supported.add("ha");
     JsonObject haObj = doc.createNestedObject("ha");
     serializeHaSection(haObj);
-
+#endif
+#if IDRYER_WITH_BAMBU
+    supported.add("bambu");
     JsonObject bambuObj = doc.createNestedObject("bambu");
     serializeBambuSection(bambuObj);
-
+#endif
+#if IDRYER_WITH_MOONRAKER
+    supported.add("moonraker");
     JsonObject moonrakerObj = doc.createNestedObject("moonraker");
     serializeMoonrakerSection(moonrakerObj);
+#endif
 
     char ts[24];
     isoTimestamp(ts, sizeof(ts));
@@ -376,6 +469,7 @@ void LinkIntegrationsManager::publishStatus()
 
 void LinkIntegrationsManager::serializeHaSection(JsonObject section) const
 {
+#if IDRYER_WITH_HA
     section["configured"] = ha_.configured();
     section["enabled"]    = ha_.enabled;
     section["state"]      = integrationStateToString(computeHaState());
@@ -395,10 +489,14 @@ void LinkIntegrationsManager::serializeHaSection(JsonObject section) const
     char ts[24];
     isoTimestamp(ts, sizeof(ts));
     section["updatedAt"] = ts;
+#else
+    (void)section;
+#endif
 }
 
 void LinkIntegrationsManager::serializeBambuSection(JsonObject section) const
 {
+#if IDRYER_WITH_BAMBU
     section["configured"] = bambu_.configured();
     section["enabled"]    = bambu_.enabled;
     section["state"]      = integrationStateToString(computeBambuState());
@@ -433,10 +531,14 @@ void LinkIntegrationsManager::serializeBambuSection(JsonObject section) const
     char ts[24];
     isoTimestamp(ts, sizeof(ts));
     section["updatedAt"] = ts;
+#else
+    (void)section;
+#endif
 }
 
 void LinkIntegrationsManager::serializeMoonrakerSection(JsonObject section) const
 {
+#if IDRYER_WITH_MOONRAKER
     section["configured"]              = moonraker_.configured();
     section["enabled"]                 = moonraker_.enabled;
     section["state"]                   = integrationStateToString(computeMoonrakerState());
@@ -476,6 +578,9 @@ void LinkIntegrationsManager::serializeMoonrakerSection(JsonObject section) cons
     char ts[24];
     isoTimestamp(ts, sizeof(ts));
     section["updatedAt"] = ts;
+#else
+    (void)section;
+#endif
 }
 
 // =============================================================================
@@ -484,6 +589,7 @@ void LinkIntegrationsManager::serializeMoonrakerSection(JsonObject section) cons
 
 IntegrationState LinkIntegrationsManager::computeHaState() const
 {
+#if IDRYER_WITH_HA
     if (selection_.active != ActiveIntegration::Ha) return IntegrationState::Disabled;
     if (!ha_.configured())                       return IntegrationState::ConfigMissing;
 
@@ -495,10 +601,14 @@ IntegrationState LinkIntegrationsManager::computeHaState() const
     case HaConnectionState::Idle:
     default:                            return IntegrationState::Idle;
     }
+#else
+    return IntegrationState::Disabled;
+#endif
 }
 
 IntegrationState LinkIntegrationsManager::computeBambuState() const
 {
+#if IDRYER_WITH_BAMBU
     if (selection_.active != ActiveIntegration::Bambu) return IntegrationState::Disabled;
     if (!bambu_.configured())                       return IntegrationState::ConfigMissing;
 
@@ -510,10 +620,14 @@ IntegrationState LinkIntegrationsManager::computeBambuState() const
     case BambuConnectionState::Idle:
     default:                               return IntegrationState::Idle;
     }
+#else
+    return IntegrationState::Disabled;
+#endif
 }
 
 IntegrationState LinkIntegrationsManager::computeMoonrakerState() const
 {
+#if IDRYER_WITH_MOONRAKER
     if (selection_.active != ActiveIntegration::Moonraker) return IntegrationState::Disabled;
     if (!moonraker_.configured())                       return IntegrationState::ConfigMissing;
 
@@ -525,6 +639,9 @@ IntegrationState LinkIntegrationsManager::computeMoonrakerState() const
     case MoonrakerConnectionState::Idle:
     default:                                   return IntegrationState::Idle;
     }
+#else
+    return IntegrationState::Disabled;
+#endif
 }
 
 // =============================================================================

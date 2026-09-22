@@ -2755,7 +2755,9 @@ mqtt_only:
     retained: true
     interval: "on change only (смена state/config интеграции, включая boot-снапшот после MQTT-connect); периодики НЕТ — retained snapshot хранит последнее состояние для портала."
     status: implemented
-    reason: "Состояние интеграций (HA/Bambu/Moonraker) живёт на ESP32, в MCU не уходит."
+    reason: "Состояние интеграций (HA/Bambu/Moonraker) живёт на ESP32, в MCU не уходит.
+      Набор интеграций у прибора фиксирован при сборке (IDRYER_WITH_HA / _BAMBU / _MOONRAKER
+      в platformio.ini прошивки): чего нет в образе, того нет и в этом сообщении."
     payload:
       top_level:
         active:
@@ -2764,6 +2766,15 @@ mqtt_only:
             enum_ref: "ActiveIntegration.json_string_form",
             values: ["none", "ha", "bambu", "moonraker"],
             note: "Wire-форма — lowercase string. См. enums.ActiveIntegration.",
+          }
+        supported:
+          {
+            type: "array<string>",
+            values: ["ha", "bambu", "moonraker"],
+            optional: true,
+            note: "Какие интеграции собраны в образ этой прошивки; секции есть только у них.
+              Портал и приложение рисуют кнопки по этому списку. Прошивки до 2026-09-22
+              поля не шлют — там показываются все три.",
           }
         updatedAt: { type: ISO8601 }
       ha:

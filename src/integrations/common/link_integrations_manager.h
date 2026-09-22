@@ -35,6 +35,7 @@
 
 #pragma once
 
+#include "integration_features.h"
 #include "link_integrations_types.h"
 #include "link_integrations_store.h"
 #include "../bambu/bambu_client.h"
@@ -124,9 +125,15 @@ public:
     /// @brief Called when Moonraker sends virtual chamber data.
     void setVirtualChamberCallback(MoonrakerClient::VirtualChamberCallback::FnPtr fn, void* ctx = nullptr);
 
+#if IDRYER_WITH_MOONRAKER
     const MoonrakerStatus&    moonrakerStatus()    const { return moonrakerClient_.status(); }
     MoonrakerConnectionState  moonrakerState()     const { return moonrakerClient_.state();  }
     const char*               moonrakerLastError() const { return moonrakerClient_.lastError(); }
+#else
+    const MoonrakerStatus&    moonrakerStatus()    const { static const MoonrakerStatus s{}; return s; }
+    MoonrakerConnectionState  moonrakerState()     const { return MoonrakerConnectionState::Disabled; }
+    const char*               moonrakerLastError() const { return ""; }
+#endif
     const MoonrakerConfig&    moonrakerConfig()    const { return moonraker_; }
 
     // ── Bambu callbacks ───────────────────────────────────────────────────────
@@ -134,26 +141,46 @@ public:
     /// @brief Called when the Bambu printer status changes.
     void setBambuPrinterStatusCallback(BambuClient::PrinterStatusCallback::FnPtr fn, void* ctx = nullptr);
 
+#if IDRYER_WITH_BAMBU
     const BambuPrinterStatus& bambuPrinterStatus() const { return bambuClient_.printerStatus(); }
     BambuConnectionState      bambuState()         const { return bambuClient_.state();  }
     const char*               bambuLastError()     const { return bambuClient_.lastError(); }
+#else
+    const BambuPrinterStatus& bambuPrinterStatus() const { static const BambuPrinterStatus s{}; return s; }
+    BambuConnectionState      bambuState()         const { return BambuConnectionState::Disabled; }
+    const char*               bambuLastError()     const { return ""; }
+#endif
     const BambuConfig&        bambuConfig()        const { return bambu_; }
 
     /// Включает/выключает логирование сырых payload'ов на обоих клиентах.
     void setLogPayloads(bool enabled) {
+#if IDRYER_WITH_BAMBU
         bambuClient_.setLogPayloads(enabled);
+#endif
+#if IDRYER_WITH_MOONRAKER
         moonrakerClient_.setLogPayloads(enabled);
+#endif
+        (void)enabled;
     }
 
     // ── Home Assistant ────────────────────────────────────────────────────────
 
     /// @brief Sets the MQTT client ID used for the HA MQTT connection.
+#if IDRYER_WITH_HA
     void setHaClientId(const char* clientId) { haClient_.setClientId(clientId); }
 
     ha::HaMqttClient* haMqttClient() { return haClient_.mqttClient(); }
 
     HaConnectionState haState()         const { return haClient_.state();  }
     const char*       haLastError()     const { return haClient_.lastError(); }
+#else
+    void setHaClientId(const char* clientId) { (void)clientId; }
+
+    ha::HaMqttClient* haMqttClient() { return nullptr; }
+
+    HaConnectionState haState()         const { return HaConnectionState::Disabled; }
+    const char*       haLastError()     const { return ""; }
+#endif
     const HaConfig&   haConfig()        const { return ha_; }
 
     // ── Device type ───────────────────────────────────────────────────────────
@@ -188,14 +215,23 @@ private:
     bool parseMoonraker(JsonObjectConst data, MoonrakerConfig& out) const;
     bool parseBambuApply(JsonObjectConst data, BambuApplyPayload& out) const;
 
+    /// Интеграция собрана в образ этой прошивки?
+    static bool isSupported(ActiveIntegration kind);
+
     static void copyField(JsonObjectConst data, const char* key, char* buf, size_t bufSize);
 
     idryer::MqttClient*      mqtt_;
     LinkIntegrationsStore*   store_;
 
+#if IDRYER_WITH_BAMBU
     BambuClient             bambuClient_;
+#endif
+#if IDRYER_WITH_MOONRAKER
     MoonrakerClient         moonrakerClient_;
+#endif
+#if IDRYER_WITH_HA
     HaIntegrationAdapter    haClient_;
+#endif
     ha::HaCardProjection*   haCard_ = nullptr;
 
     UartDeviceType          deviceType_ = UartDeviceType::Dryer;

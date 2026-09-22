@@ -186,7 +186,9 @@ struct Link::Impl {
           cloud(&wifi, &credentials, &api, &mqtt),
           pub(&mqtt, &local),
           intManager(&mqtt, &intStore),
+#if IDRYER_WITH_HA
           haCard(intManager.haMqttClient()),
+#endif
           improv(&Serial),
           profile(this->cfg, credentials, &cloud),
           runtime(&cloud, &dispatcher, &profile, &mqtt) {}
@@ -213,8 +215,10 @@ struct Link::Impl {
     // Integrations.
     idryer::cloud::LinkIntegrationsStore   intStore;
     idryer::cloud::LinkIntegrationsManager intManager;
+#if IDRYER_WITH_HA
     // Home Assistant из card-манифеста: сущности, значения, команды.
     idryer::ha::HaCardProjection           haCard;
+#endif
 
     // WiFi provisioning over Serial.
     ImprovWiFi improv;
@@ -461,9 +465,12 @@ bool Link::begin() {
     impl_->intStore.begin();
     if (identity.serialNumber[0] != '\0') {
         impl_->intManager.setHaClientId(identity.serialNumber);
+#if IDRYER_WITH_HA
         impl_->haCard.setDevice(identity.serialNumber, impl_->cfg.model,
                                 impl_->cfg.firmwareVersion, impl_->cfg.hardwareVersion);
+#endif
     }
+#if IDRYER_WITH_HA
     // HA строится из card-манифеста: нажатие в HA — тот же invoke, что из
     // локальной сети; значения — копия telemetry / status / weights.
     impl_->intManager.setHaProjection(&impl_->haCard);
@@ -485,6 +492,7 @@ bool Link::begin() {
         self->publishStatusNow();
         self->publishTelemetryNow();
     }, this);
+#endif
     // Map facade DeviceType → SDK UartDeviceType.
     switch (impl_->cfg.deviceType) {
         case DeviceType::Dryer:
@@ -970,7 +978,9 @@ void Link::loop() {
 
     // Home Assistant: команды, discovery из манифеста и уборка — порциями.
     // На время загрузки прошивки молчит, как и остальные интеграции.
+#if IDRYER_WITH_HA
     if (!impl_->otaActive) impl_->haCard.loop();
+#endif
 
     // Cooperative scheduler — продуктовые задачи зарегистрированные через every().
     // Защита от wrap millis() через signed-сравнение.
@@ -1065,7 +1075,9 @@ void Link::publishCardNow() {
     if (ok) {
         impl_->cardPublished = true;
         impl_->card.markPublished(impl_->cfg.unitsCount);
+#if IDRYER_WITH_HA
         impl_->haCard.requestRepublish();   // HA — та же декларация
+#endif
     }
 }
 
@@ -1497,7 +1509,9 @@ void Link::setUnitsCount(uint8_t n) {
     // совпадать с реальным числом физических слотов, а не быть потолком MAX.
     if (impl_->cfg.unitsCount == n) return;
     impl_->cfg.unitsCount = n;
+#if IDRYER_WITH_HA
     impl_->haCard.requestRepublish();   // сущности HA — на каждый юнит
+#endif
 }
 
 void Link::setIgnoreExternalCmd(bool flag) {
@@ -1535,7 +1549,9 @@ void Link::setWaitForMcuSerial(bool wait) {
 iDryer::McuSerialResult Link::setMcuSerial(const char* mcuSerial) {
     // Прежние версии ядра называли прибор в HA серийником контроллера —
     // эти конфиги тоже убираются при подключении к HA.
+#if IDRYER_WITH_HA
     impl_->haCard.setLegacyId(mcuSerial);
+#endif
     return impl_->cloud.setMcuSerial(mcuSerial);
 }
 

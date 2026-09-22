@@ -73,7 +73,8 @@ TELEMETRY_USER_FIELDS = [
     ("servoOpen",        "bool",      "hasServo"),
 ]
 
-# Integrations — флаги Config.allow* (compile-time выбор).
+# Integrations — канал интеграции (IntegrationStatus). Какие интеграции собраны
+# в образ, решают флаги IDRYER_WITH_* в platformio.ini прошивки.
 INTEGRATIONS = [
     ("Ha",        "allowHa",        "Home Assistant MQTT integration"),
     ("Bambu",     "allowBambu",     "Bambu Lab printer LAN MQTT"),
@@ -136,7 +137,7 @@ def render_device_type_enum(doc: dict) -> list[str]:
 
 def render_integration_kind_enum() -> list[str]:
     out = [
-        "/// Integration channel — used for IntegrationStatus and Config.allow* flags.",
+        "/// Integration channel — used for IntegrationStatus.",
         "enum class IntegrationKind : uint8_t {",
     ]
     for name, _flag, doc in INTEGRATIONS:
@@ -334,12 +335,6 @@ def render_config_struct(doc: dict) -> list[str]:
                        "has" + "".join(p.capitalize() for p in cap_name.split("_")))
         desc = cap.get("description", "")
         out.append(f"    bool        {(flag + ';'):<21} ///< {desc}")
-    out += [
-        "",
-        "    // ── Integration availability (compile-time decision) ──",
-    ]
-    for _kind, flag, _doc in INTEGRATIONS:
-        out.append(f"    bool        {flag};")
     out += [
         "",
         "    // ── Auto-publish periods (ms) ──",
