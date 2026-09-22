@@ -22,9 +22,6 @@ static const iDryer::Config CFG = {
     .hasFanStatus      = false,
     .hasScales         = false,
     .hasRfid           = false,
-    .allowHa           = false,
-    .allowBambu        = false,
-    .allowMoonraker    = false,
     .telemetryPeriodMs = 10000,
     .statusPeriodMs    = 0,
     .hardwareVersion   = "1.0",
@@ -63,13 +60,14 @@ Filled once in `main.cpp`, passed to the `Link` constructor. All fields use aggr
 | `hasFanStatus` | `bool` | Fan status present | — |
 | `hasScales` | `bool` | Scales present | — |
 | `hasRfid` | `bool` | RFID reader present | — |
-| `allowHa` | `bool` | Allow Home Assistant integration | false = SDK does not create a client |
-| `allowBambu` | `bool` | Allow Bambu Lab LAN integration | — |
-| `allowMoonraker` | `bool` | Allow Moonraker/Klipper integration | — |
 | `telemetryPeriodMs` | `uint32_t` | Auto-publish period for `Telemetry` (ms) | 0 = do not publish |
 | `statusPeriodMs` | `uint32_t` | Auto-publish period for `Status` (ms) | 0 = do not publish |
 | `hardwareVersion` | `const char*` | Hardware version string | **required** |
 | `firmwareVersion` | `const char*` | Firmware version string | **required** |
+
+> Which integrations go into the image is set by `IDRYER_WITH_HA`, `IDRYER_WITH_BAMBU` and
+> `IDRYER_WITH_MOONRAKER` in the product's `platformio.ini`. A disabled integration is absent
+> from the image and from `integrations/status`; a portal command for it is rejected.
 
 ---
 

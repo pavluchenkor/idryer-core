@@ -22,9 +22,6 @@ static const iDryer::Config CFG = {
     .hasFanStatus      = false,
     .hasScales         = false,
     .hasRfid           = false,
-    .allowHa           = false,
-    .allowBambu        = false,
-    .allowMoonraker    = false,
     .telemetryPeriodMs = 10000,
     .statusPeriodMs    = 0,
     .hardwareVersion   = "1.0",
@@ -63,13 +60,14 @@ void loop() {
 | `hasFanStatus` | `bool` | 是否有风扇状态 | — |
 | `hasScales` | `bool` | 是否有称重 | — |
 | `hasRfid` | `bool` | 是否有 RFID 读卡器 | — |
-| `allowHa` | `bool` | 允许 Home Assistant 集成 | false = SDK 不创建客户端 |
-| `allowBambu` | `bool` | 允许 Bambu Lab LAN 集成 | — |
-| `allowMoonraker` | `bool` | 允许 Moonraker/Klipper 集成 | — |
 | `telemetryPeriodMs` | `uint32_t` | `Telemetry` 自动发布周期（ms） | 0 = 不发布 |
 | `statusPeriodMs` | `uint32_t` | `Status` 自动发布周期（ms） | 0 = 不发布 |
 | `hardwareVersion` | `const char*` | 硬件版本字符串 | **必填** |
 | `firmwareVersion` | `const char*` | 固件版本字符串 | **必填** |
+
+> 固件中包含哪些集成由产品 `platformio.ini` 中的 `IDRYER_WITH_HA`、`IDRYER_WITH_BAMBU` 和
+> `IDRYER_WITH_MOONRAKER` 决定。被关闭的集成既不在固件中，也不在 `integrations/status` 中，
+> 门户对它的命令会被拒绝。
 
 ---
 

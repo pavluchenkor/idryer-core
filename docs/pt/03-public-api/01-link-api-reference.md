@@ -22,9 +22,6 @@ static const iDryer::Config CFG = {
     .hasFanStatus      = false,
     .hasScales         = false,
     .hasRfid           = false,
-    .allowHa           = false,
-    .allowBambu        = false,
-    .allowMoonraker    = false,
     .telemetryPeriodMs = 10000,
     .statusPeriodMs    = 0,
     .hardwareVersion   = "1.0",
@@ -63,13 +60,14 @@ Preenchida uma única vez em `main.cpp`, passada ao construtor de `Link`. Todos 
 | `hasFanStatus` | `bool` | Estado da ventoinha presente | — |
 | `hasScales` | `bool` | Balança presente | — |
 | `hasRfid` | `bool` | Leitor RFID presente | — |
-| `allowHa` | `bool` | Permitir integração Home Assistant | false = SDK não cria cliente |
-| `allowBambu` | `bool` | Permitir integração Bambu Lab LAN | — |
-| `allowMoonraker` | `bool` | Permitir integração Moonraker/Klipper | — |
 | `telemetryPeriodMs` | `uint32_t` | Período de publicação automática de `Telemetry` (ms) | 0 = não publicar |
 | `statusPeriodMs` | `uint32_t` | Período de publicação automática de `Status` (ms) | 0 = não publicar |
 | `hardwareVersion` | `const char*` | Cadeia de versão de hardware | **obrigatório** |
 | `firmwareVersion` | `const char*` | Cadeia de versão de firmware | **obrigatório** |
+
+> Quais integrações entram na imagem é definido por `IDRYER_WITH_HA`, `IDRYER_WITH_BAMBU` e
+> `IDRYER_WITH_MOONRAKER` no `platformio.ini` do produto. Uma integração desativada não existe
+> na imagem nem em `integrations/status`; o comando do portal para ela é rejeitado.
 
 ---
 

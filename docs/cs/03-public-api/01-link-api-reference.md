@@ -22,9 +22,6 @@ static const iDryer::Config CFG = {
     .hasFanStatus      = false,
     .hasScales         = false,
     .hasRfid           = false,
-    .allowHa           = false,
-    .allowBambu        = false,
-    .allowMoonraker    = false,
     .telemetryPeriodMs = 10000,
     .statusPeriodMs    = 0,
     .hardwareVersion   = "1.0",
@@ -63,13 +60,14 @@ Vyplňuje se jednou v `main.cpp`, předává se konstruktoru `Link`. Všechna po
 | `hasFanStatus` | `bool` | Je přítomen stav ventilátoru | — |
 | `hasScales` | `bool` | Jsou přítomny váhy | — |
 | `hasRfid` | `bool` | Je přítomen čtečka RFID | — |
-| `allowHa` | `bool` | Povolovat integraci Home Assistant | false = SDK nevytváří klienta |
-| `allowBambu` | `bool` | Povolovat integraci Bambu Lab LAN | — |
-| `allowMoonraker` | `bool` | Povolovat integraci Moonraker/Klipper | — |
 | `telemetryPeriodMs` | `uint32_t` | Období automatického publikování `Telemetry` (ms) | 0 = nepublikovat |
 | `statusPeriodMs` | `uint32_t` | Období automatického publikování `Status` (ms) | 0 = nepublikovat |
 | `hardwareVersion` | `const char*` | Řetězec verze hardwaru | **povinné** |
 | `firmwareVersion` | `const char*` | Řetězec verze firmware | **povinné** |
+
+> Které integrace se dostanou do image, určují `IDRYER_WITH_HA`, `IDRYER_WITH_BAMBU` a
+> `IDRYER_WITH_MOONRAKER` v `platformio.ini` produktu. Vypnutá integrace v image ani
+> v `integrations/status` není a příkaz portálu na ni je odmítnut.
 
 ---
 

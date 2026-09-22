@@ -76,9 +76,9 @@ TELEMETRY_USER_FIELDS = [
 # Integrations — канал интеграции (IntegrationStatus). Какие интеграции собраны
 # в образ, решают флаги IDRYER_WITH_* в platformio.ini прошивки.
 INTEGRATIONS = [
-    ("Ha",        "allowHa",        "Home Assistant MQTT integration"),
-    ("Bambu",     "allowBambu",     "Bambu Lab printer LAN MQTT"),
-    ("Moonraker", "allowMoonraker", "Moonraker WebSocket JSON-RPC"),
+    ("Ha",        "Home Assistant MQTT integration"),
+    ("Bambu",     "Bambu Lab printer LAN MQTT"),
+    ("Moonraker", "Moonraker WebSocket JSON-RPC"),
 ]
 
 
@@ -140,7 +140,7 @@ def render_integration_kind_enum() -> list[str]:
         "/// Integration channel — used for IntegrationStatus.",
         "enum class IntegrationKind : uint8_t {",
     ]
-    for name, _flag, doc in INTEGRATIONS:
+    for name, doc in INTEGRATIONS:
         out.append(f"    {name},   ///< {doc}")
     out.append("};")
     return out

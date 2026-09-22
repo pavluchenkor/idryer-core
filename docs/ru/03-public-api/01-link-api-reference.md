@@ -22,9 +22,6 @@ static const iDryer::Config CFG = {
     .hasFanStatus      = false,
     .hasScales         = false,
     .hasRfid           = false,
-    .allowHa           = false,
-    .allowBambu        = false,
-    .allowMoonraker    = false,
     .telemetryPeriodMs = 10000,
     .statusPeriodMs    = 0,
     .hardwareVersion   = "1.0",
@@ -63,13 +60,14 @@ void loop() {
 | `hasFanStatus` | `bool` | Есть статус вентилятора | — |
 | `hasScales` | `bool` | Есть весы | — |
 | `hasRfid` | `bool` | Есть RFID-считыватель | — |
-| `allowHa` | `bool` | Разрешить интеграцию Home Assistant | false = SDK не создаёт клиента |
-| `allowBambu` | `bool` | Разрешить интеграцию Bambu Lab LAN | — |
-| `allowMoonraker` | `bool` | Разрешить интеграцию Moonraker/Klipper | — |
 | `telemetryPeriodMs` | `uint32_t` | Период авто-публикации `Telemetry` (мс) | 0 = не публиковать |
 | `statusPeriodMs` | `uint32_t` | Период авто-публикации `Status` (мс) | 0 = не публиковать |
 | `hardwareVersion` | `const char*` | Версия железа (строка) | **обязательно** |
 | `firmwareVersion` | `const char*` | Версия прошивки (строка) | **обязательно** |
+
+> Какие интеграции собраны в прошивку, задают флаги `IDRYER_WITH_HA`, `IDRYER_WITH_BAMBU`
+> и `IDRYER_WITH_MOONRAKER` в `platformio.ini` продукта. Отключённой интеграции нет ни в
+> образе, ни в `integrations/status`, команда портала на неё отклоняется.
 
 ---
 

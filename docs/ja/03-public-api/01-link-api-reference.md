@@ -22,9 +22,6 @@ static const iDryer::Config CFG = {
     .hasFanStatus      = false,
     .hasScales         = false,
     .hasRfid           = false,
-    .allowHa           = false,
-    .allowBambu        = false,
-    .allowMoonraker    = false,
     .telemetryPeriodMs = 10000,
     .statusPeriodMs    = 0,
     .hardwareVersion   = "1.0",
@@ -63,13 +60,14 @@ void loop() {
 | `hasFanStatus` | `bool` | ファン ステータスが存在 | — |
 | `hasScales` | `bool` | スケールが存在 | — |
 | `hasRfid` | `bool` | RFID リーダーが存在 | — |
-| `allowHa` | `bool` | Home Assistant インテグレーションを許可 | false = SDK はクライアントを作成しません |
-| `allowBambu` | `bool` | Bambu Lab LAN インテグレーションを許可 | — |
-| `allowMoonraker` | `bool` | Moonraker/Klipper インテグレーションを許可 | — |
 | `telemetryPeriodMs` | `uint32_t` | `Telemetry` (ms) の自動発行期間 | 0 = 発行しない |
 | `statusPeriodMs` | `uint32_t` | `Status` (ms) の自動発行期間 | 0 = 発行しない |
 | `hardwareVersion` | `const char*` | ハードウェア バージョン文字列 | **必須** |
 | `firmwareVersion` | `const char*` | ファームウェア バージョン文字列 | **必須** |
+
+> どの連携をイメージに含めるかは、製品の `platformio.ini` の `IDRYER_WITH_HA`、`IDRYER_WITH_BAMBU`、
+> `IDRYER_WITH_MOONRAKER` で決まります。無効な連携はイメージにも `integrations/status` にも存在せず、
+> ポータルからのコマンドは拒否されます。
 
 ---
 
