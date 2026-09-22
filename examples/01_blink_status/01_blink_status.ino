@@ -3,103 +3,66 @@
 // ============================================================================
 //
 // Что показывает:
-//   - библиотека поднимается с минимумом кода;
-//   - WiFi подключается, MQTT подключается, устройство выходит в Online;
-//   - встроенный LED моргает, когда устройство онлайн.
-//   Никаких датчиков, исполнителей и LAN WebSocket — только сам стек.
+//   - устройство на iDryer::Link: Wi-Fi, привязка к аккаунту, MQTT и доступ
+//     по локальной сети поднимает ядро, в коде — только описание устройства;
+//   - телеметрию: температура чипа ESP32 попадает в ячейку температуры
+//     карточки на портале и в приложении;
+//   - состояние на встроенном LED: часто мигает — ждёт привязки в
+//     приложении, редко мигает — онлайн, горит или не горит ровно — нет
+//     связи с порталом.
 //
-// Что обязательно настроить:
-//   1. include/secrets.h в вашем PlatformIO-проекте (см. examples/secrets.h.example).
-//   2. build_flags в platformio.ini:
-//        -DIDRYER_API_BASE='"https://portal.idryer.org/api"'
-//        -DMQTT_USE_TLS=1
-//   3. WiFi 2.4 GHz с доступом в интернет.
+// Что настроить: platformio.ini — см. examples/README.md.
+//
+// Wi-Fi и привязка — не в коде. Сеть передаёт приложение iDryer (ESPTouch)
+// или веб-установщик по USB (Improv), токен привязки — приложение.
+// Отвязка в приложении или на портале приходит командой revoke.
 //
 // Common pitfalls:
-//   - ESP32 не работает с 5 GHz сетями.
-//   - secrets.h должен лежать в include/, имя файла строго `secrets.h`.
-//   - IDRYER_API_BASE — макрос со строкой; кавычки нужны и снаружи, и внутри.
-//   - В loop() нельзя вызывать длинный delay() — рвёт MQTT keep-alive.
-//   - Если устройство застряло в AwaitingClaim — это нормально до ввода PIN
-//     в портале. Авто-claim уже включён ниже.
+//   - ESP32 не работает с сетями 5 ГГц.
+//   - В loop() нельзя вызывать длинный delay(): s_link.loop() держит связь.
+//   - Имя объекта не `link`: так называется функция POSIX, будет конфликт.
+//   - На части плат LED включается низким уровнем — тогда мигание инверсное.
 // ============================================================================
 
 #include <Arduino.h>
-#include <ArduinoJson.h>
-#include <idryer_core.h>
-#include <secrets.h>
+#include <iDryer.h>
 
-// ── Профиль продукта (минимальный) ──────────────────────────────────────────
-// IProfile — контракт между библиотекой и продуктом.
-// Здесь все методы пустые: нет конфига, нет периодической логики.
-class BlinkProfile : public idryer::IProfile {
-public:
-    void onOnline() override {}
-    void loop() override {}
-    void getConfig(JsonDocument& /*out*/) override {}
-    bool applyConfig(int /*id*/, int /*val*/) override { return false; }
+#ifndef LED_PIN
+#define LED_PIN 8   // ESP32-C3 SuperMini
+#endif
 
-    // Публикуется в idryer/{serial}/info при первом выходе в Online.
-    void buildInfoJson(char* buf, size_t len) const override {
-        StaticJsonDocument<128> doc;
-        doc["deviceType"]      = "blink_demo";
-        doc["firmwareVersion"] = "1.0.0";
-        doc["hardwareVersion"] = "1.0";
-        char ts[32];
-        idryer::MqttClient::getIsoTimestamp(ts);
-        doc["timestamp"] = ts;
-        serializeJson(doc, buf, len);
-    }
+static const iDryer::Config CFG = {
+    .deviceType      = iDryer::DeviceType::Unknown,   // своё устройство
+    .unitsCount      = 1,
+    .hasAirTemp      = true,
+    .hardwareVersion = "1.0",
+    .firmwareVersion = "0.1.0",
+    .model           = "Blink Status",
 };
+static iDryer::Link s_link(CFG);
 
-// ── Composition root (всё статически, без new) ──────────────────────────────
-static idryer::ArduinoWifiStore         s_wifiStore;
-static idryer::ArduinoWifiManager       s_wifi;
-static idryer::ArduinoCredentialStore   s_credentials;
-static idryer::ArduinoHttpClient        s_http;
-static idryer::cloud::HttpApi           s_api(&s_http, IDRYER_API_BASE);
-static idryer::MqttClient               s_mqtt;
-static idryer::cloud::CloudStateMachine s_cloud(&s_wifi, &s_credentials, &s_api, &s_mqtt);
-static idryer::ActionDispatcher         s_dispatcher;
-static BlinkProfile                     s_profile;
-static idryer::IdryerRuntime            s_runtime(&s_cloud, &s_dispatcher, &s_profile, &s_mqtt);
-
-// ── setup ───────────────────────────────────────────────────────────────────
-void setup() {
-    Serial.begin(115200);
-    pinMode(LED_BUILTIN, OUTPUT);
-
-    // HAL логирует в Serial; для Improv-сценария см. 03_with_improv.
-    idryer::hal::initArduinoHal(&Serial);
-
-    // WiFi: пробуем сохранённые credentials, иначе берём из secrets.h.
-    char ssid[64], pass[64];
-    if (s_wifiStore.load(ssid, sizeof(ssid), pass, sizeof(pass))) {
-        s_wifi.begin(ssid, pass);
-    } else {
-        s_wifiStore.save(WIFI_SSID, WIFI_PASSWORD);
-        s_wifi.begin(WIFI_SSID, WIFI_PASSWORD);
-    }
-
-    // Серийный номер генерируется из MAC при первом запуске.
-    s_credentials.seedSerialFromMac();
-
-    // Авто-claim: устройство само запросит PIN, когда дойдёт до AwaitingClaim.
-    s_cloud.setUnclaimedCallback([](void*) { s_cloud.requestClaim(); }, nullptr);
-
-    // CommandHandler не регистрируем — встроенный fallback в IdryerRuntime
-    // обработает invoke/set/device.getConfig (см. 04-runtime/01-idryer-runtime.md).
-    s_runtime.begin();
+// Период мигания по состоянию; 0 — не мигать.
+static uint32_t blinkPeriodMs() {
+    if (s_link.isOnline()) return 1000;
+    if (!s_link.isBound()) return 200;
+    return 0;
 }
 
-// ── loop ────────────────────────────────────────────────────────────────────
-void loop() {
-    s_runtime.loop();
+void setup() {
+    Serial.begin(115200);
+    pinMode(LED_PIN, OUTPUT);
 
-    // LED моргает раз в 500 мс, когда устройство онлайн.
-    static uint32_t lastBlink = 0;
-    if (s_runtime.isOnline() && millis() - lastBlink >= 500) {
-        lastBlink = millis();
-        digitalWrite(LED_BUILTIN, !digitalRead(LED_BUILTIN));
-    }
+    s_link.begin();
+    // Отвязка: ядро стирает секрет и снова ждёт привязки.
+    s_link.onCommand("revoke", [](JsonObjectConst) { s_link.handleRevoke(); });
+}
+
+void loop() {
+    s_link.loop();
+
+    // Поля телеметрии ядро публикует само, раз в 30 с (в простое — раз в 60 с).
+    s_link.telemetry.airTempC[0] = temperatureRead();
+
+    const uint32_t period = blinkPeriodMs();
+    digitalWrite(LED_PIN, period ? (millis() / (period / 2)) % 2 : HIGH);
 }
