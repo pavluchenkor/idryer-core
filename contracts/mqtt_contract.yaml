@@ -619,7 +619,7 @@ widgets:
       - "temperature (SHT31 airTempC), отсутствует если датчик не подключён"
       - "humidity (SHT31 airHumidityPct), отсутствует если датчик не подключён"
     body:
-      - "select: animation (solid/breathe/wave/rainbow/twinkle), draft state"
+      - "select: animation (solid/breathe/wave/rainbow/twinkle/cycle/aurora/candle/ocean/lava/forest/swell/ripple/spotlight/duo), draft state"
       - "color picker (#RRGGBB), draft state"
       - "button: Turn On → commands/invoke {action:'led.pulse', args:{animation, color}}"
       - "button: Turn Off → commands/invoke {action:'led.pulse', args:{animation:'off'}}"
@@ -2178,19 +2178,32 @@ invoke_actions:
         # ── Mode 2: GLOBAL ANIMATION OVERRIDE ───────────────────────
         animation:
           type: enum
-          values: ["solid", "breathe", "wave", "rainbow", "twinkle", "off"]
+          values: ["solid", "breathe", "wave", "rainbow", "twinkle", "cycle",
+                   "aurora", "candle", "ocean", "lava", "forest",
+                   "swell", "ripple", "spotlight", "duo", "off"]
           required: false
           default: "solid"
           notes: |
             Применяется к ZONE PULSE — нет (всегда solid в зоне).
             Применяется к GLOBAL OVERRIDE — обязательно.
             Описание:
-              solid    — постоянный свет (требует color)
-              breathe  — мягкое дыхание яркости (~2 сек период), color
-              wave     — бегущая волна по ленте, color
-              rainbow  — HSV-проход по ленте, color ИГНОРИРУЕТСЯ
-              twinkle  — случайные «звёзды» (мягкий уют), color (база)
-              off      — выключить активный override / pulse-зону
+              solid     — постоянный свет (требует color)
+              breathe   — дыхание яркости 20–100%, период 4 сек, color
+              wave      — бегущая комета, хвост — четверть ленты, color
+              rainbow   — по ленте треть цветового кольца, круг за 2 мин, color ИГНОРИРУЕТСЯ
+              twinkle   — случайные «звёзды» (мягкий уют), color (база)
+              cycle     — вся лента одним цветом проходит кольцо за 60 сек, color ИГНОРИРУЕТСЯ
+              aurora    — пятна оттенков вокруг color медленно плывут по ленте, color
+              candle    — тёплый неровно мерцающий свет, color ИГНОРИРУЕТСЯ
+              ocean     — палитра «океан» перетекает по ленте, color ИГНОРИРУЕТСЯ
+              lava      — палитра «лава» перетекает по ленте, color ИГНОРИРУЕТСЯ
+              forest    — палитра «лес» перетекает по ленте, color ИГНОРИРУЕТСЯ
+              swell     — по ленте бежит синус яркости, 4 волны на ленту, color
+              ripple    — две встречные синусоиды яркости, color
+              spotlight — окно в четверть ленты ходит туда-обратно по тусклому фону, color
+              duo       — градиент от color к соседнему по кольцу оттенку (+30 из 256)
+                          плывёт по ленте, color
+              off       — выключить активный override / pulse-зону
 
         # ── Общие ───────────────────────────────────────────────────
         color:
