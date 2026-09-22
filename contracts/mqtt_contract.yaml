@@ -2668,7 +2668,7 @@ mqtt_only:
         "actions[].params[].limits": "[min, max] — одинаково для всех юнитов, либо [[min, max], …] — по юниту (индекс = номер юнита). Для type=stages — пределы температуры каждой стадии, опционально"
         "actions[].params[].step": "number, для type=number"
         "actions[].params[].default": "number — стартовое значение поля, либо массив по юнитам; для select — один из options, для color — #RRGGBB"
-        "actions[].params[].options": "string[] ≤8, для type=select — допустимые значения (прибор отбросит чужое)"
+        "actions[].params[].options": "string[] ≤16, для type=select — допустимые значения (прибор отбросит чужое)"
         "actions[].params[].unit": "string ≤8"
         "actions[].params[].max_by": |
           опционально — чем срезан верхний предел: названия ограничителя по языкам
