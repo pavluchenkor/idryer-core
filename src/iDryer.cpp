@@ -13,6 +13,7 @@
 
 #include "mqtt/mqtt_client.h"   // MQTT_CONFIG_CHUNK_SIZE
 #include "work_time_tracker.h"  // накопительный workTimeCounter
+#include "time_average.h"       // среднее мощности нагревателя
 #include <Arduino.h>
 #include <WiFi.h>
 #include <ArduinoJson.h>
@@ -282,6 +283,17 @@ struct Link::Impl {
     // смена состояния публикует телеметрию сразу, периодика остаётся сверкой.
     bool lastPubFanOn[MAX_UNITS]     = {false, false, false, false};
     bool lastPubServoOpen[MAX_UNITS] = {false, false, false, false};
+
+    // Мощность нагревателя в эфир — среднее за два периода публикации: ПИД
+    // дёргает нагреватель, и одиночный снимок в точке публикации случаен.
+    // Смена режима юнита сбрасывает среднее — старт и стоп видны сразу.
+    idryer::TimeAverage heaterAvg[MAX_UNITS];
+    UnitMode heaterAvgMode[MAX_UNITS] = { UnitMode::Idle, UnitMode::Idle,
+                                          UnitMode::Idle, UnitMode::Idle };
+    uint32_t heaterAvgLastMs = 0;
+    // Окно без публикации (нет связи) дольше этого закрывается само — иначе
+    // первая точка после связи усреднила бы весь простой.
+    static constexpr uint32_t kHeaterAvgMaxWindowMs = 120000;
 
     uint32_t sessionNum[MAX_UNITS]   = {0, 0, 0, 0};
     UnitMode lastModeForSn[MAX_UNITS]= { UnitMode::Idle, UnitMode::Idle,
@@ -669,6 +681,13 @@ inline bool isActiveUnitMode(UnitMode m) {
     return m != UnitMode::Idle && m != UnitMode::Fault && m != UnitMode::Unknown;
 }
 
+// Мощность нагревателя в эфир: в работе — среднее, вне работы — текущее
+// значение (нагреватель стоит, среднее только задержало бы ноль).
+inline float heaterPowerToPublish(const idryer::TimeAverage& avg, UnitMode mode,
+                                  float current01) {
+    return isActiveUnitMode(mode) ? avg.value(current01) : current01;
+}
+
 }  // namespace
 
 void Link::loop() {
@@ -822,6 +841,22 @@ void Link::loop() {
     const uint32_t now = millis();
     const bool anyTransport = impl_->pub.isMqttConnected() || impl_->pub.isLocalConnected();
 
+    // Мощность нагревателя копится по времени на каждом проходе; окно
+    // закрывает публикация телеметрии.
+    if (impl_->cfg.hasHeater) {
+        const uint32_t dt = impl_->heaterAvgLastMs ? now - impl_->heaterAvgLastMs : 0;
+        impl_->heaterAvgLastMs = now;
+        for (uint8_t i = 0; i < impl_->cfg.unitsCount && i < MAX_UNITS; ++i) {
+            idryer::TimeAverage& avg = impl_->heaterAvg[i];
+            if (status.mode[i] != impl_->heaterAvgMode[i]) {
+                impl_->heaterAvgMode[i] = status.mode[i];
+                avg.reset();
+            }
+            avg.add(telemetry.heaterPower01[i], dt);
+            if (avg.currentMs() >= Impl::kHeaterAvgMaxWindowMs) avg.rotate();
+        }
+    }
+
     // Entity manifest (retained): публикуем после MQTT-коннекта и
     // перепубликуем, если продукт изменил декларацию (card().dirty()).
     if (impl_->pub.isMqttConnected()) {
@@ -930,7 +965,8 @@ void Link::loop() {
         for (uint8_t i = 0; i < cfg.unitsCount && i < MAX_UNITS; ++i) {
             const float temp     = telemetry.airTempC[i];
             const float hum      = telemetry.airHumidityPct[i];
-            const int   powerPct = (int)(telemetry.heaterPower01[i] * 100.0f);
+            const int   powerPct = (int)(heaterPowerToPublish(impl_->heaterAvg[i], status.mode[i],
+                                                              telemetry.heaterPower01[i]) * 100.0f);
             const bool  fan      = telemetry.fanOn[i];
             impl_->intManager.publishHaUnitState(i, temp, hum, powerPct, fan);
         }
@@ -1063,7 +1099,12 @@ void Link::publishTelemetryNow() {
             float v = telemetry.heaterTempC[i];
             if (!isnan(v)) u["heaterTemp"] = v;
         }
-        if (cfg.hasHeater) u["heaterPower"] = (int)roundf(telemetry.heaterPower01[i] * 100.0f);
+        if (cfg.hasHeater) {
+            const float p = heaterPowerToPublish(impl_->heaterAvg[i], status.mode[i],
+                                                 telemetry.heaterPower01[i]);
+            u["heaterPower"] = (int)roundf(p * 100.0f);
+            impl_->heaterAvg[i].rotate();
+        }
         if (cfg.hasFan)    u["fanStatus"]   = telemetry.fanOn[i];
         if (cfg.hasServo)  u["servoOpen"]   = telemetry.servoOpen[i];
 

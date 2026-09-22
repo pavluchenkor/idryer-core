@@ -1437,7 +1437,7 @@ messages:
             "units[i].temperature": "float, °C — температура воздуха"
             "units[i].humidity": "float, %RH — влажность воздуха"
             "units[i].heaterTemp": "float, °C — температура корпуса нагревателя (при наличии датчика)"
-            "units[i].heaterPower": "int, 0..100 % — мощность нагрева"
+            "units[i].heaterPower": "int, 0..100 % — мощность нагрева. В работе — среднее по времени за два последних периода публикации (ядро, time_average.h); смена режима сбрасывает среднее. Вне работы (Idle/Fault) — текущее значение."
             "units[i].fanStatus": "bool — вентилятор вкл/выкл"
             "units[i].servoOpen": "bool — заслонка открыта (при hasServo)"
             "rssi": "int, dBm — уровень WiFi (top-level, шлётся всегда)"
