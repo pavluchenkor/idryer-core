@@ -619,7 +619,7 @@ widgets:
       - "temperature (SHT31 airTempC), отсутствует если датчик не подключён"
       - "humidity (SHT31 airHumidityPct), отсутствует если датчик не подключён"
     body:
-      - "select: animation (solid/breathe/wave/rainbow/twinkle/cycle/aurora/candle/ocean/lava/forest/swell/ripple/spotlight/duo), draft state"
+      - "select: animation (solid/breathe/wave/rainbow/twinkle/cycle/swell/ripple/spotlight/duo), draft state"
       - "color picker (#RRGGBB), draft state"
       - "button: Turn On → commands/invoke {action:'led.pulse', args:{animation, color}}"
       - "button: Turn Off → commands/invoke {action:'led.pulse', args:{animation:'off'}}"
@@ -2179,7 +2179,8 @@ invoke_actions:
         animation:
           type: enum
           values: ["solid", "breathe", "wave", "rainbow", "twinkle", "cycle",
-                   "aurora", "candle", "ocean", "lava", "forest",
+                   # отключены в прошивке (место на флеше), код закомментирован:
+                   # "aurora", "candle", "ocean", "lava", "forest",
                    "swell", "ripple", "spotlight", "duo", "off"]
           required: false
           default: "solid"
@@ -2193,11 +2194,6 @@ invoke_actions:
               rainbow   — по ленте треть цветового кольца, круг за 2 мин, color ИГНОРИРУЕТСЯ
               twinkle   — случайные «звёзды» (мягкий уют), color (база)
               cycle     — вся лента одним цветом проходит кольцо за 60 сек, color ИГНОРИРУЕТСЯ
-              aurora    — пятна оттенков вокруг color медленно плывут по ленте, color
-              candle    — тёплый неровно мерцающий свет, color ИГНОРИРУЕТСЯ
-              ocean     — палитра «океан» перетекает по ленте, color ИГНОРИРУЕТСЯ
-              lava      — палитра «лава» перетекает по ленте, color ИГНОРИРУЕТСЯ
-              forest    — палитра «лес» перетекает по ленте, color ИГНОРИРУЕТСЯ
               swell     — по ленте бежит синус яркости, 4 волны на ленту, color
               ripple    — две встречные синусоиды яркости, color
               spotlight — окно в четверть ленты ходит туда-обратно по тусклому фону, color

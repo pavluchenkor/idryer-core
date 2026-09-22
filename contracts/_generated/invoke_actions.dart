@@ -20,7 +20,7 @@ const Map<String, Map<String, Map<String, Object>>> invokeActions = {
   },
   'storage_link': {
     'led.pulse': {
-      'animation': ['solid', 'breathe', 'wave', 'rainbow', 'twinkle', 'cycle', 'aurora', 'candle', 'ocean', 'lava', 'forest', 'swell', 'ripple', 'spotlight', 'duo', 'off'],
+      'animation': ['solid', 'breathe', 'wave', 'rainbow', 'twinkle', 'cycle', 'swell', 'ripple', 'spotlight', 'duo', 'off'],
       'colorEncoding': '#RRGGBB',
     },
   },

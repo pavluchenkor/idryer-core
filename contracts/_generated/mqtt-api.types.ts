@@ -499,7 +499,7 @@ export const InvokeActions = {
   },
   "storage_link": {
     "led.pulse": {
-      animation: ["solid", "breathe", "wave", "rainbow", "twinkle", "cycle", "aurora", "candle", "ocean", "lava", "forest", "swell", "ripple", "spotlight", "duo", "off"] as const,
+      animation: ["solid", "breathe", "wave", "rainbow", "twinkle", "cycle", "swell", "ripple", "spotlight", "duo", "off"] as const,
       colorEncoding: "#RRGGBB",
     },
   },
