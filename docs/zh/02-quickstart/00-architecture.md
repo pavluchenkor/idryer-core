@@ -1,75 +1,82 @@
-# idryer-core 如何運作
+# idryer-core 的工作方式
 
-idryer-core 是一個針對 ESP32 的庫，處理整個雲端堆棧：通過 Improv-Serial 進行 WiFi 配置、用於將設備綁定到 idryer.org 帳戶的聲明協議、具有自動重新連接的 TLS MQTT 會話、來自門戶的命令路由和定期遙測發布。
+idryer-core 是一个 ESP32 库。它负责把设备连接到门户和应用的全部工作：
 
-您只需編寫特定於您的設備的內容：讀取傳感器、驅動外設。其餘一切都在庫內。
+- Wi-Fi：网络由 iDryer 应用（ESPTouch）或通过 USB 的网页（Improv）传给设备；
+- 用一次性令牌绑定到账户，以及解绑；
+- 带重连的安全 MQTT 会话；
+- 局域网访问：即使没有互联网，应用也能控制设备；
+- 发布遥测和状态，传递命令；
+- 无线固件更新；
+- 门户和应用中的设备卡片。
 
-## mqtt_contract.yaml — 唯一真實來源
+你只写自己的部分：读取传感器、驱动负载、声明卡片显示什么以及它启动哪些操作。
 
-文件 [`contracts/mqtt_contract.yaml`](../../../contracts/mqtt_contract.yaml) 定義：
-
-- **功能** — 每種設備類型支持的外設（加熱器、LED 條、傳感器）；
-- **遙測字段** — MQTT 數據包中的字段名稱和數據類型；
-- **UART 協議** — ESP32 和協處理器之間的結構；
-- **TypeScript 類型** — 用於門戶前端。
-
-代碼從此文件自動生成：
-
-| 生成的內容 | 位置 |
-|---|---|
-| `iDryer::Config`（has* 標誌） | `src/_generated/iDryer_api.h` |
-| MQTT 主題（C++ 常量） | `contracts/_generated/mqtt_topics.h` |
-| TypeScript 類型 | `contracts/_generated/mqtt-api.types.ts` |
-
-!!! warning
-    不要手動編輯 `src/_generated/` 和 `contracts/_generated/` 中的文件 — 它們在下一次重新生成運行時會被覆蓋。
-
-## 如何添加新外設
-
-任何新功能的流程都是相同的 — 按鈕、CO2 傳感器、RFID 讀取器。
-
-**1.** 在 [`contracts/mqtt_contract.yaml`](../../../contracts/mqtt_contract.yaml) 中的 `capability_vocabulary` 添加條目：
-
-```yaml
-co2:
-  json_key: "co2"
-  config_flag: "hasCo2"
-  telemetry_field: "co2Ppm"
-  telemetry_type: "uint16_t"
-  description: "CO2 sensor (ppm)"
-```
-
-**2.** 運行重新生成：
-
-```bash
-cd contracts
-./regen.sh
-```
-
-之後，`iDryer::Config` 將具有 `hasCo2` 字段，TypeScript 將具有 `HardwareUnitConfigCapabilities.co2`。
-
-**3.** 在您設備的 `main.cpp` 中設置標誌：
+## 唯一的入口：`iDryer::Link`
 
 ```cpp
+#include <iDryer.h>
+
 static const iDryer::Config CFG = {
-    // ...
-    .hasCo2 = true,
+    .deviceType      = iDryer::DeviceType::Unknown,   // 你自己的设备
+    .unitsCount      = 1,
+    .hasAirTemp      = true,                          // 温度单元格
+    .hardwareVersion = "1.0",
+    .firmwareVersion = "0.1.0",
+    .model           = "My Device",
 };
+static iDryer::Link s_link(CFG);
+
+void setup() {
+    s_link.begin();
+    s_link.onCommand("revoke", [](JsonObjectConst) { s_link.handleRevoke(); });
+}
+
+void loop() {
+    s_link.loop();
+    s_link.telemetry.airTempC[0] = readTemperature();   // 你的代码
+}
 ```
 
-**4.** 刷新設備。門戶將從 MQTT `/info` 主題讀取 `co2: true` 並自動顯示相應的 UI 塊 — 不需要門戶端更改。
+| 你 | 核心 |
+|---|---|
+| 填写 `s_link.telemetry.*` | 每 30 秒发布一次，空闲时每 60 秒一次 |
+| 修改 `s_link.status.*`（模式、设定值、时间）并调用 `publishStatusNow()` | 送达状态；卡片按模式切换 |
+| 声明 `s_link.card()`：传感器、控件、操作 | 生成 card 清单并发布 |
+| 注册 `s_link.onCommand(...)` | 转交来自云端和局域网的命令 |
 
-對於合約中尚未包含的外設類型，打開 PR 到 idryer-core 存儲庫，在 `capability_vocabulary` 中添加條目。合併後 — 運行 `regen.sh`。
+## 设备卡片
 
-## 基於此庫構建的兩個生產產品
+门户和应用根据设备发送的 card 清单绘制卡片：
 
-**iDryer Storage Link** — 帶有 WS2812B LED 條和 SHT31 溫度/濕度傳感器的 ESP32-C3。
+- `Config.has*` 标志提供现成的单元格：温度、湿度、加热功率、风扇等；
+- `card().sensor(...)` 按遥测中的路径添加自定义数值；
+- `card().action(...)` 声明一个操作：执行后单元的模式和启动参数。
 
-**iHeater Link** — 帶有 RMT 輸出到 iHeater 加熱器的 ESP32-C3，具有 Bambu Lab、Klipper/Moonraker 和 Home Assistant 的集成。
+门户上不需要为此写代码。详见 [设备卡片：card 清单](../09-add-product/02-add-widget.md)。
 
-兩個產品都通過 PlatformIO `lib_deps` 包括 idryer-core，並只實現其產品特定的邏輯。
+## `mqtt_contract.yaml` 是唯一的事实来源
+
+[`contracts/mqtt_contract.yaml`](../../../contracts/mqtt_contract.yaml) 描述协议：主题、遥测和状态字段、设备能力、card 清单。由它生成：
+
+| 内容 | 位置 |
+|---|---|
+| `iDryer::Config`（`has*` 标志）和 API 结构 | `src/_generated/iDryer_api.h` |
+| MQTT 主题 | `contracts/_generated/mqtt_topics.h` |
+| ESP32 ↔ 控制器的 UART 协议 | `contracts/_generated/uart_protocol.h` |
+| 门户用的 TypeScript 类型 | `contracts/_generated/mqtt-api.types.ts` |
+
+!!! warning
+    不要手动修改 `_generated/` 中的文件：`contracts/regen.sh` 会根据契约覆盖它们。
+
+自定义数值不需要修改契约：用 `card().sensor(...)` 声明即可。当所有产品都需要一项新能力时才修改契约：先改 `mqtt_contract.yaml`，再运行 `regen.sh`，最后改代码。
+
+## 基于核心的产品
+
+- **iDryer Link**：干燥机的通信模块，一块 ESP32 挨着控制器，通过 UART 通信。
+- **iDryer Storage**：线盘架照明，可寻址灯带和 SHT31 传感器。
+- **iHeater Link**：控制 iHeater 加热器，集成 Bambu Lab、Klipper/Moonraker 和 Home Assistant。
 
 ## 下一步
 
-- [01-wifi.md](01-wifi.md) — 使用 Improv-Serial 將 ESP32 連接到 WiFi。
-- [../../../README.md](../../../README.md) — 庫概述和代碼生成參考。
+[5 分钟运行](01-five-minutes.md)。

@@ -1,135 +1,83 @@
-Se é a primeira vez aqui — vá para [Comece em 5 minutos](01-five-minutes.md); esta página cobre configuração avançada e resolução de problemas.
+# Configuração detalhada
 
-Caminho rápido: ligue a biblioteca, grave um exemplo, veja o LED piscando e o dispositivo no portal.
+O caminho curto é [Rodar em 5 minutos](01-five-minutes.md). Esta página trata do ambiente, das flags de build, dos logs e do modo de desenvolvimento.
 
+## O núcleo no projeto
 
-- Placa ESP32 (recomendado: ESP32-C3 DevKit, Super Mini, XIAO ESP32-S3, Waveshare ESP32-S3 Zero).
-- PlatformIO com framework `arduino`, plataforma `espressif32`.
-- WiFi 2,4 GHz com acesso à internet.
-- Conta em [portal.idryer.org](https://portal.idryer.org/) para claim.
+O núcleo fica em `lib/idryer-core` do projeto PlatformIO: como cópia, submódulo git ou link simbólico para um clone compartilhado. O `library.json` dele traz as dependências: MQTT, ArduinoJson, WebSockets, Improv. O `lib_deps` do projeto tem só as bibliotecas dos seus sensores.
 
+Placas dos produtos sobre o núcleo: ESP32-C3 (DevKit, Super Mini), ESP32-S3 (XIAO ESP32-S3, Waveshare ESP32-S3 Zero).
 
-Em `platformio.ini` do seu produto:
+## `platformio.ini`
 
 ```ini
 [env:my-device]
-platform   = espressif32
-framework  = arduino
-board      = esp32-c3-devkitm-1
+platform    = espressif32
+framework   = arduino
+board       = esp32-c3-devkitm-1
 
-lib_deps =
-    file://../../lib/idryer-core
-    bblanchon/ArduinoJson @ ^6.21.0
-    knolleary/PubSubClient
-    links2004/WebSockets             ; apenas necessário para mqtt_with_local_ws
+; ESPAsyncTCP é o transporte ESP8266 das dependências do espMqttClient: não compila no ESP32.
+lib_ignore = ESPAsyncTCP
 
 build_flags =
     -DIDRYER_API_BASE='"https://portal.idryer.org/api"'
+    -DMQTT_BROKER='"mqtt.idryer.org"'
+    -DMQTT_PORT=8883
     -DMQTT_USE_TLS=1
+    ; Placa sem USB-UART (ESP32-C3 SuperMini): Serial pela USB.
+    -DARDUINO_USB_MODE=1
+    -DARDUINO_USB_CDC_ON_BOOT=1
 ```
 
+| Flag | Para quê |
+|---|---|
+| `IDRYER_API_BASE` | endereço da API do portal: ativação, vinculação |
+| `MQTT_BROKER`, `MQTT_PORT` | o broker do portal |
+| `MQTT_USE_TLS=1` | conexão segura com o broker |
+| `lib_ignore = ESPAsyncTCP` | transporte ESP8266 das dependências do cliente MQTT: não compila no ESP32 |
+| `ARDUINO_USB_MODE`, `ARDUINO_USB_CDC_ON_BOOT` | Serial pela USB em placas sem USB-UART |
 
-Copie [`examples/secrets.h.example`](https://github.com/pavluchenkor/idryer-core/blob/main/examples/secrets.h.example) para `include/secrets.h` no seu projeto e preencha seu SSID/senha. O arquivo deve estar em `.gitignore`.
+As macros de texto precisam de aspas por fora e por dentro.
 
-```cpp
-```
+## Períodos de publicação
 
-`IDRYER_API_BASE` é normalmente definido via `build_flags`, não através de secrets.h.
+Os campos `Config.telemetryPeriodMs`, `telemetryPeriodIdleMs`, `statusPeriodMs`, `statusPeriodIdleMs`; zero significa o valor do contrato:
 
+| O quê | Em funcionamento | Em repouso |
+|---|---|---|
+| telemetria | 30 s | 60 s |
+| status | na hora, quando muda o modo, o setpoint ou o tempo; conferência a cada 60 s | conferência a cada 5 min |
 
-O mais simples é [`examples/01_blink_status/01_blink_status.ino`](https://github.com/pavluchenkor/idryer-core/blob/main/examples/01_blink_status/01_blink_status.ino). Copie-o como seu ponto de partida:
+"Em repouso" significa que nenhuma unidade está em modo ativo.
 
-- Não requer sensores, periféricos ou LAN WS.
-- Não requer `handleCommand` manual — o fallback integrado em `IdryerRuntime` lida com comandos básicos.
-- LED pisca quando o dispositivo está online — esse é o indicador de sucesso.
-
+## Logs
 
 ```bash
-pio run -e my-device -t upload
 pio device monitor -b 115200
 ```
 
-Sequência de log esperada:
+Enquanto o dispositivo não tem rede, o log fica em silêncio: a porta está ocupada pelo Improv. Os logs ligam com a linha `[BOOT] WiFi ok, logs enabled`. Depois disso funcionam os comandos `STATUS`, `WIPE_IDENTITY`, `PAIR_TOKEN`: veja [Vinculação à conta](02-claim.md).
 
-```
-[CSM] state: Idle → WifiConnecting
-[CSM] state: WifiConnecting → Provisioning
-[CSM] state: Provisioning → AwaitingClaim     ← esperando claim
-[CSM] PIN: 1234567   expires in 600s          ← se auto-claim está ativado
-...
-[CSM] state: AwaitingClaim → Ready
-[CSM] state: Ready → MqttConnecting
-[CSM] state: MqttConnecting → Online          ← pronto, LED começa a piscar
-[RT]  Cloud Online
-```
-
-
-A associação automática já está ativada no exemplo. O PIN aparece no log. Insira-o em [portal.idryer.org](https://portal.idryer.org/) → "Adicionar dispositivo". Após a associação, `CloudStateMachine` faz a transição para `Online`.
-
-
-Os exemplos seguintes introduzem cada um um novo nível de complexidade:
-
-| Exemplo | O que é adicionado |
-|---------|-------------------|
-| [`minimal_mqtt_only`](https://github.com/pavluchenkor/idryer-core/blob/main/examples/minimal_mqtt_only/minimal_mqtt_only.ino) | `handleCommand` personalizado, manipulação de `commands/invoke` e `commands/set` |
-| [`03_with_improv`](https://github.com/pavluchenkor/idryer-core/blob/main/examples/03_with_improv/03_with_improv.ino) | Provisionamento WiFi via Improv (sem credenciais hardcoded) |
-| [`mqtt_with_local_ws`](https://github.com/pavluchenkor/idryer-core/blob/main/examples/mqtt_with_local_ws/mqtt_with_local_ws.ino) | Servidor WebSocket LAN local + `DevicePublisher` (uma publicação — dois transportes) |
-
-
-Um caminho alternativo para desenvolvedores — ver o fluxo de claim completo diretamente num monitor Serial padrão, sem Improv e sem UI do portal.
-
-Em `platformio.ini`, crie um env dev com a bandeira `-DIDRYER_DEV_REPL=1`:
+## Modo de desenvolvimento: `IDRYER_DEV_REPL`
 
 ```ini
 [env:my-device-dev]
-platform   = espressif32
-framework  = arduino
-board      = esp32-c3-devkitm-1
+extends = env:my-device
 build_flags =
     ${env:my-device.build_flags}
     -DIDRYER_DEV_REPL=1
 ```
 
-O que a bandeira ativa:
-- Os logs HAL em `Serial` começam **imediatamente** do inicialização (sem silêncio até o WiFi conectar).
-- O provisionamento Improv é **desativado** — Serial está livre para comandos interativos.
-- Um REPL simples aparece em `main.cpp`: `wifi`, `claim`, `status`, `wipe`, `restart`, `help`.
+Com a flag:
 
-Fluxo completo:
+- os logs vão para a porta logo depois de ligar;
+- o Improv e os comandos `STATUS`, `WIPE_IDENTITY`, `PAIR_TOKEN` ficam desligados: seu código lê as linhas que chegam na porta;
+- a rede vem do app (ESPTouch) ou do código: `seedWifiCredentialsIfEmpty()` antes de `begin()`, veja [Wi-Fi](01-wifi.md).
 
-```bash
-pio run -e my-device-dev -t upload
-pio device monitor -b 115200
-```
+O firmware publicado é compilado sem a flag.
 
-No monitor:
+## Próximo passo
 
-```
-[boot] iDryer dev REPL ready — type 'help'
-> wifi MyHomeWiFi MyPassword
-[wifi] saving 'MyHomeWiFi' / '****'
-[CSM] state: WifiConnecting → Provisioning
-[CSM] state: Provisioning → AwaitingClaim
-> claim
-CLAIM_PIN:12345678:600
-[claim] PIN=1234567, valid 600 s — enter in portal
-[CSM] state: AwaitingClaim → Ready → Online
-> status
-[status] wifi=3 ip=192.168.0.140 rssi=-44 online=1 serial=DEVICE_AABBCCDDEEFF
-> wipe
-[wipe] erasing NVS + reboot…
-```
-
-O REPL aceita comandos independentemente da definição de fim de linha no monitor Serial (`\n`, `\r`, ou timeout inativo 120 ms) — funciona em qualquer terminal, incluindo `pio device monitor`, Arduino IDE Serial Monitor, `screen`, `picocom`.
-
-A compilação de produção (`-e my-device-prod`, sem `IDRYER_DEV_REPL`) usa Improv via Chrome (`https://www.improv-wifi.com/`) e não contém código REPL — a bandeira é compile-time, economizando Flash.
-
-`secrets.h` com `WIFI_SSID/WIFI_PASSWORD` (Passo 2) permanece um caminho separado para cenários CI/auto-flash headless — funciona em ambos os ambientes.
-
-Depois de qualquer um dos exemplos estar funcionando, leia:
-
-- [05-architecture/01-composition-root.md](../05-architecture/01-composition-root.md) — ordem de objetos em `main.cpp`.
-- [05-architecture/03-data-flow.md](../05-architecture/03-data-flow.md) — como os dados se movem.
-- [04-patterns/](../04-patterns/) — receitas: adicione sensor, periférico, transporte.
-- [09-add-product/01-add-new-product.md](../09-add-product/01-add-new-product.md) — lista completa para um novo produto.
-- [10-troubleshooting/01-troubleshooting.md](../10-troubleshooting/01-troubleshooting.md) — o que fazer se a stack ficar travada.
+- [Exemplos do núcleo](https://github.com/pavluchenkor/idryer-core/tree/main/examples).
+- [Como adicionar um produto novo](../09-add-product/01-add-new-product.md).
+- [Card do dispositivo: o card manifest](../09-add-product/02-add-widget.md).

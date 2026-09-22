@@ -1,79 +1,51 @@
-Po tomto kroku bude váš ESP32 připojen k WiFi a přihlašovací údaje budou uloženy v NVS pro automatické připojení při příštím restartu. Portál a MQTT přijdou v dalším kroku.
+# Wi-Fi
 
+Ve firmwaru není heslo k síti. Zařízení bez uložené sítě čeká na nastavení; jakmile ho dostane, uloží síť do NVS a dál se připojuje samo. Jen sítě 2,4 GHz.
 
-**Hardware:**
+## Aplikace iDryer (ESPTouch)
 
-- Deska ESP32-C3 (DevKit, Super Mini, nebo kompatibilní)
-- USB kabel (USB-C nebo Micro-USB v závislosti na vaší desce)
+Hlavní cesta: aplikace pošle síť vzduchem, bez drátů.
 
-**Software:**
+1. Telefon je v síti, ve které bude zařízení pracovat.
+2. **Připojit nové zařízení** → krok **Wi-Fi**: zkontrolujte název sítě, zadejte heslo, klepněte na **Připojit zařízení**.
+3. Aplikace posílá nastavení až 90 sekund a ukáže **Zařízení připojeno**.
 
-- PlatformIO v VS Code
-- Prohlížeč Chrome nebo Edge (Web Serial API není podporován v Safari nebo Firefox)
+Při špatném hesle zařízení znovu čeká na nastavení: zopakujte krok.
 
+## Přes USB pomocí Improv
 
-**1. Vytvořte `platformio.ini`** v kořenu vašeho projektu:
+Dokud zařízení nemá síť, jádro poslouchá na sériovém portu protokol Improv.
 
-```ini
-[env:improv-demo]
-platform   = espressif32
-framework  = arduino
-board      = esp32-c3-devkitm-1
+1. Připojte desku přes USB.
+2. Otevřete [improv-wifi.com/serial](https://www.improv-wifi.com/serial/) v Chrome nebo Edge (Web Serial v Safari a Firefoxu nefunguje), klikněte na **Connect** a vyberte port desky.
+3. Zadejte název sítě a heslo.
 
-lib_deps =
-    https://github.com/jnthas/Improv-WiFi-Library.git
-    bblanchon/ArduinoJson @ ^6.21.3
-    knolleary/PubSubClient @ ^2.8
-    densaugeo/base64 @ ^1.4.0
+Port je v tu chvíli obsazen Improvem, proto se log objeví až po připojení zařízení k síti. Sériový monitor během práce Improvu zavřete.
 
-build_flags =
-    -DIDRYER_API_BASE='"https://portal.idryer.org/api"'
-    -DMQTT_BROKER='"mqtt.idryer.org"'
-    -DMQTT_PORT=8883
-    -DMQTT_USE_TLS=1
-```
-
-Nahraďte `board` hodnotou pro vaši desku (`esp32-c3-devkitm-1`, `seeed_xiao_esp32c3`, atd.).
-
-**2. Zkopírujte příklad.** Vezměte obsah [`examples/03_with_improv/03_with_improv.ino`](../../../examples/03_with_improv/03_with_improv.ino) a uložte jej jako `src/main.cpp` ve vašem projektu.
-
-**3. Nastavte ChipFamily.** V kopírovaném souboru najděte řádek:
+## V kódu, pro vývojářský stand
 
 ```cpp
-s_improv.setDeviceInfo(ImprovTypes::ChipFamily::CF_ESP32_C3, ...);
+void setup() {
+    // Jen pro vývojářský stand: síť se uloží do NVS, pokud tam ještě není.
+    s_link.seedWifiCredentialsIfEmpty("my-ssid", "my-password");
+    s_link.begin();
+}
 ```
 
-Ujistěte se, že ChipFamily odpovídá vašemu čipu: `CF_ESP32_C3`, `CF_ESP32_S3`, nebo `CF_ESP32`.
+`seedWifiCredentialsIfEmpty()` zapíše síť, jen když v NVS ještě žádná není; `setWifiCredentials()` přepisuje vždy. Volejte je před `begin()`.
 
-**4. Flash:**
+!!! warning
+    Nevydávejte firmware s heslem v kódu: dostane ho každý, kdo si ho stáhne.
 
-```bash
-pio run -e improv-demo -t upload
+## Kontrola
+
+V logu:
+
+```text
+[BOOT] WiFi ok, logs enabled
+[INFO ] CLOUD: WiFi connected, IP: 192.168.1.42, RSSI: -55 dBm, …
 ```
 
-**5. Otevřete [improv-wifi.com/serial](https://www.improv-wifi.com/serial/)** v prohlížeči Chrome nebo Edge. Klikněte na **Connect** a vyberte port USB zařízení z dialogu prohlížeče.
+## Dál
 
-**6. Zadejte SSID a heslo** pro vaši síť 2,4 GHz. Webová stránka odešle přihlašovací údaje na desku přes Serial-Improv. Deska je uloží do NVS.
-
-
-Otevřete Serial Monitor:
-
-```bash
-pio device monitor -b 115200
-```
-
-Po úspěšném připojení uvidíte:
-
-```
-[BOOT] WiFi connected, Improv done
-[BOOT] IP: 192.168.1.42  RSSI: -47 dBm
-```
-
-Pokud se tento řádek nezobrazí, podívejte se na odkaz na řešení potíží níže.
-
-!!! note
-    Pokud jsou přihlašovací údaje již uloženy v NVS z předchozího spuštění, deska se při startu automaticky připojí k WiFi — Improv není potřeba.
-
-
-- [02-claim.md](02-claim.md) — připojte zařízení k vašemu účtu idryer.org.
-- [../../10-troubleshooting/01-troubleshooting.md](../10-troubleshooting/01-troubleshooting.md) — pokud se WiFi nepřipojí.
+[Spárování s účtem](02-claim.md).

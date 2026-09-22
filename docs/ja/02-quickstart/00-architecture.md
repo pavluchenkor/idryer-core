@@ -1,75 +1,82 @@
-# idryer-coreの動作方法
+# idryer-core の仕組み
 
-idryer-coreはESP32用のライブラリで、クラウドスタック全体を処理します：Improv-Serialを使用したWiFiプロビジョニング、デバイスをidryer.orgアカウントにバインドするクレームプロトコル、自動再接続を備えたTLS MQTTセッション、ポータルからのコマンドルーティング、定期的なテレメトリ発行。
+idryer-core は ESP32 用のライブラリです。デバイスをポータルとアプリにつなぐすべてを引き受けます：
 
-デバイス固有の記述のみを行います：センサーの読み取り、周辺機器の駆動。その他すべてはライブラリ内です。
+- Wi-Fi：ネットワークは iDryer アプリ（ESPTouch）または USB 経由の Web ページ（Improv）から届く；
+- 使い捨てトークンによるアカウントへの紐付けと紐付け解除；
+- 再接続付きの安全な MQTT セッション；
+- ローカルネットワークでのアクセス：インターネットがなくてもアプリがデバイスを操作できる；
+- テレメトリとステータスの送信、コマンドの配送；
+- ファームウェアの無線アップデート；
+- ポータルとアプリのデバイスカード。
 
-## mqtt_contract.yaml — 真実の唯一の情報源
+あなたが書くのは自分の部分だけです。センサーを読み、負荷を制御し、カードに何を表示し、どの操作を実行するかを宣言します。
 
-ファイル [`contracts/mqtt_contract.yaml`](../../../contracts/mqtt_contract.yaml) は以下を定義します：
-
-- **capabilities** — 各デバイスタイプがサポートする周辺機器（ヒーター、LEDストリップ、センサー）；
-- **telemetry fields** — MQTTパケット内のフィールド名とデータ型；
-- **UART protocol** — ESP32とコプロセッサ間の構造；
-- **TypeScript types** — ポータルフロントエンド用。
-
-このファイルから、コードは自動的に生成されます：
-
-| 生成される内容 | 場所 |
-|---|---|
-| `iDryer::Config`（has* フラグ） | `src/_generated/iDryer_api.h` |
-| MQTTトピック（C++ 定数） | `contracts/_generated/mqtt_topics.h` |
-| TypeScript型 | `contracts/_generated/mqtt-api.types.ts` |
-
-!!! warning
-    `src/_generated/` および `contracts/_generated/` 内のファイルを手動で編集しないでください — 次の再生成実行時に上書きされます。
-
-## 新しい周辺機器を追加する方法
-
-手順は新しい機能（ボタン、CO2センサー、RFIDリーダー）と同じです。
-
-**1.** [`contracts/mqtt_contract.yaml`](../../../contracts/mqtt_contract.yaml) の `capability_vocabulary` にエントリを追加します：
-
-```yaml
-co2:
-  json_key: "co2"
-  config_flag: "hasCo2"
-  telemetry_field: "co2Ppm"
-  telemetry_type: "uint16_t"
-  description: "CO2 sensor (ppm)"
-```
-
-**2.** 再生成を実行します：
-
-```bash
-cd contracts
-./regen.sh
-```
-
-この後、`iDryer::Config` は `hasCo2` フィールドを持ち、TypeScript は `HardwareUnitConfigCapabilities.co2` を持つようになります。
-
-**3.** デバイスの `main.cpp` でフラグを設定します：
+## 入口はひとつ：`iDryer::Link`
 
 ```cpp
+#include <iDryer.h>
+
 static const iDryer::Config CFG = {
-    // ...
-    .hasCo2 = true,
+    .deviceType      = iDryer::DeviceType::Unknown,   // 独自のデバイス
+    .unitsCount      = 1,
+    .hasAirTemp      = true,                          // 温度のセル
+    .hardwareVersion = "1.0",
+    .firmwareVersion = "0.1.0",
+    .model           = "My Device",
 };
+static iDryer::Link s_link(CFG);
+
+void setup() {
+    s_link.begin();
+    s_link.onCommand("revoke", [](JsonObjectConst) { s_link.handleRevoke(); });
+}
+
+void loop() {
+    s_link.loop();
+    s_link.telemetry.airTempC[0] = readTemperature();   // あなたのコード
+}
 ```
 
-**4.** デバイスをフラッシュします。ポータルはMQTT `/info` トピックから `co2: true` を読み取り、ポータル側の変更なしで対応するUIブロックを自動的に表示します。
+| あなた | コア |
+|---|---|
+| `s_link.telemetry.*` を埋める | 30 秒ごと、待機中は 60 秒ごとに送信 |
+| `s_link.status.*`（モード、設定値、時間）を変えて `publishStatusNow()` を呼ぶ | ステータスを届ける。カードはモードで切り替わる |
+| `s_link.card()` を宣言：センサー、コントロール、アクション | card マニフェストを組み立てて送信 |
+| `s_link.onCommand(...)` を登録 | クラウドとローカルネットワークのコマンドを渡す |
 
-まだ契約にない周辺機器タイプについては、idryer-coreリポジトリへPRを開き、`capability_vocabulary` にエントリを追加します。マージ後 — `regen.sh` を実行します。
+## デバイスカード
 
-## このライブラリで構築された2つの本番製品
+ポータルとアプリは、デバイスが送る card マニフェストからカードを描きます：
 
-**iDryer Storage Link** — WS2812B LEDストリップとSHT31温度/湿度センサー付きESP32-C3。
+- `Config.has*` フラグで既製のセルが出る：温度、湿度、ヒーター出力、ファンなど；
+- `card().sensor(...)` はテレメトリ内のパスで独自の値を追加する；
+- `card().action(...)` は操作を宣言する：実行後のユニットのモードと起動パラメーター。
 
-**iHeater Link** — iHeaterヒーターへのRMT出力を備えたESP32-C3、Bambu Lab、Klipper/Moonraker、Home Assistantの統合。
+そのためのポータル側のコードは不要です。詳しくは [デバイスカード：card マニフェスト](../09-add-product/02-add-widget.md)。
 
-両製品はPlatformIO `lib_deps` を介してidryer-coreを含め、製品固有のロジックのみを実装します。
+## `mqtt_contract.yaml` が唯一の正
 
-## 次に行くべき場所
+[`contracts/mqtt_contract.yaml`](../../../contracts/mqtt_contract.yaml) はプロトコルを記述します：トピック、テレメトリとステータスの項目、デバイスの機能、card マニフェスト。ここから生成されるもの：
 
-- [01-wifi.md](01-wifi.md) — Improv-Serialを使用してESP32をWiFiに接続します。
-- [../../../README.md](../../../README.md) — ライブラリ概要とコード生成リファレンス。
+| 何 | どこへ |
+|---|---|
+| `iDryer::Config`（`has*` フラグ）と API 構造体 | `src/_generated/iDryer_api.h` |
+| MQTT トピック | `contracts/_generated/mqtt_topics.h` |
+| ESP32 ↔ コントローラーの UART プロトコル | `contracts/_generated/uart_protocol.h` |
+| ポータル用の TypeScript 型 | `contracts/_generated/mqtt-api.types.ts` |
+
+!!! warning
+    `_generated/` のファイルを手で編集しないでください。`contracts/regen.sh` が契約から上書きします。
+
+独自の値に契約の変更は不要です。`card().sensor(...)` で宣言します。契約を変えるのは、新しい機能がすべての製品に必要なときです：まず `mqtt_contract.yaml`、次に `regen.sh`、それからコード。
+
+## コアを使った製品
+
+- **iDryer Link**：ドライヤーの通信モジュール。コントローラーの隣の ESP32 で、UART でやり取りする。
+- **iDryer Storage**：スプールラックの照明。アドレス指定可能な LED テープと SHT31 センサー。
+- **iHeater Link**：iHeater ヒーターの制御。Bambu Lab、Klipper/Moonraker、Home Assistant と連携。
+
+## 次へ
+
+[5 分で起動](01-five-minutes.md)。

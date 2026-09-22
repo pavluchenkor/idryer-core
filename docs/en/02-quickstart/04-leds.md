@@ -1,95 +1,105 @@
-# Step 04 — Indication: LED strip driven by sensor data
+# LED strip: turning on with an effect and a color
 
-After this step a WS2812B strip will change colour based on humidity, and brightness will be controllable from the portal via a `set` command.
+After this page the card has the **Turn on** action, with a choice of effect and color, and **Turn off**.
 
 ## What you need
 
-**Hardware:**
-
-- WS2812B LED strip (or WS2811/SK6812)
-- 330–470 Ω resistor on the data line
-- 5 V power supply (current depends on strip length; 300 LEDs draw up to 18 A)
-
-**Software:**
-
-- Library `fastled/FastLED @ ^3.6.0`
-
-!!! warning
-    Power the strip from a dedicated 5 V supply. Powering through the board's 3.3 V or 5 V pin is acceptable only for a quick smoke test with a few LEDs.
-
-## Steps
-
-**1. Add FastLED** to `platformio.ini`:
+- a WS2812B strip (or WS2811, SK6812);
+- a 330–470 Ω resistor in the data line;
+- a 5 V power supply: one LED at full white brightness draws up to 60 mA, 60 LEDs up to 3.6 A;
+- in `platformio.ini`:
 
 ```ini
 lib_deps =
-    fastled/FastLED @ ^3.6.0
-    ; ... other dependencies
+    fastled/FastLED @ 3.10.3
 ```
 
-**2. Declare the buffer and executor** in `main.cpp`. Based on [`iDryer-Storage/src/main.cpp`](../../../../iDryer-Storage/src/main.cpp):
+FastLED 3.10.5 together with the core does not fit into ESP32-C3 flash (1.7 MB for a 1.25 MB partition); with 3.10.3 it is 1.16 MB.
+
+!!! warning
+    Power the strip from a separate 5 V supply and connect the grounds of the supply and the board. A board pin is only for a test with a few LEDs.
+
+## Code
 
 ```cpp
+#include <Arduino.h>
 #include <FastLED.h>
-#include "storage/led_strip/led_strip_executor.h"
+#include <iDryer.h>
 
-#define STORAGE_LED_PIN  4
-#define STORAGE_MAX_LEDS 300
+#define LED_DATA_PIN 4
+#define LED_COUNT    60
 
-static CRGB             s_leds[STORAGE_MAX_LEDS];
-static LedStripExecutor s_executor(s_leds, STORAGE_MAX_LEDS);
-```
+static const iDryer::Config CFG = {
+    .deviceType      = iDryer::DeviceType::Unknown,
+    .unitsCount      = 1,
+    .hardwareVersion = "1.0",
+    .firmwareVersion = "0.1.0",
+    .model           = "LED Strip",
+};
+static iDryer::Link s_link(CFG);
 
-**3. Initialise the strip** in `setup()`:
+static CRGB s_leds[LED_COUNT];
+static const char* const kEffects[] = { "solid", "breathe" };
+static CRGB s_color   = CRGB::White;
+static bool s_breathe = false;
 
-```cpp
-FastLED.addLeds<WS2812B, STORAGE_LED_PIN, GRB>(s_leds, 60);
-FastLED.setBrightness(128);
-FastLED.clear(true);
-```
+static void onLightOn(uint8_t unit, JsonObjectConst args) {
+    const char* hex = args["color"] | "#FFFFFF";          // "#RRGGBB"
+    s_color   = CRGB(strtoul(hex + 1, nullptr, 16));
+    s_breathe = strcmp(args["effect"] | "solid", "breathe") == 0;
+    s_link.status.mode[unit] = iDryer::UnitMode::LightAnimation;
+    s_link.publishStatusNow();
+}
 
-Replace `60` with the actual LED count for your strip.
+static void onLightOff(uint8_t unit, JsonObjectConst) {
+    s_link.status.mode[unit] = iDryer::UnitMode::Idle;
+    s_link.publishStatusNow();
+}
 
-**4. Change colour by humidity** in `loop()`. Colour scale: blue (dry) → yellow → red (humid):
+// Strip frame every 20 ms: the color, smooth brightness for breathe.
+static void drawLeds() {
+    const bool on = s_link.status.mode[0] == iDryer::UnitMode::LightAnimation;
+    CRGB c = s_color;
+    c.nscale8(!on ? 0 : s_breathe ? beatsin8(15, 30, 255) : 255);
+    fill_solid(s_leds, LED_COUNT, c);
+    FastLED.show();
+}
 
-```cpp
-if (s_sensorOk) {
-    s_sensor.tick(millis());
-    SensorReading r = s_sensor.get();
-    if (r.ok) {
-        s_link.telemetry.airHumidityPct[0] = r.humidity;
+void setup() {
+    FastLED.addLeds<WS2812B, LED_DATA_PIN, GRB>(s_leds, LED_COUNT);
+    FastLED.setBrightness(128);
 
-        // Humidity 20%–80% → hue from 160 (blue) to 0 (red).
-        float h = constrain(r.humidity, 20.0f, 80.0f);
-        uint8_t hue = (uint8_t)(160.0f - (h - 20.0f) / 60.0f * 160.0f);
-        fill_solid(s_leds, s_executor.ledsCount(), CHSV(hue, 255, 200));
-        FastLED.show();
-    }
+    s_link.begin();
+    s_link.onCommand("revoke", [](JsonObjectConst) { s_link.handleRevoke(); });
+
+    auto& card = s_link.card();
+    card.action("light_on", "LIGHT_ANIMATION", onLightOn)
+        .name("ru", "Включить").name("en", "Turn on")
+        .select("effect", "effect", kEffects, 2, "solid")
+        .color("color", "rgb_color", "#FFFFFF");
+    card.action("light_off", "IDLE", onLightOff)
+        .name("ru", "Выключить").name("en", "Turn off");
+
+    s_link.every(20, drawLeds);
+}
+
+void loop() {
+    s_link.loop();
 }
 ```
 
-**5. Control brightness from the portal.** Register a `set` command handler in `setup()`:
+## How it works
 
-```cpp
-s_link.onCommand("set", [](JsonObjectConst data) {
-    int id  = data["id"]  | -1;
-    int val = data["val"] | -1;
-    if (id == MENU_BRIGHTNESS && val >= 0 && val <= 255) {
-        FastLED.setBrightness((uint8_t)val);
-        FastLED.show();
-    }
-});
-```
+- `card().action(id, mode, cb)` declares an action. `mode` is the unit mode after it: `LIGHT_ANIMATION` for turning on, `IDLE` for turning off.
+- `.name("ru", …)` and `.name("en", …)` are the button name; in other languages the card shows the English one.
+- `.select(...)` and `.color(...)` are the turn-on parameters. The portal and the app label the `effect` and `rgb_color` purposes themselves; a value not in the list is replaced by the core with the default.
+- The callback gets the parameters in `args` by their ids, sets `status.mode` and calls `publishStatusNow()`.
+- The card chooses by the unit mode: off shows the **Turn on** form; on shows the lit-strip block and the **Turn off** button.
 
-`MENU_BRIGHTNESS` is a constant from [`iDryer-Storage/src/menu/menu_ids.h`](../../../../iDryer-Storage/src/menu/menu_ids.h), generated from `menu.yaml` via `regen.sh`. In your own product the name and value will differ — check `menu_ids.h` of your project.
+## Check
 
-## Verification
+On the card choose an effect and a color and tap **Turn on**: the strip lights up and the card shows **Turn off**.
 
-After flashing, the strip should light up in the colour corresponding to the current humidity. If no sensor is present, the strip stays off (executor receives no data).
+## Next
 
-Open the device settings on the portal and adjust the brightness slider — the strip responds immediately.
-
-## What's next
-
-- [05-rmt-command.md](05-rmt-command.md) — drive an actuator from a portal command (RMT output).
-- [led_strip_executor.h](../../../../iDryer-Storage/src/storage/led_strip/led_strip_executor.h) — executor API: zone pulse, animations, brightness.
+[Actions without a mode](05-actions.md).

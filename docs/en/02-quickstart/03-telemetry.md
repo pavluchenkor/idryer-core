@@ -1,99 +1,92 @@
-# Step 03 — Telemetry: publish sensor data
+# Telemetry: a sensor on the card
 
-After this step the ESP32 will read temperature and humidity from an SHT31 sensor and publish the values to the portal every 10 seconds. The portal will display them as a live graph.
+After this page the device reads temperature and humidity from an SHT31, and the card shows their cells and your own value, the dew point.
 
 ## What you need
 
-**Hardware:**
-
-- SHT31 on an I2C breakout module (address 0x44 or 0x45)
-- Wires: SDA, SCL, VCC (3.3 V), GND
-
-**Software:**
-
-- PlatformIO
-- Library `robtillaart/SHT31 @ ^0.5.0`
-
-## Steps
-
-**1. Connect SHT31 to ESP32-C3** (default pins used by Storage Link):
-
-| SHT31 | ESP32-C3 |
-|-------|----------|
-| VCC   | 3.3 V    |
-| GND   | GND      |
-| SDA   | GPIO 8   |
-| SCL   | GPIO 9   |
-
-!!! warning
-    Connect the sensor only with the board powered off.
-
-**2. Add the library** to `platformio.ini`:
+- an SHT31 module (I2C, address 0x44 or 0x45);
+- wires: SDA, SCL, 3.3 V, GND;
+- in `platformio.ini`:
 
 ```ini
 lib_deps =
     robtillaart/SHT31 @ ^0.5.0
-    ; ... other dependencies
 ```
 
-**3. Include Wire and the sensor** in `main.cpp`. Based on [`iDryer-Storage/src/main.cpp`](../../../../iDryer-Storage/src/main.cpp):
+!!! warning
+    Connect the sensor with the board powered off.
+
+## Code
 
 ```cpp
+#include <Arduino.h>
 #include <Wire.h>
-#include "storage/sensors/Sht31ClimateSensor.h"
+#include <SHT31.h>
+#include <iDryer.h>
 
-static Sht31ClimateSensor s_sensor(&Wire);
-static bool s_sensorOk = false;
-```
+static const iDryer::Config CFG = {
+    .deviceType      = iDryer::DeviceType::Unknown,
+    .unitsCount      = 1,
+    .hasAirTemp      = true,    // temperature cell
+    .hasAirHumidity  = true,    // humidity cell
+    .hardwareVersion = "1.0",
+    .firmwareVersion = "0.1.0",
+    .model           = "Climate Sensor",
+};
+static iDryer::Link s_link(CFG);
+static SHT31 s_sht(0x44, &Wire);   // address 0x44 or 0x45, set by the module jumper
 
-**4. Initialise** in `setup()`:
+// Dew point by the Magnus formula: an example of your own value.
+static float dewPointC(float t, float rh) {
+    const float g = logf(rh / 100.0f) + 17.62f * t / (243.12f + t);
+    return 243.12f * g / (17.62f - g);
+}
 
-```cpp
-Wire.begin(8, 9);  // SDA=8, SCL=9
-s_sensorOk = s_sensor.begin();  // auto-detects address 0x44 or 0x45
-```
-
-`begin()` returns `false` if no sensor is found. The device will continue running without it.
-
-**5. Call `tick()` in `loop()` and update the telemetry fields:**
-
-```cpp
-if (s_sensorOk) {
-    s_sensor.tick(millis());
-    SensorReading r = s_sensor.get();
-    if (r.ok) {
-        s_link.telemetry.airTempC[0]       = r.temperature;
-        s_link.telemetry.airHumidityPct[0] = r.humidity;
+static void readSensor() {
+    if (s_sht.read()) {
+        s_link.telemetry.airTempC[0]       = s_sht.getTemperature();
+        s_link.telemetry.airHumidityPct[0] = s_sht.getHumidity();
+    } else {
+        // No data is NAN: the field is not sent, the card shows "—".
+        s_link.telemetry.airTempC[0]       = NAN;
+        s_link.telemetry.airHumidityPct[0] = NAN;
     }
+}
+
+void setup() {
+    Wire.begin(8, 9);                  // SDA, SCL: pins of your board
+    s_sht.begin();
+
+    s_link.begin();
+    s_link.onCommand("revoke", [](JsonObjectConst) { s_link.handleRevoke(); });
+
+    s_link.onTelemetryPublish([](JsonObject root) {
+        const float t  = s_link.telemetry.airTempC[0];
+        const float rh = s_link.telemetry.airHumidityPct[0];
+        if (!isnan(t) && !isnan(rh)) root["units"][0]["dewPointC"] = dewPointC(t, rh);
+    });
+    s_link.card().sensor("dew_point", "Dew point", "°C", "units[0].dewPointC", "temperature");
+
+    s_link.every(2000, readSensor);    // read every 2 s
+}
+
+void loop() {
+    s_link.loop();
 }
 ```
 
-The library publishes all `telemetry.*` fields to MQTT automatically at the interval set by `telemetryPeriodMs` in `iDryer::Config`. The default is 10 000 ms.
+## How it works
 
-**6. Enable the capability in `iDryer::Config`:**
+- `hasAirTemp` and `hasAirHumidity` in `Config` give temperature and humidity cells on the card. No portal code is needed.
+- The core publishes the `s_link.telemetry.*` fields itself: every 30 s while at least one unit is working, otherwise every 60 s. The `Config.telemetryPeriodMs` and `telemetryPeriodIdleMs` fields change the periods; zero means the contract value.
+- `NAN` means no data: the field is not published. Do not put zero instead, or the chart shows a false drop.
+- Your own value: `onTelemetryPublish` adds a field to telemetry before publishing, `card().sensor(id, label, unit, path, deviceClass)` declares it on the card. `path` is the path in telemetry; `deviceClass` is optional and sets the icon and format.
+- `s_link.every(ms, fn)` calls a function from `loop()` with the given period without blocking the connection.
 
-```cpp
-static const iDryer::Config CFG = {
-    // ...
-    .hasAirTemp     = true,
-    .hasAirHumidity = true,
-    .telemetryPeriodMs = 10000,
-};
-```
+## Check
 
-## Verification
+Within a minute after flashing, the card shows temperature, humidity and dew point. Without the sensor the cells are empty and the device keeps working.
 
-Open the Serial Monitor. On successful sensor detection:
+## Next
 
-```
-[MAIN] SHT31 at 0x44
-```
-
-On the portal, navigate to the device page — temperature and humidity readings update every 10 seconds.
-
-If the sensor is not found a warning is logged and the device continues running. Check that address 0x44/0x45 is not occupied by another device on the bus.
-
-## What's next
-
-- [04-leds.md](04-leds.md) — visualise humidity with an LED strip colour.
-- [Sht31ClimateSensor.h](../../../../iDryer-Storage/src/storage/sensors/Sht31ClimateSensor.h) — sensor implementation.
+[LED strip](04-leds.md).

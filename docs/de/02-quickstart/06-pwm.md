@@ -1,76 +1,129 @@
-# Schritt 06 — Ersetzen Sie RMT durch PWM
+# Heizen per PWM: Modus, Sitzung, Leistung
 
-Nach diesem Schritt wird derselbe Portal-Befehlsfluss einen PWM-Ausgang statt RMT steuern. Ein typischer Anwendungsfall ist ein Heizer, der über einen MOSFET oder einen DC-Dimmer gesteuert wird.
+Nach dieser Seite startet die Karte das Heizen mit Temperatur und Zeit, zeigt Sitzung und Leistung, und das Gerät hält die Temperatur mit einem PWM-Ausgang nach dem Sensor.
 
-## Wie es funktioniert
+## Was Sie brauchen
 
-Der Executor ist eine einfache Callback-Funktion. `RmtOutputAdapter` aus dem vorherigen Schritt ist eine Implementierung. Ersetzen Sie ihn durch `ledcWrite` Code — alles andere (MQTT, Befehle, Status) bleibt unverändert.
+- den SHT31-Sensor aus dem [Schritt „Telemetrie“](03-telemetry.md);
+- einen Logic-Level-MOSFET (öffnet bei 3,3 V) an Pin 3 und einen Heizer für dessen Versorgungsspannung;
+- in `platformio.ini`: `robtillaart/SHT31 @ ^0.5.0`.
 
-## Schritte
+!!! warning
+    Einen Heizer ohne Thermosicherung nicht unbeaufsichtigt lassen: die Firmware kann hängen, der MOSFET kann durchlegieren.
 
-**1. Entfernen** Sie die `RmtOutputAdapter` Include und Instanz aus `main.cpp`:
-
-```cpp
-// Entfernen:
-#include "controller/RmtOutputAdapter.h"
-static iheaterlink::RmtOutputAdapter s_output{iheaterlink::RmtOutputConfig{}};
-```
-
-**2. Fügen Sie PWM-Initialisierung** in `setup()` hinzu:
+## Code
 
 ```cpp
-#define PWM_PIN     0      // GPIO für MOSFET Gate
-#define PWM_CHANNEL 0      // LEDC Kanal (0–15)
-#define PWM_FREQ_HZ 25000  // 25 kHz — unhörbar für die meisten Heizer
-#define PWM_RES     8      // 8-Bit → Duty 0–255
+#include <Arduino.h>
+#include <Wire.h>
+#include <SHT31.h>
+#include <iDryer.h>
 
-ledcSetup(PWM_CHANNEL, PWM_FREQ_HZ, PWM_RES);
-ledcAttachPin(PWM_PIN, PWM_CHANNEL);
-ledcWrite(PWM_CHANNEL, 0);  // aus beim Start
-```
+#define HEATER_PIN  3        // MOSFET-Gate
+#define PWM_CHANNEL 0
+#define PWM_FREQ_HZ 1000
+#define PWM_BITS    8        // Tastgrad 0..255
 
-**3. Im Befehls-Handler** ersetzen Sie `s_output.apply(cmd)` durch `ledcWrite`:
+static const iDryer::Config CFG = {
+    .deviceType      = iDryer::DeviceType::Unknown,
+    .unitsCount      = 1,
+    .hasHeater       = true,    // Zelle der Heizleistung
+    .hasAirTemp      = true,
+    .hasAirHumidity  = true,
+    .hardwareVersion = "1.0",
+    .firmwareVersion = "0.1.0",
+    .model           = "PWM Heater",
+};
+static iDryer::Link s_link(CFG);
+static SHT31 s_sht(0x44, &Wire);
 
-```cpp
-device().onCommand("invoke", [](JsonObjectConst data) {
-    const char* action   = data["action"] | "";
-    JsonObjectConst args = data["args"];
+static void readSensor() {
+    const bool ok = s_sht.read();
+    s_link.telemetry.airTempC[0]       = ok ? s_sht.getTemperature() : NAN;
+    s_link.telemetry.airHumidityPct[0] = ok ? s_sht.getHumidity()    : NAN;
+}
 
-    if (strcmp(action, "heat.start") == 0) {
-        float power01 = args["power"] | 1.0f;  // 0.0–1.0
-        uint8_t duty  = (uint8_t)(power01 * 255.0f);
-        ledcWrite(PWM_CHANNEL, duty);
+static uint32_t s_startMs = 0;
 
-        device().status.mode[0]             = iDryer::UnitMode::Drying;
-        device().telemetry.heaterPower01[0] = power01;
-        device().publishStatusNow();
+static void stopHeat(uint8_t unit) {
+    ledcWrite(PWM_CHANNEL, 0);
+    s_link.telemetry.heaterPower01[unit] = 0.0f;
+    s_link.status.mode[unit]        = iDryer::UnitMode::Idle;
+    s_link.status.targetTempC[unit] = 0.0f;
+    s_link.status.durationS[unit]   = 0;
+    s_link.status.elapsedS[unit]    = 0;
+    s_link.publishStatusNow();
+}
 
-    } else if (strcmp(action, "heat.stop") == 0) {
-        ledcWrite(PWM_CHANNEL, 0);
+static void onHeat(uint8_t unit, JsonObjectConst args) {
+    s_link.status.mode[unit]        = iDryer::UnitMode::Heating;
+    s_link.status.targetTempC[unit] = args["temperature"].as<float>();
+    s_link.status.durationS[unit]   = args["duration"].as<uint32_t>() * 60;   // 0 = ohne Begrenzung
+    s_link.status.elapsedS[unit]    = 0;
+    s_startMs = millis();
+    s_link.publishStatusNow();
+}
 
-        device().status.mode[0]             = iDryer::UnitMode::Idle;
-        device().telemetry.heaterPower01[0] = 0.0f;
-        device().publishStatusNow();
-    }
-});
-```
+static void onStop(uint8_t unit, JsonObjectConst) { stopHeat(unit); }
 
-**4. `loop()` ändert sich nicht:**
+// Einmal pro Sekunde: Leistung aus dem Abstand zum Sollwert, Sitzungszeit.
+static void regulate() {
+    if (s_link.status.mode[0] != iDryer::UnitMode::Heating) return;
 
-```cpp
+    const float t = s_link.telemetry.airTempC[0];
+    // Kein Messwert = Heizung aus: niemals blind heizen.
+    float power = 0.0f;
+    if (!isnan(t)) power = constrain((s_link.status.targetTempC[0] - t) * 0.1f, 0.0f, 1.0f);
+    ledcWrite(PWM_CHANNEL, (uint32_t)(power * 255));
+    s_link.telemetry.heaterPower01[0] = power;
+
+    const uint32_t elapsed = (millis() - s_startMs) / 1000;
+    s_link.status.elapsedS[0] = elapsed;
+    if (s_link.status.durationS[0] && elapsed >= s_link.status.durationS[0]) stopHeat(0);
+}
+
+void setup() {
+    ledcSetup(PWM_CHANNEL, PWM_FREQ_HZ, PWM_BITS);
+    ledcAttachPin(HEATER_PIN, PWM_CHANNEL);
+    ledcWrite(PWM_CHANNEL, 0);
+
+    Wire.begin(8, 9);
+    s_sht.begin();
+
+    s_link.begin();
+    s_link.onCommand("revoke", [](JsonObjectConst) { s_link.handleRevoke(); });
+
+    auto& card = s_link.card();
+    card.action("heat", "HEATING", onHeat)
+        .name("ru", "Нагрев").name("en", "Heat")
+        .param("temperature", "target_temperature", 30, 70, 1, 45, "°C")
+        .param("duration", "duration", 0, 720, 10, 120, "min");
+    card.action("stop", "IDLE", onStop)
+        .name("ru", "Стоп").name("en", "Stop");
+
+    s_link.every(2000, readSensor);
+    s_link.every(1000, regulate);
+}
+
 void loop() {
-    device().loop();
+    s_link.loop();
 }
 ```
 
-!!! warning
-    `ledcSetup` / `ledcAttachPin` ist die Arduino ESP32 API für Versionen vor 3.x. In Version 3.x und höher verwenden Sie `ledcAttach(pin, freq, resolution)` und `ledcWrite(pin, duty)`. Überprüfen Sie Ihre Version in `platformio.ini` (`platform = espressif32@X.Y.Z`).
+## So funktioniert es
 
-## Überprüfung
+- Eine Aktion mit dem Modus `HEATING` startet eine Sitzung: der Callback setzt Modus, Sollwert und Dauer und ruft `publishStatusNow()`. Nach dem Modus zeigt die Karte den Sitzungsblock und **Stop**.
+- Die Purposes `target_temperature` und `duration` beschriften Portal und App selbst. Zahlen in `args` sind bereits auf die Grenzen des Parameters begrenzt.
+- `durationS = 0` bedeutet ohne Zeitgrenze; `elapsedS` zeigt die Karte als vergangene Zeit.
+- `hasHeater` liefert die Leistungszelle. Im Betrieb sendet der Kern den Mittelwert von `heaterPower01` über die letzten zwei Veröffentlichungsperioden, daher springen häufige PWM-Änderungen auf der Karte nicht.
+- Der Regler hier ist proportional: 10 °C unter dem Sollwert bedeutet volle Leistung. Für genaues Halten durch einen PID ersetzen.
+- `ledcSetup` / `ledcAttachPin` sind die API von arduino-esp32 2.x. In 3.x `ledcAttach(pin, freq, bits)` und `ledcWrite(pin, duty)` verwenden.
 
-Drücken Sie die **Heat** Taste im Portal. Der Ausgabepin trägt ein PWM-Signal mit einem Duty-Zyklus proportional zum `power` Argument. Überprüfen Sie mit einem Multimeter (Durchschnittsspannung) oder einem Oszilloskop.
+## Prüfen
 
-## Nächste Schritte
+Starten Sie **Heat** auf der Karte: der Sitzungsblock erscheint mit Sollwert und Zeit, die Leistungszelle zeigt, wie viel der Heizer eingeschaltet ist. **Stop** schaltet den Ausgang ab.
 
-- [../03-public-api/01-link-api-reference.md](../03-public-api/01-link-api-reference.md) — vollständige `iDryer::Link` API-Referenz.
-- [../04-patterns/02-add-peripheral.md](../04-patterns/02-add-peripheral.md) — Vorlage für jeden neuen Aktuator.
+## Weiter
+
+- [Gerätekarte: das Card-Manifest](../09-add-product/02-add-widget.md): Parameter aus dem Gerätemenü, Profile, Kartenlayout.
+- [Ein neues Produkt hinzufügen](../09-add-product/01-add-new-product.md).

@@ -1,99 +1,92 @@
-# Schritt 03 — Telemetrie: Sensordaten veröffentlichen
+# Telemetrie: ein Sensor auf der Karte
 
-Nach diesem Schritt liest der ESP32 Temperatur und Luftfeuchtigkeit von einem SHT31-Sensor und veröffentlicht die Werte alle 10 Sekunden im Portal. Das Portal zeigt sie als Live-Grafik an.
+Nach dieser Seite liest das Gerät Temperatur und Feuchte aus einem SHT31, und die Karte zeigt deren Zellen sowie einen eigenen Wert, den Taupunkt.
 
-## Was Sie benötigen
+## Was Sie brauchen
 
-**Hardware:**
-
-- SHT31 auf einem I2C-Breakout-Modul (Adresse 0x44 oder 0x45)
-- Drähte: SDA, SCL, VCC (3,3 V), GND
-
-**Software:**
-
-- PlatformIO
-- Bibliothek `robtillaart/SHT31 @ ^0.5.0`
-
-## Schritte
-
-**1. Verbinden Sie SHT31 mit ESP32-C3** (Standard-Pins, die von Storage Link verwendet werden):
-
-| SHT31 | ESP32-C3 |
-|-------|----------|
-| VCC   | 3.3 V    |
-| GND   | GND      |
-| SDA   | GPIO 8   |
-| SCL   | GPIO 9   |
-
-!!! warning
-    Verbinden Sie den Sensor nur bei ausgeschaltetem Board.
-
-**2. Fügen Sie die Bibliothek** zu `platformio.ini` hinzu:
+- ein SHT31-Modul (I2C, Adresse 0x44 oder 0x45);
+- Leitungen: SDA, SCL, 3,3 V, GND;
+- in `platformio.ini`:
 
 ```ini
 lib_deps =
     robtillaart/SHT31 @ ^0.5.0
-    ; ... andere Abhängigkeiten
 ```
 
-**3. Schließen Sie Wire und den Sensor** in `main.cpp` ein. Basierend auf [`iDryer-Storage/src/main.cpp`](../../../../iDryer-Storage/src/main.cpp):
+!!! warning
+    Den Sensor nur bei ausgeschaltetem Board anschließen.
+
+## Code
 
 ```cpp
+#include <Arduino.h>
 #include <Wire.h>
-#include "storage/sensors/Sht31ClimateSensor.h"
+#include <SHT31.h>
+#include <iDryer.h>
 
-static Sht31ClimateSensor s_sensor(&Wire);
-static bool s_sensorOk = false;
-```
+static const iDryer::Config CFG = {
+    .deviceType      = iDryer::DeviceType::Unknown,
+    .unitsCount      = 1,
+    .hasAirTemp      = true,    // Temperaturzelle
+    .hasAirHumidity  = true,    // Feuchtezelle
+    .hardwareVersion = "1.0",
+    .firmwareVersion = "0.1.0",
+    .model           = "Climate Sensor",
+};
+static iDryer::Link s_link(CFG);
+static SHT31 s_sht(0x44, &Wire);   // Adresse 0x44 oder 0x45, je nach Brücke am Modul
 
-**4. Initialisieren** in `setup()`:
+// Taupunkt nach der Magnus-Formel: Beispiel für einen eigenen Wert.
+static float dewPointC(float t, float rh) {
+    const float g = logf(rh / 100.0f) + 17.62f * t / (243.12f + t);
+    return 243.12f * g / (17.62f - g);
+}
 
-```cpp
-Wire.begin(8, 9);  // SDA=8, SCL=9
-s_sensorOk = s_sensor.begin();  // auto-detects address 0x44 or 0x45
-```
-
-`begin()` gibt `false` zurück, wenn kein Sensor gefunden wird. Das Gerät läuft ohne ihn weiter.
-
-**5. Rufen Sie `tick()` in `loop()` auf und aktualisieren Sie die Telemetrie-Felder:**
-
-```cpp
-if (s_sensorOk) {
-    s_sensor.tick(millis());
-    SensorReading r = s_sensor.get();
-    if (r.ok) {
-        s_link.telemetry.airTempC[0]       = r.temperature;
-        s_link.telemetry.airHumidityPct[0] = r.humidity;
+static void readSensor() {
+    if (s_sht.read()) {
+        s_link.telemetry.airTempC[0]       = s_sht.getTemperature();
+        s_link.telemetry.airHumidityPct[0] = s_sht.getHumidity();
+    } else {
+        // Keine Daten = NAN: das Feld wird nicht gesendet, die Karte zeigt „—“.
+        s_link.telemetry.airTempC[0]       = NAN;
+        s_link.telemetry.airHumidityPct[0] = NAN;
     }
+}
+
+void setup() {
+    Wire.begin(8, 9);                  // SDA, SCL: Pins Ihres Boards
+    s_sht.begin();
+
+    s_link.begin();
+    s_link.onCommand("revoke", [](JsonObjectConst) { s_link.handleRevoke(); });
+
+    s_link.onTelemetryPublish([](JsonObject root) {
+        const float t  = s_link.telemetry.airTempC[0];
+        const float rh = s_link.telemetry.airHumidityPct[0];
+        if (!isnan(t) && !isnan(rh)) root["units"][0]["dewPointC"] = dewPointC(t, rh);
+    });
+    s_link.card().sensor("dew_point", "Dew point", "°C", "units[0].dewPointC", "temperature");
+
+    s_link.every(2000, readSensor);    // Abfrage alle 2 s
+}
+
+void loop() {
+    s_link.loop();
 }
 ```
 
-Die Bibliothek veröffentlicht automatisch alle `telemetry.*` Felder im Intervall, das durch `telemetryPeriodMs` in `iDryer::Config` gesetzt ist. Der Standard ist 10 000 ms.
+## So funktioniert es
 
-**6. Aktivieren Sie die Fähigkeit in `iDryer::Config`:**
+- `hasAirTemp` und `hasAirHumidity` in `Config` liefern Zellen für Temperatur und Feuchte auf der Karte. Code im Portal ist nicht nötig.
+- Die Felder `s_link.telemetry.*` veröffentlicht der Kern selbst: alle 30 s, solange mindestens eine Einheit arbeitet, sonst alle 60 s. Die Perioden ändern die Felder `Config.telemetryPeriodMs` und `telemetryPeriodIdleMs`; null bedeutet den Wert aus dem Vertrag.
+- `NAN` bedeutet keine Daten: das Feld wird nicht veröffentlicht. Keine Null einsetzen, sonst zeigt das Diagramm einen falschen Einbruch.
+- Eigener Wert: `onTelemetryPublish` fügt vor der Veröffentlichung ein Feld in die Telemetrie ein, `card().sensor(id, label, unit, path, deviceClass)` deklariert es auf der Karte. `path` ist der Pfad in der Telemetrie; `deviceClass` ist optional und legt Symbol und Format fest.
+- `s_link.every(ms, fn)` ruft eine Funktion aus `loop()` mit der angegebenen Periode auf, ohne die Verbindung zu blockieren.
 
-```cpp
-static const iDryer::Config CFG = {
-    // ...
-    .hasAirTemp     = true,
-    .hasAirHumidity = true,
-    .telemetryPeriodMs = 10000,
-};
-```
+## Prüfen
 
-## Überprüfung
+Innerhalb einer Minute nach dem Flashen zeigt die Karte Temperatur, Feuchte und Taupunkt. Ohne Sensor bleiben die Zellen leer, das Gerät arbeitet weiter.
 
-Öffnen Sie Serial Monitor. Bei erfolgreichem Sensor-Erkennungsmeldung:
+## Weiter
 
-```
-[MAIN] SHT31 at 0x44
-```
-
-Navigieren Sie im Portal zur Geräteseite — Temperatur- und Feuchtigkeitswerte werden alle 10 Sekunden aktualisiert.
-
-Wenn der Sensor nicht gefunden wird, wird eine Warnung protokolliert und das Gerät läuft weiter. Überprüfen Sie, dass die Adresse 0x44/0x45 nicht von einem anderen Gerät auf dem Bus verwendet wird.
-
-## Nächste Schritte
-
-- [04-leds.md](04-leds.md) — visualisieren Sie Luftfeuchtigkeit mit LED-Streifen-Farbe.
-- [Sht31ClimateSensor.h](../../../../iDryer-Storage/src/storage/sensors/Sht31ClimateSensor.h) — Sensor-Implementierung.
+[LED-Streifen](04-leds.md).

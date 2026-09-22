@@ -1,64 +1,68 @@
-Po tomto kroku se vaše zařízení zobrazí ve vašem účtu [portal.idryer.org](https://portal.idryer.org/) se stavem Online. Všechny následné restarty jsou automatické — opakované připojení není potřeba.
+# Spárování s účtem
 
+Spárování je jednorázový postup: zařízení dostane jednorázový párovací token, vymění ho na portálu za trvalé tajemství a uloží tajemství do NVS. Pak se po každém restartu připojuje k portálu samo. Dokud tajemství nemá, je zařízení v režimu nastavení a čeká na token.
 
-Claim je jednorázový postup, ve kterém se ESP32 zaregistruje v cloudu idryer.org a připojí se k vašemu účtu. Zařízení vygeneruje sedmimístný PIN platný 10 minut. PIN zadáte na portálu — připojení je hotovo.
+## V aplikaci iDryer
 
-Po claimu se `deviceId` uloží do NVS — jedinečný identifikátor zařízení v cloudu. Při následujících restartech se ESP32 připojí přímo k MQTT, bez opakování toku claimu.
+1. Zařízení je v síti (viz [Wi-Fi](01-wifi.md)), telefon ve stejné síti.
+2. **Připojit nové zařízení** → krok **Spárování** (pokud už je zařízení v síti, klepněte na čip kroku nahoře v okně) → **Spárovat**.
+3. Aplikace najde zařízení v místní síti, získá od portálu token, předá ho zařízení a počká, až portál potvrdí, že je zařízení online.
+4. Po zprávě **Zařízení spárováno** je zařízení v seznamu na portálu i v aplikaci.
 
+Log před spárováním:
 
-- ESP32 naflashovaný z [Kroku 01](01-wifi.md) a připojený k WiFi
-- Účet na [portal.idryer.org](https://portal.idryer.org/)
-- USB kabel a otevřený Serial Monitor
+```text
+[BOOT] WiFi ok, logs enabled
+[INFO ] CLOUD: WiFi connected, IP: 192.168.1.42, RSSI: -55 dBm, …
+…
+[INFO ] CLOUD: binding-v3: no secret — awaiting pairing token (SETUP)
+```
 
+Po něm:
 
-**1. Ověřte, že sketch obsahuje auto-claim.** Následující řádek musí být v `setup()` (je již přítomen v příkladu `03_with_improv`):
+```text
+[INFO ] CLOUD: binding-v3: pairing token received (… chars)
+[INFO ] CLOUD: binding-v3: activating with pairing token (serial=DEVICE_… mcu=-)
+[INFO ] CLOUD: binding-v3: activated, deviceId=… -> Ready
+…
+[INFO ] MQTT: Connected! …
+```
+
+Webový instalátor firmwaru předává token přes USB příkazem `PAIR_TOKEN` (viz níže).
+
+## Odpojení
+
+Odpojení v aplikaci nebo na portálu dorazí do zařízení jako příkaz `revoke`. Každý firmware potřebuje obsluhu:
 
 ```cpp
-s_cloud.setUnclaimedCallback([](void*) { s_cloud.requestClaim(); }, nullptr);
+// Odpojení v aplikaci nebo na portálu: smazat tajemství a čekat na nové spárování.
+s_link.onCommand("revoke", [](JsonObjectConst) { s_link.handleRevoke(); });
 ```
 
-Tento callback se spustí automaticky, když zařízení dosáhne internetu a detekuje, že ještě není připojeno.
+`handleRevoke()` smaže tajemství a síť ponechá: zařízení znovu čeká na spárování. Bez obsluhy tajemství v zařízení zůstane a znovu spárovat ho půjde až po `WIPE_IDENTITY`.
 
-**2. Otevřete Serial Monitor** a restartujte desku:
+## Příkazy přes USB
 
-```bash
-pio device monitor -b 115200
+Po připojení k síti přijímá jádro řádky na sériovém portu (115200, každý řádek končí znakem nového řádku):
+
+| Příkaz | Odpověď | Co dělá |
+|---|---|---|
+| `STATUS` | `STATUS:state=… wifi=… ip=… cloud=… serial=… mcu=… fw=… part=…` | stav: `state` je `bound` (spárováno) nebo `setup` (čeká na token), `cloud` je `online`/`offline` |
+| `WIPE_IDENTITY` | `WIPE_IDENTITY:OK` | smaže tajemství jako `revoke`; síť zůstane |
+| `PAIR_TOKEN:<token>` | `PAIR_TOKEN:OK`, `PAIR_TOKEN:ERROR`, `PAIR_TOKEN:ERROR:ALREADY_BOUND` | předá párovací token; spárované zařízení token nepřijme |
+
+```text
+STATUS
+STATUS:state=setup wifi=1 ip=192.168.1.42 cloud=offline serial=DEVICE_… mcu=- fw=0.1.0 part=…
 ```
 
-**3. Čekejte na PIN v logu.** Po WiFi → provisioning → awaiting claim:
+Než se zařízení připojí k síti, port drží Improv a příkazy neodpovídají. V sestavení s `IDRYER_DEV_REPL` patří port produktu a tyto příkazy neexistují: viz [Podrobné nastavení](99-detailed-setup.md).
 
-```
-[CLOUD] WiFi connected, IP: 192.168.1.42, RSSI: -47 dBm
-[CLOUD] Provisioning device...
-[CLOUD] Provision OK: isNew=1 isClaimed=0
-[CLOUD] Registering device for claim...
-[CLOUD] PIN: 3847291 (expires in 600s)
-```
+## Když to nevyšlo
 
-Zařízení čeká. PIN je platný 10 minut.
+- aplikace zařízení nenajde: telefon a zařízení ve stejné síti; sítě pro hosty často blokují vyhledávání zařízení;
+- `PAIR_TOKEN:ERROR:ALREADY_BOUND`, nebo zařízení patří jinému účtu: odpojte ho na portálu nebo pošlete `WIPE_IDENTITY` a spárujte znovu.
 
-**4. Přejděte na [portal.idryer.org](https://portal.idryer.org/)** a otevřete **Přidat zařízení**.
+## Dál
 
-**5. Zadejte PIN** ze Serial Monitoru (8 číslic, bez mezer).
-
-**6. Potvrďte připojení** na portálu. Serial Monitor pak zobrazí:
-
-```
-[CLOUD] Device claimed! deviceId=...
-[CLOUD] Connecting to MQTT...
-[CLOUD] MQTT connected!
-[RT] Cloud Online
-```
-
-
-Otevřete seznam zařízení na portálu — zařízení se by mělo zobrazit se stavem **Online**. Vestavěná LED začne blikat jednou za 500 ms (pokud používáte příklad `01_blink_status`).
-
-!!! note
-    Pokud PIN vypršel (uplynulo více než 10 minut) — restartujte desku. Auto-claim vygeneruje nový PIN.
-
-!!! warning
-    Pokud je zařízení již připojeno k jinému účtu, zadejte příkaz `wipe` do Serial Monitoru s povoleným `IDRYER_DEV_REPL=1`. NVS bude vymazáno, deska se restartuje a claim začne od začátku.
-
-
-- [03-telemetry.md](03-telemetry.md) — připojte senzor a publikujte údaje na portál.
-- [02-onboarding.md](02-onboarding.md) — podrobná dokumentace onboardingu pro REPL a Improv cesty.
+[Telemetrie](03-telemetry.md).

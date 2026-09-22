@@ -1,85 +1,51 @@
-# 步驟 01 — 使用 Improv 進行 WiFi 佈建
+# Wi-Fi
 
-完成此步驟後，您的 ESP32 將連接到 WiFi，認證將保存到 NVS 以便在下一次重啟時自動重新連接。門戶和 MQTT 將在下一步中進行。
+固件中没有网络密码。没有保存网络的设备会等待设置；收到后把网络保存到 NVS，之后自行连接。仅支持 2.4 GHz 网络。
 
-## 您需要什麼
+## iDryer 应用（ESPTouch）
 
-**硬件：**
+主要方式：应用通过无线方式发送网络，无需连线。
 
-- ESP32-C3 主機板（DevKit、Super Mini 或相容）
-- USB 線纜（USB-C 或 Micro-USB，取決於您的主機板）
+1. 手机连在设备将要使用的网络上。
+2. **连接新设备** → **Wi-Fi** 步骤：核对网络名称，输入密码，点击 **连接设备**。
+3. 应用最多发送 90 秒，并显示 **设备已连接**。
 
-**軟件：**
+密码错误时设备会重新等待设置：重复这一步即可。
 
-- VS Code 中的 PlatformIO
-- Chrome 或 Edge 瀏覽器（Safari 或 Firefox 不支持 Web Serial API）
+## 通过 USB 使用 Improv
 
-## 步驟
+设备没有网络时，核心在串口上监听 Improv 协议。
 
-**1. 建立 `platformio.ini`**，位於您項目的根目錄：
+1. 用 USB 连接板子。
+2. 在 Chrome 或 Edge 中打开 [improv-wifi.com/serial](https://www.improv-wifi.com/serial/)（Safari 和 Firefox 不支持 Web Serial），点击 **Connect** 并选择板子的端口。
+3. 输入网络名称和密码。
 
-```ini
-[env:improv-demo]
-platform   = espressif32
-framework  = arduino
-board      = esp32-c3-devkitm-1
+此时端口被 Improv 占用，所以日志要等设备连上网络后才出现。Improv 工作时请关闭串口监视器。
 
-lib_deps =
-    https://github.com/jnthas/Improv-WiFi-Library.git
-    bblanchon/ArduinoJson @ ^6.21.3
-    knolleary/PubSubClient @ ^2.8
-    densaugeo/base64 @ ^1.4.0
-
-build_flags =
-    -DIDRYER_API_BASE='"https://portal.idryer.org/api"'
-    -DMQTT_BROKER='"mqtt.idryer.org"'
-    -DMQTT_PORT=8883
-    -DMQTT_USE_TLS=1
-```
-
-將 `board` 替換為您主機板的值（`esp32-c3-devkitm-1`、`seeed_xiao_esp32c3` 等）。
-
-**2. 複製示例。** 取得 [`examples/03_with_improv/03_with_improv.ino`](../../../examples/03_with_improv/03_with_improv.ino) 的內容並將其保存為您項目中的 `src/main.cpp`。
-
-**3. 設置 ChipFamily。** 在複製的文件中，找到這一行：
+## 在代码中：用于开发台
 
 ```cpp
-s_improv.setDeviceInfo(ImprovTypes::ChipFamily::CF_ESP32_C3, ...);
+void setup() {
+    // 仅用于开发台：NVS 中还没有网络时才保存。
+    s_link.seedWifiCredentialsIfEmpty("my-ssid", "my-password");
+    s_link.begin();
+}
 ```
 
-確保 ChipFamily 與您的芯片匹配：`CF_ESP32_C3`、`CF_ESP32_S3` 或 `CF_ESP32`。
+`seedWifiCredentialsIfEmpty()` 只在 NVS 中还没有网络时写入；`setWifiCredentials()` 总是覆盖。请在 `begin()` 之前调用。
 
-**4. 刷新：**
+!!! warning
+    不要发布代码中带密码的固件：任何下载它的人都会拿到密码。
 
-```bash
-pio run -e improv-demo -t upload
+## 检查
+
+日志中：
+
+```text
+[BOOT] WiFi ok, logs enabled
+[INFO ] CLOUD: WiFi connected, IP: 192.168.1.42, RSSI: -55 dBm, …
 ```
-
-**5. 在 Chrome 或 Edge 中打開 [improv-wifi.com/serial](https://www.improv-wifi.com/serial/)**。點擊**連接**並從瀏覽器對話框中選擇設備 USB 端口。
-
-**6. 為您的 2.4 GHz 網絡輸入 SSID 和密碼**。網頁將通過 Serial-Improv 向主機板發送認證。主機板將將其保存到 NVS。
-
-## 驗證
-
-打開串行監視器：
-
-```bash
-pio device monitor -b 115200
-```
-
-成功連接後您將看到：
-
-```
-[BOOT] WiFi connected, Improv done
-[BOOT] IP: 192.168.1.42  RSSI: -47 dBm
-```
-
-如果此行未出現，請查看下面的故障排除鏈接。
-
-!!! note
-    如果認證已從之前的運行保存在 NVS 中，主機板將在啟動時自動連接到 WiFi — 不需要 Improv。
 
 ## 下一步
 
-- [02-claim.md](02-claim.md) — 將設備綁定到您的 idryer.org 帳戶。
-- [../../10-troubleshooting/01-troubleshooting.md](../10-troubleshooting/01-troubleshooting.md) — 如果 WiFi 無法連接。
+[绑定到账户](02-claim.md)。

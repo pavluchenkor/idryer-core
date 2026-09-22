@@ -1,71 +1,68 @@
-# ステップ 02 — クレーム: ポータルへのバインディング
+# アカウントへの紐付け
 
-このステップの後、デバイスはあなたの [portal.idryer.org](https://portal.idryer.org/) アカウントにステータス「オンライン」で表示されます。その後のすべての再起動は自動です — 再度のクレームは不要です。
+紐付けは一度だけの手順です。デバイスは使い捨ての紐付けトークンを受け取り、ポータルで恒久的なシークレットと交換し、シークレットを NVS に保存します。以後は再起動のたびに自分でポータルに接続します。シークレットがない間、デバイスは設定モードでトークンを待ちます。
 
-## クレームとは
+## iDryer アプリで
 
-クレームは、ESP32 が idryer.org クラウドに登録され、あなたのアカウントにバインドされる 1 回限りの手順です。デバイスは 10 分間有効な 8 桁の PIN を生成します。PIN をポータルに入力します — バインディングは完了です。
+1. デバイスはネットワーク上にあり（[Wi-Fi](01-wifi.md) を参照）、電話も同じネットワークにある。
+2. **新しいデバイスを接続** → **ペアリング** ステップ（デバイスがすでにネットワーク上なら、ウィンドウ上部のステップのチップをタップ）→ **ペアリング**。
+3. アプリはローカルネットワークでデバイスを見つけ、ポータルからトークンを取得してデバイスに渡し、デバイスがオンラインになったことをポータルが確認するまで待つ。
+4. **ペアリングが完了しました** の後、デバイスはポータルとアプリの一覧にある。
 
-クレーム後、`deviceId` が NVS に保存されます — これはクラウド内のデバイスの一意の識別子です。その後の再起動では、ESP32 はクレーム フローを繰り返さずに MQTT に直接接続します。
+紐付け前のログ：
 
-## 必要なもの
+```text
+[BOOT] WiFi ok, logs enabled
+[INFO ] CLOUD: WiFi connected, IP: 192.168.1.42, RSSI: -55 dBm, …
+…
+[INFO ] CLOUD: binding-v3: no secret — awaiting pairing token (SETUP)
+```
 
-- [ステップ 01](01-wifi.md) からフラッシュされた ESP32 で WiFi に接続された状態
-- [portal.idryer.org](https://portal.idryer.org/) のアカウント
-- USB ケーブルと開いた Serial Monitor
+紐付け後：
 
-## 手順
+```text
+[INFO ] CLOUD: binding-v3: pairing token received (… chars)
+[INFO ] CLOUD: binding-v3: activating with pairing token (serial=DEVICE_… mcu=-)
+[INFO ] CLOUD: binding-v3: activated, deviceId=… -> Ready
+…
+[INFO ] MQTT: Connected! …
+```
 
-**1. スケッチに自動クレームが含まれていることを確認します。** 次の行は `setup()` に含まれている必要があります (`03_with_improv` の例には既に存在しています):
+ファームウェアの Web インストーラーは、USB 経由で `PAIR_TOKEN` コマンドによりトークンを渡します（下記参照）。
+
+## 紐付け解除
+
+アプリまたはポータルでの紐付け解除は、`revoke` コマンドとしてデバイスに届きます。どのファームウェアにもハンドラーが必要です：
 
 ```cpp
-s_cloud.setUnclaimedCallback([](void*) { s_cloud.requestClaim(); }, nullptr);
+// アプリまたはポータルでの紐付け解除：シークレットを消去し、新しい紐付けを待つ。
+s_link.onCommand("revoke", [](JsonObjectConst) { s_link.handleRevoke(); });
 ```
 
-このコールバックは、デバイスがインターネットに到達し、まだクレームされていないことが検出されたときに自動的に発火します。
+`handleRevoke()` はシークレットを消去し、ネットワークは残します。デバイスは再び紐付けを待ちます。ハンドラーがないとシークレットはデバイスに残り、`WIPE_IDENTITY` の後でないと再び紐付けできません。
 
-**2. Serial Monitor を開き、** ボードを再起動します:
+## USB コマンド
 
-```bash
-pio device monitor -b 115200
+ネットワーク接続後、コアはシリアルポートで行を受け付けます（115200、各行は改行で終わる）：
+
+| コマンド | 応答 | 動作 |
+|---|---|---|
+| `STATUS` | `STATUS:state=… wifi=… ip=… cloud=… serial=… mcu=… fw=… part=…` | 状態：`state` は `bound`（紐付け済み）または `setup`（トークン待ち）、`cloud` は `online`/`offline` |
+| `WIPE_IDENTITY` | `WIPE_IDENTITY:OK` | `revoke` と同じくシークレットを消去。ネットワークは残る |
+| `PAIR_TOKEN:<トークン>` | `PAIR_TOKEN:OK`、`PAIR_TOKEN:ERROR`、`PAIR_TOKEN:ERROR:ALREADY_BOUND` | 紐付けトークンを渡す。紐付け済みのデバイスは受け付けない |
+
+```text
+STATUS
+STATUS:state=setup wifi=1 ip=192.168.1.42 cloud=offline serial=DEVICE_… mcu=- fw=0.1.0 part=…
 ```
 
-**3. ログで PIN を待ちます。** WiFi → プロビジョニング → クレーム待機の後:
+ネットワーク接続前はポートを Improv が使うため、コマンドは応答しません。`IDRYER_DEV_REPL` 付きのビルドではポートは製品のもので、これらのコマンドはありません。[詳細設定](99-detailed-setup.md) を参照。
 
-```
-[CLOUD] WiFi connected, IP: 192.168.1.42, RSSI: -47 dBm
-[CLOUD] Provisioning device...
-[CLOUD] Provision OK: isNew=1 isClaimed=0
-[CLOUD] Registering device for claim...
-[CLOUD] PIN: 3847291 (expires in 600s)
-```
+## うまくいかないとき
 
-デバイスは待機しています。PIN は 10 分間有効です。
+- アプリがデバイスを見つけない：電話とデバイスを同じネットワークに。ゲストネットワークはデバイス検出をよくブロックします；
+- `PAIR_TOKEN:ERROR:ALREADY_BOUND`、またはデバイスが別のアカウントのもの：ポータルで紐付けを解除するか `WIPE_IDENTITY` を送り、改めて紐付けます。
 
-**4. [portal.idryer.org](https://portal.idryer.org/) に移動し、** **デバイスを追加** に移動します。
+## 次へ
 
-**5. Serial Monitor から PIN を入力します** (8 桁、スペースなし)。
-
-**6. ポータルでバインディングを確認します。** Serial Monitor には次のように表示されます:
-
-```
-[CLOUD] Device claimed! deviceId=...
-[CLOUD] Connecting to MQTT...
-[CLOUD] MQTT connected!
-[RT] Cloud Online
-```
-
-## 検証
-
-ポータルのデバイス リストを開きます — デバイスはステータス **オンライン** で表示されます。内蔵 LED は 500 ms ごとに 1 回点滅します (`01_blink_status` の例を使用している場合)。
-
-!!! note
-    PIN の有効期限が切れた場合 (10 分以上経過) — ボードを再起動します。自動クレームは新しい PIN を生成します。
-
-!!! warning
-    デバイスが既に別のアカウントでクレームされている場合、`IDRYER_DEV_REPL=1` を有効にして Serial Monitor に `wipe` コマンドを入力します。NVS は消去され、ボードが再起動され、クレームは最初から開始されます。
-
-## 次は?
-
-- [03-telemetry.md](03-telemetry.md) — センサーを接続し、ポータルに読み取り値を発行します。
-- [02-onboarding.md](02-onboarding.md) — REPL と Improv パスの詳細なオンボーディング ドキュメント。
+[テレメトリ](03-telemetry.md)。

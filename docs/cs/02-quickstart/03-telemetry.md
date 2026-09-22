@@ -1,91 +1,92 @@
-Po tomto kroku bude ESP32 číst teplotu a vlhkost ze senzoru SHT31 a publikovat hodnoty na portál každých 10 sekund. Portál je bude zobrazovat jako živý graf.
+# Telemetrie: senzor na kartě
 
+Po této stránce zařízení čte teplotu a vlhkost ze SHT31 a karta ukáže jejich buňky i vlastní veličinu, rosný bod.
 
-**Hardware:**
+## Co budete potřebovat
 
-- SHT31 na I2C breakout modulu (adresa 0x44 nebo 0x45)
-- Vodiče: SDA, SCL, VCC (3,3 V), GND
-
-**Software:**
-
-- PlatformIO
-- Knihovna `robtillaart/SHT31 @ ^0.5.0`
-
-
-**1. Připojte SHT31 k ESP32-C3** (výchozí piny používané Storage Link):
-
-| SHT31 | ESP32-C3 |
-|-------|----------|
-| VCC   | 3,3 V    |
-| GND   | GND      |
-| SDA   | GPIO 8   |
-| SCL   | GPIO 9   |
-
-!!! warning
-    Připojujte senzor pouze s vypnutou deskou.
-
-**2. Přidejte knihovnu** do `platformio.ini`:
+- modul SHT31 (I2C, adresa 0x44 nebo 0x45);
+- vodiče: SDA, SCL, 3,3 V, GND;
+- v `platformio.ini`:
 
 ```ini
 lib_deps =
     robtillaart/SHT31 @ ^0.5.0
-    ; ... další závislosti
 ```
 
-**3. Vložte Wire a senzor** do `main.cpp`. Založeno na [`iDryer-Storage/src/main.cpp`](../../../../iDryer-Storage/src/main.cpp):
+!!! warning
+    Senzor připojujte při vypnutém napájení desky.
+
+## Kód
 
 ```cpp
+#include <Arduino.h>
+#include <Wire.h>
+#include <SHT31.h>
+#include <iDryer.h>
 
-static Sht31ClimateSensor s_sensor(&Wire);
-static bool s_sensorOk = false;
-```
+static const iDryer::Config CFG = {
+    .deviceType      = iDryer::DeviceType::Unknown,
+    .unitsCount      = 1,
+    .hasAirTemp      = true,    // buňka teploty
+    .hasAirHumidity  = true,    // buňka vlhkosti
+    .hardwareVersion = "1.0",
+    .firmwareVersion = "0.1.0",
+    .model           = "Climate Sensor",
+};
+static iDryer::Link s_link(CFG);
+static SHT31 s_sht(0x44, &Wire);   // adresa 0x44 nebo 0x45 podle propojky modulu
 
-**4. Inicializujte** v `setup()`:
+// Rosný bod podle Magnusova vzorce: příklad vlastní veličiny.
+static float dewPointC(float t, float rh) {
+    const float g = logf(rh / 100.0f) + 17.62f * t / (243.12f + t);
+    return 243.12f * g / (17.62f - g);
+}
 
-```cpp
-Wire.begin(8, 9);  // SDA=8, SCL=9
-s_sensorOk = s_sensor.begin();  // auto-detects address 0x44 nebo 0x45
-```
-
-`begin()` vrací `false`, pokud není senzor nalezen. Zařízení bude pokračovat bez něj.
-
-**5. Zavolejte `tick()` v `loop()` a aktualizujte telemetrická pole:**
-
-```cpp
-if (s_sensorOk) {
-    s_sensor.tick(millis());
-    SensorReading r = s_sensor.get();
-    if (r.ok) {
-        s_link.telemetry.airTempC[0]       = r.temperature;
-        s_link.telemetry.airHumidityPct[0] = r.humidity;
+static void readSensor() {
+    if (s_sht.read()) {
+        s_link.telemetry.airTempC[0]       = s_sht.getTemperature();
+        s_link.telemetry.airHumidityPct[0] = s_sht.getHumidity();
+    } else {
+        // Žádná data = NAN: pole se neodešle, karta ukáže „—“.
+        s_link.telemetry.airTempC[0]       = NAN;
+        s_link.telemetry.airHumidityPct[0] = NAN;
     }
+}
+
+void setup() {
+    Wire.begin(8, 9);                  // SDA, SCL: piny vaší desky
+    s_sht.begin();
+
+    s_link.begin();
+    s_link.onCommand("revoke", [](JsonObjectConst) { s_link.handleRevoke(); });
+
+    s_link.onTelemetryPublish([](JsonObject root) {
+        const float t  = s_link.telemetry.airTempC[0];
+        const float rh = s_link.telemetry.airHumidityPct[0];
+        if (!isnan(t) && !isnan(rh)) root["units"][0]["dewPointC"] = dewPointC(t, rh);
+    });
+    s_link.card().sensor("dew_point", "Dew point", "°C", "units[0].dewPointC", "temperature");
+
+    s_link.every(2000, readSensor);    // čtení každé 2 s
+}
+
+void loop() {
+    s_link.loop();
 }
 ```
 
-Knihovna publikuje všechna pole `telemetry.*` na MQTT automaticky v intervalu nastaveném pomocí `telemetryPeriodMs` v `iDryer::Config`. Výchozí hodnota je 10 000 ms.
+## Jak to funguje
 
-**6. Povolte schopnost v `iDryer::Config`:**
+- `hasAirTemp` a `hasAirHumidity` v `Config` dávají na kartě buňky teploty a vlhkosti. Kód na portálu není potřeba.
+- Pole `s_link.telemetry.*` jádro publikuje samo: každých 30 s, dokud pracuje aspoň jedna jednotka, jinak každých 60 s. Periody mění pole `Config.telemetryPeriodMs` a `telemetryPeriodIdleMs`; nula znamená hodnotu z kontraktu.
+- `NAN` znamená žádná data: pole se nepublikuje. Nedosazujte nulu, jinak graf ukáže falešný propad.
+- Vlastní veličina: `onTelemetryPublish` přidá pole do telemetrie před publikací, `card().sensor(id, label, unit, path, deviceClass)` ho deklaruje na kartě. `path` je cesta v telemetrii; `deviceClass` je nepovinný a určuje ikonu a formát.
+- `s_link.every(ms, fn)` volá funkci z `loop()` se zadanou periodou a neblokuje spojení.
 
-```cpp
-static const iDryer::Config CFG = {
-    // ...
-    .hasAirTemp     = true,
-    .hasAirHumidity = true,
-    .telemetryPeriodMs = 10000,
-};
-```
+## Kontrola
 
+Do minuty po nahrání ukáže karta teplotu, vlhkost a rosný bod. Bez senzoru zůstanou buňky prázdné a zařízení pracuje dál.
 
-Otevřete Serial Monitor. Při úspěšné detekci senzoru:
+## Dál
 
-```
-[MAIN] SHT31 at 0x44
-```
-
-Na portálu přejděte na stránku zařízení — údaje teploty a vlhkosti se aktualizují každých 10 sekund.
-
-Pokud senzor není nalezen, je zaznamenáno varování a zařízení pokračuje v běhu. Zkontrolujte, že adresa 0x44/0x45 není obsazena jiným zařízením na sběrnici.
-
-
-- [04-leds.md](04-leds.md) — vizualizujte vlhkost barvou LED pásu.
-- [Sht31ClimateSensor.h](../../../../iDryer-Storage/src/storage/sensors/Sht31ClimateSensor.h) — implementace senzoru.
+[LED pásek](04-leds.md).

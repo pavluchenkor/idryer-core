@@ -1,95 +1,105 @@
-# 步驟 04 — 指示：由傳感器數據驅動的 LED 條帶
+# LED 灯带：选择效果和颜色开灯
 
-完成此步驟後，WS2812B 條帶將根據濕度改變顏色，亮度將可通過 `set` 命令從門戶控制。
+完成本页后，卡片上会有可选择效果和颜色的 **Turn on** 操作，以及 **Turn off**。
 
-## 您需要什麼
+## 你需要
 
-**硬件：**
-
-- WS2812B LED 條帶（或 WS2811/SK6812）
-- 數據線上的 330–470 Ω 電阻
-- 5 V 電源（電流取決於條帶長度；300 個 LED 可吸引高達 18 A）
-
-**軟件：**
-
-- 庫 `fastled/FastLED @ ^3.6.0`
-
-!!! warning
-    從專用 5 V 電源為條帶供電。通過主機板的 3.3 V 或 5 V 引腳供電僅適用於幾個 LED 的快速冒煙測試。
-
-## 步驟
-
-**1. 將 FastLED 添加**到 `platformio.ini`：
+- 一条 WS2812B 灯带（或 WS2811、SK6812）；
+- 数据线上一个 330–470 Ω 电阻；
+- 一个 5 V 电源：每颗 LED 在白色全亮时最多 60 mA，60 颗最多 3.6 A；
+- 在 `platformio.ini` 中：
 
 ```ini
 lib_deps =
-    fastled/FastLED @ ^3.6.0
-    ; ... other dependencies
+    fastled/FastLED @ 3.10.3
 ```
 
-**2. 在 `main.cpp` 中聲明緩衝區和執行器**。基於 [`iDryer-Storage/src/main.cpp`](../../../../iDryer-Storage/src/main.cpp)：
+FastLED 3.10.5 加上核心放不进 ESP32-C3 的闪存（1.25 MB 分区需要 1.7 MB）；用 3.10.3 则为 1.16 MB。
+
+!!! warning
+    灯带请用单独的 5 V 电源供电，并把电源和板子的地线相连。板子引脚供电只适合用几颗 LED 做测试。
+
+## 代码
 
 ```cpp
+#include <Arduino.h>
 #include <FastLED.h>
-#include "storage/led_strip/led_strip_executor.h"
+#include <iDryer.h>
 
-#define STORAGE_LED_PIN  4
-#define STORAGE_MAX_LEDS 300
+#define LED_DATA_PIN 4
+#define LED_COUNT    60
 
-static CRGB             s_leds[STORAGE_MAX_LEDS];
-static LedStripExecutor s_executor(s_leds, STORAGE_MAX_LEDS);
-```
+static const iDryer::Config CFG = {
+    .deviceType      = iDryer::DeviceType::Unknown,
+    .unitsCount      = 1,
+    .hardwareVersion = "1.0",
+    .firmwareVersion = "0.1.0",
+    .model           = "LED Strip",
+};
+static iDryer::Link s_link(CFG);
 
-**3. 在 `setup()` 中初始化條帶**：
+static CRGB s_leds[LED_COUNT];
+static const char* const kEffects[] = { "solid", "breathe" };
+static CRGB s_color   = CRGB::White;
+static bool s_breathe = false;
 
-```cpp
-FastLED.addLeds<WS2812B, STORAGE_LED_PIN, GRB>(s_leds, 60);
-FastLED.setBrightness(128);
-FastLED.clear(true);
-```
+static void onLightOn(uint8_t unit, JsonObjectConst args) {
+    const char* hex = args["color"] | "#FFFFFF";          // "#RRGGBB"
+    s_color   = CRGB(strtoul(hex + 1, nullptr, 16));
+    s_breathe = strcmp(args["effect"] | "solid", "breathe") == 0;
+    s_link.status.mode[unit] = iDryer::UnitMode::LightAnimation;
+    s_link.publishStatusNow();
+}
 
-將 `60` 替換為條帶的實際 LED 數量。
+static void onLightOff(uint8_t unit, JsonObjectConst) {
+    s_link.status.mode[unit] = iDryer::UnitMode::Idle;
+    s_link.publishStatusNow();
+}
 
-**4. 在 `loop()` 中根據濕度改變顏色**。顏色刻度：藍色（干燥）→ 黃色 → 紅色（潮濕）：
+// 每 20 ms 一帧：颜色，breathe 时亮度平滑变化。
+static void drawLeds() {
+    const bool on = s_link.status.mode[0] == iDryer::UnitMode::LightAnimation;
+    CRGB c = s_color;
+    c.nscale8(!on ? 0 : s_breathe ? beatsin8(15, 30, 255) : 255);
+    fill_solid(s_leds, LED_COUNT, c);
+    FastLED.show();
+}
 
-```cpp
-if (s_sensorOk) {
-    s_sensor.tick(millis());
-    SensorReading r = s_sensor.get();
-    if (r.ok) {
-        s_link.telemetry.airHumidityPct[0] = r.humidity;
+void setup() {
+    FastLED.addLeds<WS2812B, LED_DATA_PIN, GRB>(s_leds, LED_COUNT);
+    FastLED.setBrightness(128);
 
-        // Humidity 20%–80% → hue from 160 (blue) to 0 (red).
-        float h = constrain(r.humidity, 20.0f, 80.0f);
-        uint8_t hue = (uint8_t)(160.0f - (h - 20.0f) / 60.0f * 160.0f);
-        fill_solid(s_leds, s_executor.ledsCount(), CHSV(hue, 255, 200));
-        FastLED.show();
-    }
+    s_link.begin();
+    s_link.onCommand("revoke", [](JsonObjectConst) { s_link.handleRevoke(); });
+
+    auto& card = s_link.card();
+    card.action("light_on", "LIGHT_ANIMATION", onLightOn)
+        .name("ru", "Включить").name("en", "Turn on")
+        .select("effect", "effect", kEffects, 2, "solid")
+        .color("color", "rgb_color", "#FFFFFF");
+    card.action("light_off", "IDLE", onLightOff)
+        .name("ru", "Выключить").name("en", "Turn off");
+
+    s_link.every(20, drawLeds);
+}
+
+void loop() {
+    s_link.loop();
 }
 ```
 
-**5. 從門戶控制亮度。** 在 `setup()` 中註冊一個 `set` 命令處理程序：
+## 工作原理
 
-```cpp
-s_link.onCommand("set", [](JsonObjectConst data) {
-    int id  = data["id"]  | -1;
-    int val = data["val"] | -1;
-    if (id == MENU_BRIGHTNESS && val >= 0 && val <= 255) {
-        FastLED.setBrightness((uint8_t)val);
-        FastLED.show();
-    }
-});
-```
+- `card().action(id, mode, cb)` 声明一个操作。`mode` 是执行后单元的模式：开灯为 `LIGHT_ANIMATION`，关灯为 `IDLE`。
+- `.name("ru", …)` 和 `.name("en", …)` 是按钮名称；其他语言下卡片显示英文名称。
+- `.select(...)` 和 `.color(...)` 是开灯的参数。门户和应用会自动为 `effect` 和 `rgb_color` 这两个 purpose 加标签；不在列表中的值由核心替换为默认值。
+- 回调按 id 在 `args` 中取得参数，设置 `status.mode` 并调用 `publishStatusNow()`。
+- 卡片按单元的模式选择显示：关灯时显示 **Turn on** 表单；开灯时显示点亮的区块和 **Turn off** 按钮。
 
-`MENU_BRIGHTNESS` 是來自 [`iDryer-Storage/src/menu/menu_ids.h`](../../../../iDryer-Storage/src/menu/menu_ids.h) 的常數，由 `regen.sh` 從 `menu.yaml` 生成。在您自己的產品中，名稱和值將有所不同 — 檢查您項目的 `menu_ids.h`。
+## 检查
 
-## 驗證
-
-刷新後，條帶應根據當前濕度以相應的顏色點亮。如果沒有傳感器，條帶保持關閉（執行器未收到數據）。
-
-打開門戶上的設備設置並調整亮度滑塊 — 條帶立即響應。
+在卡片上选择效果和颜色并点击 **Turn on**：灯带亮起，卡片显示 **Turn off**。
 
 ## 下一步
 
-- [05-rmt-command.md](05-rmt-command.md) — 從門戶命令驅動執行器（RMT 輸出）。
-- [led_strip_executor.h](../../../../iDryer-Storage/src/storage/led_strip/led_strip_executor.h) — 執行器 API：區域脈衝、動畫、亮度。
+[无模式的操作](05-actions.md)。

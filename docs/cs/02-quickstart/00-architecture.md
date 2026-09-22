@@ -1,75 +1,82 @@
-# Jak idryer-core funguje
+# Jak funguje idryer-core
 
-idryer-core je knihovna pro ESP32, která zvládá celý cloud stack: zřizování WiFi přes Improv-Serial, protokol claim pro vazbu zařízení na účet idryer.org, TLS MQTT relaci s auto-reconnectem, směrování příkazů z portálu a periodické publikování telemetrie.
+idryer-core je knihovna pro ESP32. Převezme vše, co spojuje zařízení s portálem a aplikací:
 
-Píšete jen to, co je specifické pro vaše zařízení: čtení senzorů, řízení periférií. Vše ostatní je v knihovně.
+- Wi-Fi: síť předá aplikace iDryer (ESPTouch) nebo webová stránka přes USB (Improv);
+- spárování s účtem jednorázovým tokenem a odpojení;
+- zabezpečenou relaci MQTT s opětovným připojením;
+- přístup v místní síti: aplikace ovládá zařízení i bez internetu;
+- publikaci telemetrie a stavu, doručování příkazů;
+- aktualizaci firmwaru vzduchem;
+- kartu zařízení na portálu a v aplikaci.
 
-## mqtt_contract.yaml — jediný zdroj pravdy
+Vy píšete jen svou část: čtete senzory, ovládáte zátěž, určujete, co karta ukáže a jaké operace spouští.
 
-Soubor [`contracts/mqtt_contract.yaml`](../../../contracts/mqtt_contract.yaml) definuje:
-
-- **capabilities** — jaké periférie jednotlivé typy zařízení podporují (topidlo, LED páska, senzory);
-- **telemetry fields** — názvy polí a datové typy v MQTT paketech;
-- **UART protocol** — struktury mezi ESP32 a ko-procesorem;
-- **TypeScript types** — pro frontend portálu.
-
-Z tohoto souboru se kód generuje automaticky:
-
-| Co je generováno | Kde |
-|---|---|
-| `iDryer::Config` (has* příznaky) | `src/_generated/iDryer_api.h` |
-| MQTT témata (C++ konstanty) | `contracts/_generated/mqtt_topics.h` |
-| TypeScript typy | `contracts/_generated/mqtt-api.types.ts` |
-
-!!! warning
-    Neupravujte ručně soubory v `src/_generated/` a `contracts/_generated/` — budou přepsány při příštím spuštění regenerace.
-
-## Jak přidat nové periférie
-
-Postup je stejný pro jakoukoli novou schopnost — tlačítko, senzor CO2, čtecí zařízení RFID.
-
-**1.** Přidejte záznam do `capability_vocabulary` v [`contracts/mqtt_contract.yaml`](../../../contracts/mqtt_contract.yaml):
-
-```yaml
-co2:
-  json_key: "co2"
-  config_flag: "hasCo2"
-  telemetry_field: "co2Ppm"
-  telemetry_type: "uint16_t"
-  description: "CO2 sensor (ppm)"
-```
-
-**2.** Spusťte regeneraci:
-
-```bash
-cd contracts
-./regen.sh
-```
-
-Poté bude `iDryer::Config` mít pole `hasCo2` a TypeScript bude mít `HardwareUnitConfigCapabilities.co2`.
-
-**3.** Nastavte příznak v `main.cpp` vašeho zařízení:
+## Jeden vstupní bod: `iDryer::Link`
 
 ```cpp
+#include <iDryer.h>
+
 static const iDryer::Config CFG = {
-    // ...
-    .hasCo2 = true,
+    .deviceType      = iDryer::DeviceType::Unknown,   // vlastní zařízení
+    .unitsCount      = 1,
+    .hasAirTemp      = true,                          // buňka teploty
+    .hardwareVersion = "1.0",
+    .firmwareVersion = "0.1.0",
+    .model           = "My Device",
 };
+static iDryer::Link s_link(CFG);
+
+void setup() {
+    s_link.begin();
+    s_link.onCommand("revoke", [](JsonObjectConst) { s_link.handleRevoke(); });
+}
+
+void loop() {
+    s_link.loop();
+    s_link.telemetry.airTempC[0] = readTemperature();   // váš kód
+}
 ```
 
-**4.** Nahrajte zařízení. Portál přečte `co2: true` z MQTT tématu `/info` a automaticky zobrazí odpovídající blok UI — nejsou potřebné žádné změny na straně portálu.
+| Vy | Jádro |
+|---|---|
+| vyplňujete `s_link.telemetry.*` | publikuje každých 30 s, v klidu každých 60 s |
+| měníte `s_link.status.*` (režim, žádanou hodnotu, čas) a voláte `publishStatusNow()` | doručí stav; karta se přepne podle režimu |
+| deklarujete `s_link.card()`: senzory, ovládací prvky, akce | sestaví card manifest a publikuje ho |
+| registrujete `s_link.onCommand(...)` | předá příkazy z cloudu i z místní sítě |
 
-U typů periférií, které v kontraktu ještě nejsou, otevřete PR do repozitáře idryer-core s přidáním záznamu do `capability_vocabulary`. Po sloučení — spusťte `regen.sh`.
+## Karta zařízení
 
-## Dva produkční produkty postavené na této knihovně
+Portál a aplikace kreslí kartu podle card manifestu, který zařízení posílá:
 
-**iDryer Storage Link** — ESP32-C3 s WS2812B LED páskou a senzorem teploty/vlhkosti SHT31.
+- příznaky `Config.has*` dávají hotové buňky: teplotu, vlhkost, výkon topení, ventilátor a další;
+- `card().sensor(...)` přidá vlastní veličinu podle její cesty v telemetrii;
+- `card().action(...)` deklaruje operaci: režim jednotky po ní a parametry spuštění.
 
-**iHeater Link** — ESP32-C3 s RMT výstupem na topidlo iHeater, s integrací pro Bambu Lab, Klipper/Moonraker a Home Assistant.
+Kód na portálu k tomu není potřeba. Podrobně: [Karta zařízení: card manifest](../09-add-product/02-add-widget.md).
 
-Oba produkty obsahují idryer-core přes PlatformIO `lib_deps` a implementují pouze svou logiku specifickou pro produkt.
+## `mqtt_contract.yaml` je zdroj pravdy
 
-## Co dál
+[`contracts/mqtt_contract.yaml`](../../../contracts/mqtt_contract.yaml) popisuje protokol: topicy, pole telemetrie a stavu, schopnosti zařízení, card manifest. Generuje se z něj:
 
-- [01-wifi.md](01-wifi.md) — připojte ESP32 k WiFi pomocí Improv-Serial.
-- [../../../README.md](../../../README.md) — přehled knihovny a odkaz na generování kódu.
+| Co | Kam |
+|---|---|
+| `iDryer::Config` (příznaky `has*`) a struktury API | `src/_generated/iDryer_api.h` |
+| MQTT topicy | `contracts/_generated/mqtt_topics.h` |
+| protokol UART ESP32 ↔ řadič | `contracts/_generated/uart_protocol.h` |
+| typy TypeScript pro portál | `contracts/_generated/mqtt-api.types.ts` |
+
+!!! warning
+    Soubory v `_generated/` neupravujte ručně: `contracts/regen.sh` je přepíše z kontraktu.
+
+Vlastní veličina nevyžaduje změnu kontraktu: deklaruje ji `card().sensor(...)`. Kontrakt se mění, když novou schopnost potřebují všechny produkty: nejdřív `mqtt_contract.yaml`, pak `regen.sh`, pak kód.
+
+## Produkty na jádře
+
+- **iDryer Link**: komunikační modul sušičky, ESP32 vedle řadiče, výměna přes UART.
+- **iDryer Storage**: osvětlení regálu s cívkami, adresovatelný pásek a senzor SHT31.
+- **iHeater Link**: ovládání topení iHeater, integrace s Bambu Lab, Klipper/Moonraker a Home Assistant.
+
+## Dál
+
+[Spustit za 5 minut](01-five-minutes.md).

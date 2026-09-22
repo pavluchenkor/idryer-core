@@ -1,99 +1,92 @@
-# Шаг 03 — Телеметрия: публикуй данные датчика
+# Телеметрия: датчик на карточке
 
-После этого шага ESP32 будет читать температуру и влажность с датчика SHT31 и каждые 10 секунд публиковать их на портал. Портал отобразит данные на графике.
+После этой страницы устройство читает температуру и влажность с SHT31, а на карточке появляются их ячейки и своя величина — точка росы.
 
 ## Что понадобится
 
-**Железо:**
-
-- Датчик SHT31 на I2C-модуле (адрес 0x44 или 0x45)
-- Провода: SDA, SCL, VCC (3.3 В), GND
-
-**ПО:**
-
-- PlatformIO
-- Библиотека `robtillaart/SHT31 @ ^0.5.0`
-
-## Шаги
-
-**1. Подключить SHT31 к ESP32-C3** (пины по умолчанию Storage Link):
-
-| SHT31 | ESP32-C3 |
-|-------|----------|
-| VCC   | 3.3 V    |
-| GND   | GND      |
-| SDA   | GPIO 8   |
-| SCL   | GPIO 9   |
-
-!!! warning
-    Подключайте датчик только при отключённом питании платы.
-
-**2. Добавить библиотеку** в `platformio.ini`:
+- модуль SHT31 (I2C, адрес 0x44 или 0x45);
+- провода: SDA, SCL, 3,3 В, GND;
+- в `platformio.ini`:
 
 ```ini
 lib_deps =
     robtillaart/SHT31 @ ^0.5.0
-    ; ... остальные зависимости
 ```
 
-**3. Включить Wire и датчик** в `main.cpp`. Пример из [`iDryer-Storage/src/main.cpp`](../../../../iDryer-Storage/src/main.cpp):
+!!! warning
+    Подключайте датчик при отключённом питании платы.
+
+## Код
 
 ```cpp
+#include <Arduino.h>
 #include <Wire.h>
-#include "storage/sensors/Sht31ClimateSensor.h"
+#include <SHT31.h>
+#include <iDryer.h>
 
-static Sht31ClimateSensor s_sensor(&Wire);
-static bool s_sensorOk = false;
-```
+static const iDryer::Config CFG = {
+    .deviceType      = iDryer::DeviceType::Unknown,
+    .unitsCount      = 1,
+    .hasAirTemp      = true,    // ячейка температуры
+    .hasAirHumidity  = true,    // ячейка влажности
+    .hardwareVersion = "1.0",
+    .firmwareVersion = "0.1.0",
+    .model           = "Climate Sensor",
+};
+static iDryer::Link s_link(CFG);
+static SHT31 s_sht(0x44, &Wire);   // адрес 0x44 или 0x45 — по перемычке модуля
 
-**4. Инициализировать** в `setup()`:
+// Точка росы по формуле Магнуса — пример своей величины.
+static float dewPointC(float t, float rh) {
+    const float g = logf(rh / 100.0f) + 17.62f * t / (243.12f + t);
+    return 243.12f * g / (17.62f - g);
+}
 
-```cpp
-Wire.begin(8, 9);  // SDA=8, SCL=9
-s_sensorOk = s_sensor.begin();  // авто-определяет адрес 0x44 или 0x45
-```
-
-`begin()` возвращает `false`, если датчик не найден. Устройство продолжит работу без него.
-
-**5. В `loop()` вызывать `tick()` и обновлять телеметрию:**
-
-```cpp
-if (s_sensorOk) {
-    s_sensor.tick(millis());
-    SensorReading r = s_sensor.get();
-    if (r.ok) {
-        s_link.telemetry.airTempC[0]       = r.temperature;
-        s_link.telemetry.airHumidityPct[0] = r.humidity;
+static void readSensor() {
+    if (s_sht.read()) {
+        s_link.telemetry.airTempC[0]       = s_sht.getTemperature();
+        s_link.telemetry.airHumidityPct[0] = s_sht.getHumidity();
+    } else {
+        // Нет данных — NAN: поле не уходит, на карточке «—».
+        s_link.telemetry.airTempC[0]       = NAN;
+        s_link.telemetry.airHumidityPct[0] = NAN;
     }
+}
+
+void setup() {
+    Wire.begin(8, 9);                  // SDA, SCL — выводы вашей платы
+    s_sht.begin();
+
+    s_link.begin();
+    s_link.onCommand("revoke", [](JsonObjectConst) { s_link.handleRevoke(); });
+
+    s_link.onTelemetryPublish([](JsonObject root) {
+        const float t  = s_link.telemetry.airTempC[0];
+        const float rh = s_link.telemetry.airHumidityPct[0];
+        if (!isnan(t) && !isnan(rh)) root["units"][0]["dewPointC"] = dewPointC(t, rh);
+    });
+    s_link.card().sensor("dew_point", "Dew point", "°C", "units[0].dewPointC", "temperature");
+
+    s_link.every(2000, readSensor);    // опрос раз в 2 с
+}
+
+void loop() {
+    s_link.loop();
 }
 ```
 
-Библиотека публикует поля `telemetry.*` в MQTT автоматически с периодом `telemetryPeriodMs`, заданным в `iDryer::Config`. По умолчанию — 10 000 мс.
+## Как это работает
 
-**6. В `iDryer::Config` включить capability:**
-
-```cpp
-static const iDryer::Config CFG = {
-    // ...
-    .hasAirTemp     = true,
-    .hasAirHumidity = true,
-    .telemetryPeriodMs = 10000,
-};
-```
+- `hasAirTemp` и `hasAirHumidity` в `Config` дают ячейки температуры и влажности на карточке. Код на портале не нужен.
+- Поля `s_link.telemetry.*` ядро публикует само: раз в 30 с, пока хоть один юнит работает, иначе раз в 60 с. Периоды меняют поля `Config.telemetryPeriodMs` и `telemetryPeriodIdleMs`; ноль — значение из контракта.
+- `NAN` — нет данных: поле не публикуется. Не подставляйте ноль, иначе на графике появится ложный провал.
+- Своя величина: `onTelemetryPublish` добавляет поле в телеметрию перед публикацией, `card().sensor(id, label, unit, path, deviceClass)` объявляет его на карточке. `path` — путь в телеметрии, `deviceClass` необязателен: он задаёт иконку и формат.
+- `s_link.every(ms, fn)` вызывает функцию из `loop()` с заданным периодом, не блокируя связь.
 
 ## Проверка
 
-Откройте Serial Monitor. При успешном обнаружении датчика:
-
-```
-[MAIN] SHT31 at 0x44
-```
-
-На портале перейдите на страницу устройства — показания температуры и влажности обновляются каждые 10 секунд.
-
-Если датчик не найден, в логе будет предупреждение, устройство продолжит работу. Убедитесь, что адрес 0x44/0x45 не занят другим устройством на шине.
+Через минуту после прошивки на карточке — температура, влажность и точка росы. Без датчика ячейки пустые, устройство работает дальше.
 
 ## Что дальше
 
-- [04-leds.md](04-leds.md) — отображать влажность цветом LED-ленты.
-- [Sht31ClimateSensor.h](../../../../iDryer-Storage/src/storage/sensors/Sht31ClimateSensor.h) — реализация датчика.
+[LED-лента](04-leds.md).

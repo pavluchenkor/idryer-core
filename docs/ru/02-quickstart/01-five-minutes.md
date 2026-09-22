@@ -1,95 +1,146 @@
 ---
 title: "Запустить устройство на idryer-core за 5 минут"
-description: "Короткий старт для разработчика: как собрать минимальное ESP32-устройство на idryer-core, подключить Wi-Fi, MQTT и проверить команды."
+description: "Первое устройство на idryer-core: проект PlatformIO, минимальная прошивка, Wi-Fi и привязка к аккаунту в приложении iDryer."
 ---
 
 # Запустить устройство на idryer-core за 5 минут
 
-Эта страница помогает быстро проверить, что устройство на ESP32 может запуститься с `idryer-core`, подключиться к сети и начать обмен данными. Используйте её как первый технический тест перед разработкой своей сушилки, термокамеры, подсветки или другого модуля.
+После этой страницы ESP32 будет в сети, привязан к вашему аккаунту и виден на портале [portal.idryer.org](https://portal.idryer.org/) и в приложении iDryer. Понадобятся: плата ESP32-C3 (DevKit, Super Mini или совместимая), USB-кабель, PlatformIO в VS Code, телефон с приложением iDryer, сеть Wi-Fi 2,4 ГГц.
 
-После этой страницы ваш ESP32 будет прошит, подключится к WiFi и появится в [portal.idryer.org](https://portal.idryer.org/) со статусом Online. Потребуется: ESP32-C3 (DevKit, Super Mini или совместимый), USB-кабель, PlatformIO в VS Code.
+## 1. Проект PlatformIO
 
-## 1. Подготовить secrets.h
-
-Скопируйте файл [`examples/secrets.h.example`](https://github.com/pavluchenkor/idryer-core/blob/main/examples/secrets.h.example) в `include/secrets.h` вашего проекта и укажите SSID и пароль своей WiFi-сети (только 2.4 GHz):
-
-```cpp
-#define WIFI_SSID      "your-ssid"
-#define WIFI_PASSWORD  "your-password"
+```text
+my-device/
+├── platformio.ini
+├── lib/
+│   └── idryer-core/      ← копия, git submodule или символическая ссылка
+└── src/
+    └── main.cpp
 ```
 
-Добавьте `include/secrets.h` в `.gitignore`.
-
-## 2. Настроить platformio.ini
-
-Создайте `platformio.ini` в корне проекта:
+`platformio.ini`:
 
 ```ini
-[env:blink-demo]
+[env:my-device]
 platform    = espressif32
 framework   = arduino
 board       = esp32-c3-devkitm-1
 
-lib_deps =
-    file://path/to/idryer-core
-    bblanchon/ArduinoJson @ ^6.21.0
-    knolleary/PubSubClient
+; ESPAsyncTCP — транспорт ESP8266 из зависимостей espMqttClient: на ESP32 не собирается.
+lib_ignore = ESPAsyncTCP
 
 build_flags =
     -DIDRYER_API_BASE='"https://portal.idryer.org/api"'
+    -DMQTT_BROKER='"mqtt.idryer.org"'
+    -DMQTT_PORT=8883
     -DMQTT_USE_TLS=1
+    ; Плата без USB-UART (ESP32-C3 SuperMini): Serial — по USB.
+    -DARDUINO_USB_MODE=1
+    -DARDUINO_USB_CDC_ON_BOOT=1
 ```
 
-Измените `board` под вашу плату. Замените `path/to/idryer-core` на реальный путь к библиотеке.
+Библиотеки ядра (MQTT, ArduinoJson, WebSockets, Improv) приходят сами из `library.json` ядра. Для платы с USB-UART последние два флага не нужны; `board` — под вашу плату.
 
-## 3. Скопировать пример 01_blink_status
+## 2. Код
 
-Скопируйте содержимое [`examples/01_blink_status/01_blink_status.ino`](https://github.com/pavluchenkor/idryer-core/blob/main/examples/01_blink_status/01_blink_status.ino) в `src/main.cpp` вашего проекта. Пример не требует датчиков и дополнительных зависимостей — только минимальный composition root.
+Скопируйте в `src/main.cpp` пример [`01_blink_status`](https://github.com/pavluchenkor/idryer-core/blob/main/examples/01_blink_status/01_blink_status.ino):
 
-## 4. Прошить
+```cpp
+#include <Arduino.h>
+#include <iDryer.h>
 
-```bash
-pio run -e blink-demo -t upload
+#ifndef LED_PIN
+#define LED_PIN 8   // ESP32-C3 SuperMini
+#endif
+
+static const iDryer::Config CFG = {
+    .deviceType      = iDryer::DeviceType::Unknown,   // своё устройство
+    .unitsCount      = 1,
+    .hasAirTemp      = true,
+    .hardwareVersion = "1.0",
+    .firmwareVersion = "0.1.0",
+    .model           = "Blink Status",
+};
+static iDryer::Link s_link(CFG);
+
+// Период мигания по состоянию; 0 — не мигать.
+static uint32_t blinkPeriodMs() {
+    if (s_link.isOnline()) return 1000;
+    if (!s_link.isBound()) return 200;
+    return 0;
+}
+
+void setup() {
+    Serial.begin(115200);
+    pinMode(LED_PIN, OUTPUT);
+
+    s_link.begin();
+    // Отвязка: ядро стирает секрет и снова ждёт привязки.
+    s_link.onCommand("revoke", [](JsonObjectConst) { s_link.handleRevoke(); });
+}
+
+void loop() {
+    s_link.loop();
+
+    // Поля телеметрии ядро публикует само, раз в 30 с (в простое — раз в 60 с).
+    s_link.telemetry.airTempC[0] = temperatureRead();
+
+    const uint32_t period = blinkPeriodMs();
+    digitalWrite(LED_PIN, period ? (millis() / (period / 2)) % 2 : HIGH);
+}
 ```
 
-## 5. Открыть Serial Monitor
+В прошивке нет ни пароля от сети, ни данных аккаунта: сеть и привязку устройство получит из приложения.
+
+## 3. Прошить и открыть лог
 
 ```bash
+pio run -t upload
 pio device monitor -b 115200
 ```
 
-Ожидаемая последовательность в логе:
+Пока у устройства нет Wi-Fi, лог молчит: ядро держит порт для Improv. LED часто мигает — устройство ждёт сети и привязки.
 
-```
-[CLOUD] Init: serial=DEVICE_XXXXXXXXXXXX deviceId=
-[CLOUD] Connecting to WiFi...
-[CLOUD] WiFi connected, IP: 192.168.1.42, RSSI: -47 dBm
-[CLOUD] Provisioning device...
-[CLOUD] Provision OK: isNew=1 isClaimed=0
-[CLOUD] Registering device for claim...
-[CLOUD] PIN: 1234567 (expires in 600s)
-```
+## 4. Wi-Fi и привязка в приложении
 
-После ввода PIN в портале (шаг 6):
+1. Подключите телефон к той сети Wi-Fi, в которой будет работать устройство, и войдите в приложение iDryer под своим аккаунтом портала.
+2. На главном экране нажмите **Подключить новое устройство** — откроется шаг **Wi-Fi**.
+3. Проверьте название сети, введите пароль и нажмите **Подключить устройство**. Приложение передаёт настройки до 90 секунд; когда устройство подключится, появится **Устройство подключено**. Нажмите **Далее**.
+4. На шаге **Привязка** нажмите **Привязать**. Приложение найдёт устройство в сети, получит у портала одноразовый токен привязки и передаст его устройству.
+5. После **Устройство привязано** оно появится в списке устройств на портале и в приложении.
 
-```
-[CLOUD] Device claimed! deviceId=...
-[CLOUD] Connecting to MQTT...
-[CLOUD] MQTT connected!
-[RT] Cloud Online
+В логе после подключения к сети:
+
+```text
+[BOOT] WiFi ok, logs enabled
+[INFO ] CLOUD: WiFi connected, IP: 192.168.1.42, RSSI: -55 dBm, …
+…
+[INFO ] CLOUD: binding-v3: no secret — awaiting pairing token (SETUP)
 ```
 
-Если устройство остановилось на сообщении `PIN: ...` — это нормально, переходите к шагу 6.
+После привязки:
 
-## 6. Привязать устройство в портале
+```text
+[INFO ] CLOUD: binding-v3: pairing token received (… chars)
+[INFO ] CLOUD: binding-v3: activating with pairing token (serial=DEVICE_… mcu=-)
+[INFO ] CLOUD: binding-v3: activated, deviceId=… -> Ready
+…
+[INFO ] MQTT: Connected! …
+```
 
-Откройте [portal.idryer.org](https://portal.idryer.org/), перейдите в раздел **Добавить устройство** и введите PIN из Serial Monitor. После успешной привязки устройство перейдёт в `Online`, встроенный LED начнёт моргать раз в 500 мс.
+## 5. Проверка
 
-Подробно про привязку: [Onboarding](02-onboarding.md).
+- на портале и в приложении устройство в сети;
+- на карточке — температура чипа ESP32;
+- LED мигает раз в секунду. Горит или не горит ровно — нет связи с порталом.
+
+## Если не получилось
+
+- приложение не дождалось подключения — проверьте пароль и что сеть 2,4 ГГц; при неверном пароле устройство снова ждёт настроек. Другие способы передать сеть — [Wi-Fi](01-wifi.md);
+- на шаге **Привязка** устройство не нашлось — телефон и устройство должны быть в одной сети; гостевые сети часто блокируют обнаружение устройств. Подробнее — [Привязка к аккаунту](02-claim.md);
+- сборка и флаги — [Подробная настройка](99-detailed-setup.md).
 
 ## Что дальше
 
-- Добавить датчик — [04-patterns/01-add-sensor.md](../04-patterns/01-add-sensor.md)
-- Добавить периферию — [04-patterns/02-add-peripheral.md](../04-patterns/02-add-peripheral.md)
-- Полный справочник API — [03-public-api/01-link-api-reference.md](../03-public-api/01-link-api-reference.md)
-- Как работает изнутри — [05-architecture/01-composition-root.md](../05-architecture/01-composition-root.md)
+- [Телеметрия](03-telemetry.md) — датчик и своя величина на карточке.
+- [Примеры ядра](https://github.com/pavluchenkor/idryer-core/tree/main/examples) — действия карточки, свои датчики и контролы.

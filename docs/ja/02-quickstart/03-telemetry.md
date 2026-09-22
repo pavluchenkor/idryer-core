@@ -1,99 +1,92 @@
-# ステップ 03 — テレメトリ: センサー データを発行します
+# テレメトリ：カードにセンサーを
 
-このステップの後、ESP32 は SHT31 センサーから温度と湿度を読み取り、10 秒ごとにポータルに値を発行します。ポータルはそれらをライブ グラフとして表示します。
+このページを終えると、デバイスは SHT31 から温度と湿度を読み、カードにはそのセルと独自の値である露点が表示されます。
 
 ## 必要なもの
 
-**ハードウェア:**
-
-- SHT31 on I2C ブレークアウト モジュール (アドレス 0x44 または 0x45)
-- ワイヤー: SDA、SCL、VCC (3.3 V)、GND
-
-**ソフトウェア:**
-
-- PlatformIO
-- ライブラリ `robtillaart/SHT31 @ ^0.5.0`
-
-## 手順
-
-**1. SHT31 を ESP32-C3 に接続します** (Storage Link で使用されるデフォルト ピン):
-
-| SHT31 | ESP32-C3 |
-|-------|----------|
-| VCC   | 3.3 V    |
-| GND   | GND      |
-| SDA   | GPIO 8   |
-| SCL   | GPIO 9   |
-
-!!! warning
-    ボードの電源を切った状態でのみセンサーを接続します。
-
-**2. ライブラリを `platformio.ini` に追加します:**
+- SHT31 モジュール（I2C、アドレス 0x44 または 0x45）；
+- 配線：SDA、SCL、3.3 V、GND；
+- `platformio.ini` に：
 
 ```ini
 lib_deps =
     robtillaart/SHT31 @ ^0.5.0
-    ; ... other dependencies
 ```
 
-**3. `main.cpp` に Wire とセンサーを含めます。** [`iDryer-Storage/src/main.cpp`](../../../../iDryer-Storage/src/main.cpp) に基づいています:
+!!! warning
+    センサーはボードの電源を切ってから接続してください。
+
+## コード
 
 ```cpp
+#include <Arduino.h>
 #include <Wire.h>
-#include "storage/sensors/Sht31ClimateSensor.h"
+#include <SHT31.h>
+#include <iDryer.h>
 
-static Sht31ClimateSensor s_sensor(&Wire);
-static bool s_sensorOk = false;
-```
+static const iDryer::Config CFG = {
+    .deviceType      = iDryer::DeviceType::Unknown,
+    .unitsCount      = 1,
+    .hasAirTemp      = true,    // 温度のセル
+    .hasAirHumidity  = true,    // 湿度のセル
+    .hardwareVersion = "1.0",
+    .firmwareVersion = "0.1.0",
+    .model           = "Climate Sensor",
+};
+static iDryer::Link s_link(CFG);
+static SHT31 s_sht(0x44, &Wire);   // アドレス 0x44 または 0x45（モジュールのジャンパーで決まる）
 
-**4. `setup()` で初期化します:**
+// マグヌスの式による露点：独自の値の例。
+static float dewPointC(float t, float rh) {
+    const float g = logf(rh / 100.0f) + 17.62f * t / (243.12f + t);
+    return 243.12f * g / (17.62f - g);
+}
 
-```cpp
-Wire.begin(8, 9);  // SDA=8, SCL=9
-s_sensorOk = s_sensor.begin();  // auto-detects address 0x44 or 0x45
-```
-
-`begin()` がセンサーを見つけない場合、`false` を返します。デバイスはそれなしで実行を続けます。
-
-**5. `loop()` で `tick()` を呼び出し、テレメトリ フィールドを更新します:**
-
-```cpp
-if (s_sensorOk) {
-    s_sensor.tick(millis());
-    SensorReading r = s_sensor.get();
-    if (r.ok) {
-        s_link.telemetry.airTempC[0]       = r.temperature;
-        s_link.telemetry.airHumidityPct[0] = r.humidity;
+static void readSensor() {
+    if (s_sht.read()) {
+        s_link.telemetry.airTempC[0]       = s_sht.getTemperature();
+        s_link.telemetry.airHumidityPct[0] = s_sht.getHumidity();
+    } else {
+        // データなしは NAN：項目は送信されず、カードには「—」。
+        s_link.telemetry.airTempC[0]       = NAN;
+        s_link.telemetry.airHumidityPct[0] = NAN;
     }
+}
+
+void setup() {
+    Wire.begin(8, 9);                  // SDA、SCL：お使いのボードのピン
+    s_sht.begin();
+
+    s_link.begin();
+    s_link.onCommand("revoke", [](JsonObjectConst) { s_link.handleRevoke(); });
+
+    s_link.onTelemetryPublish([](JsonObject root) {
+        const float t  = s_link.telemetry.airTempC[0];
+        const float rh = s_link.telemetry.airHumidityPct[0];
+        if (!isnan(t) && !isnan(rh)) root["units"][0]["dewPointC"] = dewPointC(t, rh);
+    });
+    s_link.card().sensor("dew_point", "Dew point", "°C", "units[0].dewPointC", "temperature");
+
+    s_link.every(2000, readSensor);    // 2 秒ごとに読み取り
+}
+
+void loop() {
+    s_link.loop();
 }
 ```
 
-ライブラリは、`iDryer::Config` で `telemetryPeriodMs` で設定された間隔で、すべての `telemetry.*` フィールドを MQTT に自動的に発行します。デフォルトは 10 000 ms です。
+## 仕組み
 
-**6. `iDryer::Config` で機能を有効にします:**
+- `Config` の `hasAirTemp` と `hasAirHumidity` で、カードに温度と湿度のセルが出ます。ポータル側のコードは不要です。
+- `s_link.telemetry.*` の項目はコアが自動で送信します。ユニットがひとつでも動作中なら 30 秒ごと、そうでなければ 60 秒ごとです。周期は `Config.telemetryPeriodMs` と `telemetryPeriodIdleMs` で変えられ、0 は契約の値です。
+- `NAN` はデータなしで、項目は送信されません。代わりに 0 を入れるとグラフに偽の落ち込みが出ます。
+- 独自の値：`onTelemetryPublish` は送信前にテレメトリへ項目を追加し、`card().sensor(id, label, unit, path, deviceClass)` はそれをカードに宣言します。`path` はテレメトリ内のパス、`deviceClass` は任意でアイコンと表示形式を決めます。
+- `s_link.every(ms, fn)` は、接続を止めずに `loop()` から指定周期で関数を呼びます。
 
-```cpp
-static const iDryer::Config CFG = {
-    // ...
-    .hasAirTemp     = true,
-    .hasAirHumidity = true,
-    .telemetryPeriodMs = 10000,
-};
-```
+## 確認
 
-## 検証
+書き込みから 1 分以内に、カードに温度、湿度、露点が表示されます。センサーがなければセルは空のままで、デバイスは動作を続けます。
 
-Serial Monitor を開きます。センサー検出に成功すると:
+## 次へ
 
-```
-[MAIN] SHT31 at 0x44
-```
-
-ポータルで、デバイス ページに移動 — 温度と湿度の読み取り値は 10 秒ごとに更新されます。
-
-センサーが見つからない場合、警告がログに記録され、デバイスは実行を続けます。アドレス 0x44/0x45 がバス上の別のデバイスに占有されていないことを確認します。
-
-## 次は?
-
-- [04-leds.md](04-leds.md) — センサー データで LED ストリップ カラーを視覚化します。
-- [Sht31ClimateSensor.h](../../../../iDryer-Storage/src/storage/sensors/Sht31ClimateSensor.h) — センサー実装。
+[LED テープ](04-leds.md)。

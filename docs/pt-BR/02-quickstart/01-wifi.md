@@ -1,81 +1,51 @@
-Depois deste passo seu ESP32 estará conectado ao WiFi e as credenciais serão salvas em NVS para reconexão automática no próximo reinício. Portal e MQTT vêm no próximo passo.
+# Wi-Fi
 
+O firmware não tem a senha da rede. Um dispositivo sem rede salva espera a configuração; ao receber, salva a rede na NVS e dali em diante conecta sozinho. Só redes de 2,4 GHz.
 
-**Hardware:**
+## O app iDryer (ESPTouch)
 
-- Placa ESP32-C3 (DevKit, Super Mini, ou compatível)
-- Cabo USB (USB-C ou Micro-USB dependendo de sua placa)
+O caminho principal: o app envia a rede pelo ar, sem fios.
 
-**Software:**
+1. O celular está na rede em que o dispositivo vai funcionar.
+2. **Conectar novo dispositivo** → passo **Wi-Fi**: confira o nome da rede, digite a senha, toque em **Conectar dispositivo**.
+3. O app envia a configuração por até 90 segundos e mostra **Dispositivo conectado**.
 
-- PlatformIO em VS Code
-- Navegador Chrome ou Edge (Web Serial API não é suportado em Safari ou Firefox)
+Com a senha errada, o dispositivo volta a esperar a configuração: repita o passo.
 
+## Pela USB com Improv
 
-**1. Crie `platformio.ini`** na raiz do seu projeto:
+Enquanto o dispositivo não tem rede, o núcleo escuta o protocolo Improv na porta serial.
 
-```ini
-[env:improv-demo]
-platform   = espressif32
-framework  = arduino
-board      = esp32-c3-devkitm-1
+1. Conecte a placa pela USB.
+2. Abra [improv-wifi.com/serial](https://www.improv-wifi.com/serial/) no Chrome ou no Edge (o Web Serial não funciona no Safari nem no Firefox), clique em **Connect** e escolha a porta da placa.
+3. Digite o nome da rede e a senha.
 
-lib_deps =
-    https://github.com/jnthas/Improv-WiFi-Library.git
-    bblanchon/ArduinoJson @ ^6.21.3
-    knolleary/PubSubClient @ ^2.8
-    densaugeo/base64 @ ^1.4.0
+Nesse momento a porta está ocupada pelo Improv, por isso o log só aparece quando o dispositivo já está na rede. Feche o monitor serial enquanto o Improv trabalha.
 
-build_flags =
-    -DIDRYER_API_BASE='"https://portal.idryer.org/api"'
-    -DMQTT_BROKER='"mqtt.idryer.org"'
-    -DMQTT_PORT=8883
-    -DMQTT_USE_TLS=1
-```
-
-Substitua `board` pelo valor para sua placa (`esp32-c3-devkitm-1`, `seeed_xiao_esp32c3`, etc.).
-
-**2. Copie o exemplo.** Pegue o conteúdo de [`examples/03_with_improv/03_with_improv.ino`](../../../examples/03_with_improv/03_with_improv.ino) e salve como `src/main.cpp` no seu projeto.
-
-**3. Defina a ChipFamily.** No arquivo copiado, encontre a linha:
+## No código, para uma bancada de desenvolvimento
 
 ```cpp
-s_improv.setDeviceInfo(ImprovTypes::ChipFamily::CF_ESP32_C3, ...);
+void setup() {
+    // Só para a bancada de desenvolvimento: a rede é salva na NVS se ainda não estiver lá.
+    s_link.seedWifiCredentialsIfEmpty("my-ssid", "my-password");
+    s_link.begin();
+}
 ```
 
-Certifique-se de que a ChipFamily corresponde ao seu chip: `CF_ESP32_C3`, `CF_ESP32_S3`, ou `CF_ESP32`.
+`seedWifiCredentialsIfEmpty()` só grava a rede se a NVS ainda não tiver nenhuma; `setWifiCredentials()` sobrescreve sempre. Chame antes de `begin()`.
 
-**4. Flash:**
+!!! warning
+    Não publique firmware com a senha no código: quem baixar fica com a senha.
 
-```bash
-pio run -e improv-demo -t upload
+## Verificação
+
+No log:
+
+```text
+[BOOT] WiFi ok, logs enabled
+[INFO ] CLOUD: WiFi connected, IP: 192.168.1.42, RSSI: -55 dBm, …
 ```
 
-**5. Abra [improv-wifi.com/serial](https://www.improv-wifi.com/serial/)** no Chrome ou Edge. Clique em **Connect** e selecione a porta USB do dispositivo no diálogo do navegador.
+## Próximo passo
 
-**6. Insira o SSID e a senha** da sua rede 2,4 GHz. A página web enviará as credenciais para a placa via Serial-Improv. A placa as salvará em NVS.
-
-
-Abra o Serial Monitor:
-
-```bash
-pio device monitor -b 115200
-```
-
-Após uma conexão bem-sucedida você verá:
-
-```
-[BOOT] WiFi connected, Improv done
-[BOOT] IP: 192.168.1.42  RSSI: -47 dBm
-```
-
-Se esta linha não aparecer, consulte o link de solução de problemas abaixo.
-
-!!! note
-    Se as credenciais já estão salvas em NVS de uma execução anterior, a placa se conecta ao WiFi na inicialização automaticamente — Improv não é necessário.
-
-
-- [02-claim.md](02-claim.md) — vincule o dispositivo à sua conta idryer.org.
-- [../../10-troubleshooting/01-troubleshooting.md](../10-troubleshooting/01-troubleshooting.md) — se o WiFi não se conectar.
-
----
+[Vinculação à conta](02-claim.md).

@@ -1,71 +1,68 @@
-# 步驟 02 — 聲稱：綁定到門戶
+# 绑定到账户
 
-完成此步驟後，您的設備將在您的 [portal.idryer.org](https://portal.idryer.org/) 帳戶中顯示為線上狀態。所有後續重啟都是自動的 — 不需要重新聲稱。
+绑定是一次性的过程：设备获得一次性绑定令牌，在门户上用它换取永久密钥，并把密钥保存到 NVS。此后每次重启都会自行连接门户。没有密钥时，设备处于设置模式并等待令牌。
 
-## 什麼是聲稱
+## 在 iDryer 应用中
 
-聲稱是一個一次性的過程，其中 ESP32 向 idryer.org 雲端註冊並綁定到您的帳戶。設備生成一個有效期為 10 分鐘的 8 位數 PIN。您在門戶中輸入 PIN — 綁定完成。
+1. 设备已在网络中（见 [Wi-Fi](01-wifi.md)），手机在同一网络。
+2. **连接新设备** → **绑定** 步骤（如果设备已经在网络中，点击窗口顶部该步骤的标签）→ **绑定**。
+3. 应用在局域网中找到设备，从门户获取令牌交给设备，并等待门户确认设备已上线。
+4. 显示 **设备已绑定** 后，设备出现在门户和应用的列表中。
 
-聲稱後，`deviceId` 被保存在 NVS 中 — 設備在雲中的唯一標識符。在後續重啟時，ESP32 直接連接到 MQTT，無需重複聲稱流程。
+绑定前的日志：
 
-## 您需要什麼
+```text
+[BOOT] WiFi ok, logs enabled
+[INFO ] CLOUD: WiFi connected, IP: 192.168.1.42, RSSI: -55 dBm, …
+…
+[INFO ] CLOUD: binding-v3: no secret — awaiting pairing token (SETUP)
+```
 
-- 從 [步驟 01](01-wifi.md) 刷新並連接到 WiFi 的 ESP32
-- [portal.idryer.org](https://portal.idryer.org/) 上的帳戶
-- USB 線纜和打開的串行監視器
+绑定后：
 
-## 步驟
+```text
+[INFO ] CLOUD: binding-v3: pairing token received (… chars)
+[INFO ] CLOUD: binding-v3: activating with pairing token (serial=DEVICE_… mcu=-)
+[INFO ] CLOUD: binding-v3: activated, deviceId=… -> Ready
+…
+[INFO ] MQTT: Connected! …
+```
 
-**1. 驗證草圖包含自動聲稱。** 以下行必須在 `setup()` 中（它已經在 `03_with_improv` 示例中存在）：
+固件的网页安装器通过 USB 用 `PAIR_TOKEN` 命令传递令牌（见下文）。
+
+## 解绑
+
+在应用或门户中解绑时，设备会收到 `revoke` 命令。每个固件都需要这个处理函数：
 
 ```cpp
-s_cloud.setUnclaimedCallback([](void*) { s_cloud.requestClaim(); }, nullptr);
+// 在应用或门户中解绑：清除密钥，等待新的绑定。
+s_link.onCommand("revoke", [](JsonObjectConst) { s_link.handleRevoke(); });
 ```
 
-當設備連接到互聯網並檢測到尚未被聲稱時，此回調會自動觸發。
+`handleRevoke()` 清除密钥并保留网络：设备重新等待绑定。没有处理函数时密钥会留在设备中，只有执行 `WIPE_IDENTITY` 之后才能重新绑定。
 
-**2. 打開串行監視器**並重啟主機板：
+## USB 命令
 
-```bash
-pio device monitor -b 115200
+连上网络后，核心在串口上接收命令行（115200，每行以换行结束）：
+
+| 命令 | 回复 | 作用 |
+|---|---|---|
+| `STATUS` | `STATUS:state=… wifi=… ip=… cloud=… serial=… mcu=… fw=… part=…` | 状态：`state` 为 `bound`（已绑定）或 `setup`（等待令牌），`cloud` 为 `online`/`offline` |
+| `WIPE_IDENTITY` | `WIPE_IDENTITY:OK` | 像 `revoke` 一样清除密钥；网络保留 |
+| `PAIR_TOKEN:<令牌>` | `PAIR_TOKEN:OK`、`PAIR_TOKEN:ERROR`、`PAIR_TOKEN:ERROR:ALREADY_BOUND` | 传入绑定令牌；已绑定的设备不接受 |
+
+```text
+STATUS
+STATUS:state=setup wifi=1 ip=192.168.1.42 cloud=offline serial=DEVICE_… mcu=- fw=0.1.0 part=…
 ```
 
-**3. 在日誌中等待 PIN。** 在 WiFi → 佈建 → 等待聲稱之後：
+连上网络之前端口被 Improv 占用，命令没有回复。在带 `IDRYER_DEV_REPL` 的构建中，端口归产品使用，这些命令不存在：见 [详细设置](99-detailed-setup.md)。
 
-```
-[CLOUD] WiFi connected, IP: 192.168.1.42, RSSI: -47 dBm
-[CLOUD] Provisioning device...
-[CLOUD] Provision OK: isNew=1 isClaimed=0
-[CLOUD] Registering device for claim...
-[CLOUD] PIN: 3847291 (expires in 600s)
-```
+## 如果没有成功
 
-設備正在等待。PIN 有效期為 10 分鐘。
-
-**4. 轉到 [portal.idryer.org](https://portal.idryer.org/)**並導航到**添加設備**。
-
-**5. 從串行監視器輸入 PIN**（8 位數字，無空格）。
-
-**6. 在門戶中確認綁定**。串行監視器將顯示：
-
-```
-[CLOUD] Device claimed! deviceId=...
-[CLOUD] Connecting to MQTT...
-[CLOUD] MQTT connected!
-[RT] Cloud Online
-```
-
-## 驗證
-
-打開門戶上的設備列表 — 設備應顯示為**線上**狀態。內置 LED 將每 500 毫秒閃爍一次（如果您正在使用 `01_blink_status` 示例）。
-
-!!! note
-    如果 PIN 過期（已超過 10 分鐘） — 重啟主機板。自動聲稱將生成新 PIN。
-
-!!! warning
-    如果設備已被另一個帳戶聲稱，在啟用 `IDRYER_DEV_REPL=1` 的串行監視器中輸入 `wipe` 命令。NVS 將被擦除，主機板將重啟，聲稱將從新開始。
+- 应用找不到设备：手机和设备要在同一网络；访客网络经常阻止设备发现；
+- 出现 `PAIR_TOKEN:ERROR:ALREADY_BOUND`，或设备属于另一个账户：在门户上解绑，或发送 `WIPE_IDENTITY` 后重新绑定。
 
 ## 下一步
 
-- [03-telemetry.md](03-telemetry.md) — 連接傳感器並將讀數發布到門戶。
-- [02-onboarding.md](02-onboarding.md) — REPL 和 Improv 路徑的詳細登錄文檔。
+[遥测](03-telemetry.md)。

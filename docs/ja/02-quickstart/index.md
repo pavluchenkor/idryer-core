@@ -1,8 +1,17 @@
 # クイックスタート
 
-5分で動作するデバイスを用意できます：ESP32-C3がオンラインになり、ポータルに表示されます。
+数ステップで ESP32 がポータル [portal.idryer.org](https://portal.idryer.org/) と iDryer アプリのデバイスになります。ネットワークに接続し、アカウントに紐付き、データを表示し、カードからのコマンドを受け付けます。
 
-必要なもの：ESP32ボード（ESP32-C3 DevKit、Super Mini、または互換）、USBケーブル、PlatformIO、WiFi 2.4 GHz、および[portal.idryer.org](https://portal.idryer.org/)のアカウント。
+必要なもの：ESP32-C3 ボード（DevKit、Super Mini または互換品）、USB ケーブル、PlatformIO、iDryer アプリの入った電話、2.4 GHz の Wi-Fi ネットワーク、ポータルのアカウント。
 
-- [5分で始める](01-five-minutes.md) — 最初の動作例への段階的なウォークスルー。
-- [詳細セットアップ](99-detailed-setup.md) — 完全な環境分解、開発REPL、初回起動前のトラブルシューティング。
+| ページ | 得られるもの |
+|---|---|
+| [idryer-core の仕組み](00-architecture.md) | コアが行うこと、あなたが書くこと |
+| [5 分で起動](01-five-minutes.md) | 最初のデバイスがオンラインに |
+| [Wi-Fi](01-wifi.md) | デバイスにネットワークを渡す 3 つの方法 |
+| [アカウントへの紐付け](02-claim.md) | 紐付けトークン、紐付け解除、USB コマンド |
+| [テレメトリ](03-telemetry.md) | センサーと独自の値をカードに |
+| [LED テープ](04-leds.md) | エフェクトと色を選んで点灯 |
+| [モードなしのアクション](05-actions.md) | 指定時間のリレーとデバイス呼び出し |
+| [PWM による加熱](06-pwm.md) | モード、セッション、ヒーター出力 |
+| [詳細設定](99-detailed-setup.md) | 環境、ビルドフラグ、ログ、開発モード |

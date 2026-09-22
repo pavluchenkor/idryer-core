@@ -1,76 +1,129 @@
-# Шаг 06 — Замена RMT на PWM
+# Нагрев через ШИМ: режим, сессия, мощность
 
-После этого шага тот же поток команд с портала будет управлять PWM-выходом вместо RMT. Типичное применение — нагреватель через MOSFET или диммер постоянного тока.
+После этой страницы карточка запускает нагрев с температурой и временем, показывает сессию и мощность, а прибор держит температуру ШИМ-выходом по датчику.
 
-## Принцип
+## Что понадобится
 
-Executor — это обычная функция-обработчик. `RmtOutputAdapter` из предыдущего шага — одна из реализаций. Замените её на код с `ledcWrite` — всё остальное (MQTT, команды, статус) остаётся без изменений.
+- датчик SHT31 из [шага «Телеметрия»](03-telemetry.md);
+- логический MOSFET (открывается от 3,3 В) на выводе 3 и нагреватель на его напряжение питания;
+- в `platformio.ini` — `robtillaart/SHT31 @ ^0.5.0`.
 
-## Шаги
+!!! warning
+    Нагреватель без термопредохранителя не оставляйте без присмотра: прошивка может зависнуть, а MOSFET — пробиться накоротко.
 
-**1. Удалить** включение `RmtOutputAdapter` и его инстанс из `main.cpp`. Уберите:
-
-```cpp
-// Удалить:
-#include "controller/RmtOutputAdapter.h"
-static iheaterlink::RmtOutputAdapter s_output{iheaterlink::RmtOutputConfig{}};
-```
-
-**2. Добавить PWM-инициализацию** в `setup()`:
+## Код
 
 ```cpp
-#define PWM_PIN     0      // GPIO для MOSFET
-#define PWM_CHANNEL 0      // LEDC-канал (0–15)
-#define PWM_FREQ_HZ 25000  // 25 кГц — тихо для большинства нагревателей
-#define PWM_RES     8      // 8 бит → duty 0–255
+#include <Arduino.h>
+#include <Wire.h>
+#include <SHT31.h>
+#include <iDryer.h>
 
-ledcSetup(PWM_CHANNEL, PWM_FREQ_HZ, PWM_RES);
-ledcAttachPin(PWM_PIN, PWM_CHANNEL);
-ledcWrite(PWM_CHANNEL, 0);  // выключено при старте
-```
+#define HEATER_PIN  3        // затвор MOSFET
+#define PWM_CHANNEL 0
+#define PWM_FREQ_HZ 1000
+#define PWM_BITS    8        // заполнение 0..255
 
-**3. В обработчике команды** заменить `s_output.apply(cmd)` на `ledcWrite`:
+static const iDryer::Config CFG = {
+    .deviceType      = iDryer::DeviceType::Unknown,
+    .unitsCount      = 1,
+    .hasHeater       = true,    // ячейка мощности нагрева
+    .hasAirTemp      = true,
+    .hasAirHumidity  = true,
+    .hardwareVersion = "1.0",
+    .firmwareVersion = "0.1.0",
+    .model           = "PWM Heater",
+};
+static iDryer::Link s_link(CFG);
+static SHT31 s_sht(0x44, &Wire);
 
-```cpp
-device().onCommand("invoke", [](JsonObjectConst data) {
-    const char* action   = data["action"] | "";
-    JsonObjectConst args = data["args"];
+static void readSensor() {
+    const bool ok = s_sht.read();
+    s_link.telemetry.airTempC[0]       = ok ? s_sht.getTemperature() : NAN;
+    s_link.telemetry.airHumidityPct[0] = ok ? s_sht.getHumidity()    : NAN;
+}
 
-    if (strcmp(action, "heat.start") == 0) {
-        float power01 = args["power"] | 1.0f;  // 0.0–1.0
-        uint8_t duty  = (uint8_t)(power01 * 255.0f);
-        ledcWrite(PWM_CHANNEL, duty);
+static uint32_t s_startMs = 0;
 
-        device().status.mode[0]        = iDryer::UnitMode::Drying;
-        device().telemetry.heaterPower01[0] = power01;
-        device().publishStatusNow();
+static void stopHeat(uint8_t unit) {
+    ledcWrite(PWM_CHANNEL, 0);
+    s_link.telemetry.heaterPower01[unit] = 0.0f;
+    s_link.status.mode[unit]        = iDryer::UnitMode::Idle;
+    s_link.status.targetTempC[unit] = 0.0f;
+    s_link.status.durationS[unit]   = 0;
+    s_link.status.elapsedS[unit]    = 0;
+    s_link.publishStatusNow();
+}
 
-    } else if (strcmp(action, "heat.stop") == 0) {
-        ledcWrite(PWM_CHANNEL, 0);
+static void onHeat(uint8_t unit, JsonObjectConst args) {
+    s_link.status.mode[unit]        = iDryer::UnitMode::Heating;
+    s_link.status.targetTempC[unit] = args["temperature"].as<float>();
+    s_link.status.durationS[unit]   = args["duration"].as<uint32_t>() * 60;   // 0 — без ограничения
+    s_link.status.elapsedS[unit]    = 0;
+    s_startMs = millis();
+    s_link.publishStatusNow();
+}
 
-        device().status.mode[0] = iDryer::UnitMode::Idle;
-        device().telemetry.heaterPower01[0] = 0.0f;
-        device().publishStatusNow();
-    }
-});
-```
+static void onStop(uint8_t unit, JsonObjectConst) { stopHeat(unit); }
 
-**4. `loop()` не меняется:**
+// Раз в секунду: мощность по разнице с уставкой, время сессии.
+static void regulate() {
+    if (s_link.status.mode[0] != iDryer::UnitMode::Heating) return;
 
-```cpp
+    const float t = s_link.telemetry.airTempC[0];
+    // Нет показаний — нагреватель выключен: греть вслепую нельзя.
+    float power = 0.0f;
+    if (!isnan(t)) power = constrain((s_link.status.targetTempC[0] - t) * 0.1f, 0.0f, 1.0f);
+    ledcWrite(PWM_CHANNEL, (uint32_t)(power * 255));
+    s_link.telemetry.heaterPower01[0] = power;
+
+    const uint32_t elapsed = (millis() - s_startMs) / 1000;
+    s_link.status.elapsedS[0] = elapsed;
+    if (s_link.status.durationS[0] && elapsed >= s_link.status.durationS[0]) stopHeat(0);
+}
+
+void setup() {
+    ledcSetup(PWM_CHANNEL, PWM_FREQ_HZ, PWM_BITS);
+    ledcAttachPin(HEATER_PIN, PWM_CHANNEL);
+    ledcWrite(PWM_CHANNEL, 0);
+
+    Wire.begin(8, 9);
+    s_sht.begin();
+
+    s_link.begin();
+    s_link.onCommand("revoke", [](JsonObjectConst) { s_link.handleRevoke(); });
+
+    auto& card = s_link.card();
+    card.action("heat", "HEATING", onHeat)
+        .name("ru", "Нагрев").name("en", "Heat")
+        .param("temperature", "target_temperature", 30, 70, 1, 45, "°C")
+        .param("duration", "duration", 0, 720, 10, 120, "min");
+    card.action("stop", "IDLE", onStop)
+        .name("ru", "Стоп").name("en", "Stop");
+
+    s_link.every(2000, readSensor);
+    s_link.every(1000, regulate);
+}
+
 void loop() {
-    device().loop();
+    s_link.loop();
 }
 ```
 
-!!! warning
-    `ledcSetup` / `ledcAttachPin` — Arduino ESP32 API (до версии arduino-esp32 3.x). В версии 3.x и выше используйте `ledcAttach(pin, freq, resolution)` и `ledcWrite(pin, duty)`. Проверьте версию в `platformio.ini` (`platform = espressif32@X.Y.Z`).
+## Как это работает
+
+- Действие с режимом `HEATING` запускает сессию: колбэк выставляет режим, уставку, длительность и вызывает `publishStatusNow()`. Карточка по режиму показывает блок сессии и **Стоп**.
+- `purpose` `target_temperature` и `duration` портал и приложение подписывают сами. Числа в `args` уже зажаты в пределы параметра.
+- `durationS = 0` — без ограничения времени; `elapsedS` карточка показывает как прошедшее время.
+- `hasHeater` даёт ячейку мощности. В работе ядро отдаёт среднее `heaterPower01` за два последних периода публикации, поэтому частые изменения ШИМ не прыгают на карточке.
+- Регулятор здесь пропорциональный: 10 °C до уставки — полная мощность. Для точного удержания замените его на ПИД.
+- `ledcSetup` / `ledcAttachPin` — API arduino-esp32 2.x. В 3.x — `ledcAttach(pin, freq, bits)` и `ledcWrite(pin, duty)`.
 
 ## Проверка
 
-Нажмите кнопку **Heat** на портале. На выходном пине появится ШИМ-сигнал с заполнением, пропорциональным параметру `power`. Проверьте мультиметром (среднее напряжение) или осциллографом.
+Запустите **Нагрев** на карточке: появится блок сессии с уставкой и временем, ячейка мощности покажет долю включения нагревателя. **Стоп** выключает выход.
 
 ## Что дальше
 
-- [../03-public-api/01-link-api-reference.md](../03-public-api/01-link-api-reference.md) — полный справочник API `iDryer::Link`.
-- [../04-patterns/02-add-peripheral.md](../04-patterns/02-add-peripheral.md) — шаблон для любого нового исполнительного механизма.
+- [Карточка устройства: card-манифест](../09-add-product/02-add-widget.md) — параметры из меню прибора, профили, разметка карточки.
+- [Как добавить новый продукт](../09-add-product/01-add-new-product.md).

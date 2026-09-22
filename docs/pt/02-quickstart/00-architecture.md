@@ -1,75 +1,82 @@
-# Como o idryer-core funciona
+# Como funciona o idryer-core
 
-idryer-core é uma biblioteca para ESP32 que trata de toda a pilha em nuvem: provisionamento WiFi via Improv-Serial, protocolo de reivindicação para vincular um dispositivo a uma conta idryer.org, sessão MQTT com TLS com reconexão automática, roteamento de comandos do portal e publicação periódica de telemetria.
+O idryer-core é uma biblioteca para ESP32. Trata de tudo o que liga um dispositivo ao portal e à aplicação:
 
-Você escreve apenas o que é específico para seu dispositivo: leitura de sensores, acionamento de periféricos. Tudo mais está dentro da biblioteca.
+- Wi-Fi: a rede chega da aplicação iDryer (ESPTouch) ou de uma página web por USB (Improv);
+- a associação a uma conta com um token de uso único, e a desassociação;
+- uma sessão MQTT segura com religação;
+- acesso pela rede local: a aplicação controla o dispositivo mesmo sem internet;
+- a publicação de telemetria e estado, a entrega de comandos;
+- a atualização do firmware pelo ar;
+- o cartão do dispositivo no portal e na aplicação.
 
-## mqtt_contract.yaml — única fonte de verdade
+Só escreve a sua parte: ler sensores, comandar cargas, declarar o que o cartão mostra e que operações inicia.
 
-O arquivo [`contracts/mqtt_contract.yaml`](../../../contracts/mqtt_contract.yaml) define:
-
-- **capabilities** — quais periféricos cada tipo de dispositivo suporta (aquecedor, fita LED, sensores);
-- **telemetry fields** — nomes de campos e tipos de dados em pacotes MQTT;
-- **UART protocol** — estruturas entre ESP32 e um co-processador;
-- **TypeScript types** — para o frontend do portal.
-
-A partir deste arquivo, o código é gerado automaticamente:
-
-| O que é gerado | Onde |
-|---|---|
-| `iDryer::Config` (sinalizadores has*) | `src/_generated/iDryer_api.h` |
-| Tópicos MQTT (constantes C++) | `contracts/_generated/mqtt_topics.h` |
-| Tipos TypeScript | `contracts/_generated/mqtt-api.types.ts` |
-
-!!! warning
-    Não edite manualmente arquivos em `src/_generated/` e `contracts/_generated/` — eles serão sobrescritos na próxima execução de regeneração.
-
-## Como adicionar novos periféricos
-
-O procedimento é o mesmo para qualquer novo recurso — um botão, um sensor de CO2, um leitor RFID.
-
-**1.** Adicione uma entrada a `capability_vocabulary` em [`contracts/mqtt_contract.yaml`](../../../contracts/mqtt_contract.yaml):
-
-```yaml
-co2:
-  json_key: "co2"
-  config_flag: "hasCo2"
-  telemetry_field: "co2Ppm"
-  telemetry_type: "uint16_t"
-  description: "CO2 sensor (ppm)"
-```
-
-**2.** Execute a regeneração:
-
-```bash
-cd contracts
-./regen.sh
-```
-
-Depois disso, `iDryer::Config` terá um campo `hasCo2` e TypeScript terá `HardwareUnitConfigCapabilities.co2`.
-
-**3.** Defina o sinalizador no `main.cpp` do seu dispositivo:
+## Um único ponto de entrada: `iDryer::Link`
 
 ```cpp
+#include <iDryer.h>
+
 static const iDryer::Config CFG = {
-    // ...
-    .hasCo2 = true,
+    .deviceType      = iDryer::DeviceType::Unknown,   // o seu próprio dispositivo
+    .unitsCount      = 1,
+    .hasAirTemp      = true,                          // célula de temperatura
+    .hardwareVersion = "1.0",
+    .firmwareVersion = "0.1.0",
+    .model           = "My Device",
 };
+static iDryer::Link s_link(CFG);
+
+void setup() {
+    s_link.begin();
+    s_link.onCommand("revoke", [](JsonObjectConst) { s_link.handleRevoke(); });
+}
+
+void loop() {
+    s_link.loop();
+    s_link.telemetry.airTempC[0] = readTemperature();   // o seu código
+}
 ```
 
-**4.** Programe o dispositivo. O portal lerá `co2: true` a partir do tópico MQTT `/info` e exibirá automaticamente o bloco de UI correspondente — não são necessárias alterações no portal.
+| Você | O núcleo |
+|---|---|
+| preenche `s_link.telemetry.*` | publica a cada 30 s, a cada 60 s em repouso |
+| altera `s_link.status.*` (modo, setpoint, tempo) e chama `publishStatusNow()` | entrega o estado; o cartão muda conforme o modo |
+| declara `s_link.card()`: sensores, controlos, ações | constrói o card manifest e publica-o |
+| regista `s_link.onCommand(...)` | passa os comandos da nuvem e da rede local |
 
-Para tipos de periféricos ainda não presentes no contrato, abra um PR no repositório idryer-core adicionando uma entrada a `capability_vocabulary`. Após a mesclagem — execute `regen.sh`.
+## Cartão do dispositivo
 
-## Dois produtos de produção construídos em cima desta biblioteca
+O portal e a aplicação desenham o cartão a partir do card manifest enviado pelo dispositivo:
 
-**iDryer Storage Link** — ESP32-C3 com uma fita LED WS2812B e um sensor de temperatura/umidade SHT31.
+- as flags `Config.has*` dão células prontas: temperatura, humidade, potência de aquecimento, ventilador e outras;
+- `card().sensor(...)` acrescenta um valor seu pelo caminho na telemetria;
+- `card().action(...)` declara uma operação: o modo da unidade depois dela e os parâmetros de arranque.
 
-**iHeater Link** — ESP32-C3 com saída RMT para o aquecedor iHeater, com integrações para Bambu Lab, Klipper/Moonraker e Home Assistant.
+Não é preciso código no portal. Detalhes: [Cartão do dispositivo: o card manifest](../09-add-product/02-add-widget.md).
 
-Ambos os produtos incluem idryer-core via PlatformIO `lib_deps` e implementam apenas sua lógica específica do produto.
+## `mqtt_contract.yaml` é a fonte da verdade
 
-## O que vem a seguir
+[`contracts/mqtt_contract.yaml`](../../../contracts/mqtt_contract.yaml) descreve o protocolo: tópicos, campos de telemetria e de estado, capacidades dos dispositivos, o card manifest. A partir dele geram-se:
 
-- [01-wifi.md](01-wifi.md) — conecte o ESP32 ao WiFi usando Improv-Serial.
-- [../../../README.md](../../../README.md) — visão geral da biblioteca e referência de geração de código.
+| O quê | Onde |
+|---|---|
+| `iDryer::Config` (flags `has*`) e estruturas da API | `src/_generated/iDryer_api.h` |
+| tópicos MQTT | `contracts/_generated/mqtt_topics.h` |
+| protocolo UART ESP32 ↔ controlador | `contracts/_generated/uart_protocol.h` |
+| tipos TypeScript para o portal | `contracts/_generated/mqtt-api.types.ts` |
+
+!!! warning
+    Não edite à mão os ficheiros em `_generated/`: `contracts/regen.sh` reescreve-os a partir do contrato.
+
+Um valor seu não exige alterar o contrato: declara-o `card().sensor(...)`. O contrato muda quando todos os produtos precisam de uma capacidade nova: primeiro `mqtt_contract.yaml`, depois `regen.sh`, depois o código.
+
+## Produtos sobre o núcleo
+
+- **iDryer Link**: módulo de comunicação do secador, um ESP32 junto ao controlador, troca por UART.
+- **iDryer Storage**: iluminação de uma estante de bobinas, fita endereçável e sensor SHT31.
+- **iHeater Link**: controlo do aquecedor iHeater, integrações com Bambu Lab, Klipper/Moonraker e Home Assistant.
+
+## A seguir
+
+[Arrancar em 5 minutos](01-five-minutes.md).

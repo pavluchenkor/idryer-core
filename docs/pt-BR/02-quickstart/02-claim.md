@@ -1,66 +1,68 @@
-Depois deste passo seu dispositivo aparecerá em sua conta [portal.idryer.org](https://portal.idryer.org/) com estado Online. Todos os reinícios subsequentes são automáticos — nova vinculação não é necessária.
+# Vinculação à conta
 
+A vinculação é um procedimento único: o dispositivo recebe um token de vinculação de uso único, troca no portal por um segredo permanente e salva o segredo na NVS. Depois ele conecta sozinho ao portal a cada reinício. Enquanto não tem segredo, o dispositivo fica em modo de configuração e espera um token.
 
-O claim é um procedimento único em que o ESP32 se registra na nuvem idryer.org e se vincula à sua conta. O dispositivo gera um PIN de 8 dígitos válido por 10 minutos. Você insere o PIN no portal — vinculação completa.
+## No app iDryer
 
-Após o claim, um `deviceId` é salvo em NVS — o identificador único do dispositivo na nuvem. Nos reinícios subsequentes o ESP32 se conecta diretamente ao MQTT, sem repetir o fluxo de claim.
+1. O dispositivo está na rede (veja [Wi-Fi](01-wifi.md)), o celular na mesma rede.
+2. **Conectar novo dispositivo** → passo **Vinculação** (se o dispositivo já estiver na rede, toque no chip do passo no topo da janela) → **Vincular**.
+3. O app encontra o dispositivo na rede local, pega um token no portal, entrega ao dispositivo e espera o portal confirmar que o dispositivo está online.
+4. Depois de **Dispositivo vinculado**, o dispositivo está na lista do portal e do app.
 
+O log antes da vinculação:
 
-- ESP32 gravado do [Passo 01](01-wifi.md) e conectado ao WiFi
-- Uma conta em [portal.idryer.org](https://portal.idryer.org/)
-- Cabo USB e um Serial Monitor aberto
+```text
+[BOOT] WiFi ok, logs enabled
+[INFO ] CLOUD: WiFi connected, IP: 192.168.1.42, RSSI: -55 dBm, …
+…
+[INFO ] CLOUD: binding-v3: no secret — awaiting pairing token (SETUP)
+```
 
+Depois:
 
-**1. Verifique se o sketch contém auto-claim.** A linha seguinte deve estar em `setup()` (já está presente no exemplo `03_with_improv`):
+```text
+[INFO ] CLOUD: binding-v3: pairing token received (… chars)
+[INFO ] CLOUD: binding-v3: activating with pairing token (serial=DEVICE_… mcu=-)
+[INFO ] CLOUD: binding-v3: activated, deviceId=… -> Ready
+…
+[INFO ] MQTT: Connected! …
+```
+
+O instalador web de firmware passa o token pela USB com o comando `PAIR_TOKEN` (veja abaixo).
+
+## Desvinculação
+
+A desvinculação no app ou no portal chega ao dispositivo como o comando `revoke`. Todo firmware precisa do handler:
 
 ```cpp
-s_cloud.setUnclaimedCallback([](void*) { s_cloud.requestClaim(); }, nullptr);
+// Desvinculação no app ou no portal: apagar o segredo e esperar uma nova vinculação.
+s_link.onCommand("revoke", [](JsonObjectConst) { s_link.handleRevoke(); });
 ```
 
-Este callback executa-se automaticamente quando o dispositivo chega à internet e detecta que ainda não está vinculado.
+`handleRevoke()` apaga o segredo e mantém a rede: o dispositivo volta a esperar a vinculação. Sem o handler, o segredo fica no dispositivo, e só dá para vincular de novo depois de `WIPE_IDENTITY`.
 
-**2. Abra o Serial Monitor** e reinicie a placa:
+## Comandos pela USB
 
-```bash
-pio device monitor -b 115200
+Depois de entrar na rede, o núcleo aceita linhas na porta serial (115200, cada linha termina com uma quebra de linha):
+
+| Comando | Resposta | O que faz |
+|---|---|---|
+| `STATUS` | `STATUS:state=… wifi=… ip=… cloud=… serial=… mcu=… fw=… part=…` | estado: `state` é `bound` (vinculado) ou `setup` (espera um token), `cloud` é `online`/`offline` |
+| `WIPE_IDENTITY` | `WIPE_IDENTITY:OK` | apaga o segredo como `revoke`; a rede continua |
+| `PAIR_TOKEN:<token>` | `PAIR_TOKEN:OK`, `PAIR_TOKEN:ERROR`, `PAIR_TOKEN:ERROR:ALREADY_BOUND` | passa um token de vinculação; um dispositivo vinculado não aceita |
+
+```text
+STATUS
+STATUS:state=setup wifi=1 ip=192.168.1.42 cloud=offline serial=DEVICE_… mcu=- fw=0.1.0 part=…
 ```
 
-**3. Aguarde o PIN no log.** Após WiFi → provisioning → awaiting claim:
+Antes de entrar na rede, a porta está ocupada pelo Improv e os comandos não respondem. Num build com `IDRYER_DEV_REPL`, a porta é do produto e esses comandos não existem: veja [Configuração detalhada](99-detailed-setup.md).
 
-```
-[CLOUD] WiFi connected, IP: 192.168.1.42, RSSI: -47 dBm
-[CLOUD] Provisioning device...
-[CLOUD] Provision OK: isNew=1 isClaimed=0
-[CLOUD] Registering device for claim...
-[CLOUD] PIN: 3847291 (expires in 600s)
-```
+## Se não deu certo
 
-O dispositivo está esperando. O PIN é válido por 10 minutos.
+- o app não acha o dispositivo: celular e dispositivo na mesma rede; redes de convidados costumam bloquear a descoberta de dispositivos;
+- `PAIR_TOKEN:ERROR:ALREADY_BOUND`, ou o dispositivo é de outra conta: desvincule no portal ou envie `WIPE_IDENTITY` e vincule de novo.
 
-**4. Vá para [portal.idryer.org](https://portal.idryer.org/)** e navegue para **Adicionar dispositivo**.
+## Próximo passo
 
-**5. Insira o PIN** do Serial Monitor (8 dígitos, sem espaços).
-
-**6. Confirme a vinculação** no portal. O Serial Monitor mostrará então:
-
-```
-[CLOUD] Device claimed! deviceId=...
-[CLOUD] Connecting to MQTT...
-[CLOUD] MQTT connected!
-[RT] Cloud Online
-```
-
-
-Abra a lista de dispositivos no portal — o dispositivo deve aparecer com estado **Online**. O LED incorporado começará a piscar uma vez a cada 500 ms (se você está usando o exemplo `01_blink_status`).
-
-!!! note
-    Se o PIN expirou (mais de 10 minutos passaram) — reinicie a placa. Auto-claim gerará um novo PIN.
-
-!!! warning
-    Se o dispositivo já está vinculado a outra conta, insira o comando `wipe` no Serial Monitor com `IDRYER_DEV_REPL=1` ativado. NVS será apagado, a placa reiniciará e o claim começará do zero.
-
-
-- [03-telemetry.md](03-telemetry.md) — conecte um sensor e publique leituras no portal.
-- [02-onboarding.md](02-onboarding.md) — documentação detalhada de onboarding para caminhos REPL e Improv.
-
----
+[Telemetria](03-telemetry.md).

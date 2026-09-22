@@ -1,85 +1,51 @@
-# Schritt 01 — WiFi-Bereitstellung mit Improv
+# WLAN
 
-Nach diesem Schritt wird Ihr ESP32 mit WiFi verbunden und die Anmeldedaten werden im NVS gespeichert, um beim nächsten Neustart automatisch eine Verbindung herzustellen. Portal und MQTT folgen im nächsten Schritt.
+Die Firmware enthält kein WLAN-Passwort. Ein Gerät ohne gespeichertes Netz wartet auf Einstellungen; hat es sie bekommen, speichert es das Netz im NVS und verbindet sich danach selbst. Nur Netze mit 2,4 GHz.
 
-## Was Sie benötigen
+## Die iDryer-App (ESPTouch)
 
-**Hardware:**
+Der Hauptweg: die App sendet das Netz per Funk, ohne Kabel.
 
-- ESP32-C3 Board (DevKit, Super Mini oder kompatibel)
-- USB-Kabel (USB-C oder Micro-USB je nach Ihrem Board)
+1. Das Telefon ist in dem Netz, in dem das Gerät arbeiten soll.
+2. **Neues Gerät verbinden** → Schritt **WLAN**: Netzwerknamen prüfen, Passwort eingeben, **Gerät verbinden** tippen.
+3. Die App sendet die Einstellungen bis zu 90 Sekunden lang und zeigt **Gerät verbunden**.
 
-**Software:**
+Bei falschem Passwort wartet das Gerät wieder auf Einstellungen: den Schritt wiederholen.
 
-- PlatformIO in VS Code
-- Chrome oder Edge Browser (Web Serial API wird in Safari oder Firefox nicht unterstützt)
+## Über USB mit Improv
 
-## Schritte
+Solange das Gerät kein Netz hat, hört der Kern auf der seriellen Schnittstelle auf das Improv-Protokoll.
 
-**1. Erstellen Sie `platformio.ini`** im Root Ihres Projekts:
+1. Board per USB anschließen.
+2. [improv-wifi.com/serial](https://www.improv-wifi.com/serial/) in Chrome oder Edge öffnen (Web Serial funktioniert nicht in Safari und Firefox), **Connect** klicken und den Port des Boards wählen.
+3. Netzwerknamen und Passwort eingeben.
 
-```ini
-[env:improv-demo]
-platform   = espressif32
-framework  = arduino
-board      = esp32-c3-devkitm-1
+Der Port ist in dieser Zeit von Improv belegt, deshalb erscheint das Log erst, wenn das Gerät im Netz ist. Den seriellen Monitor schließen, solange Improv arbeitet.
 
-lib_deps =
-    https://github.com/jnthas/Improv-WiFi-Library.git
-    bblanchon/ArduinoJson @ ^6.21.3
-    knolleary/PubSubClient @ ^2.8
-    densaugeo/base64 @ ^1.4.0
-
-build_flags =
-    -DIDRYER_API_BASE='"https://portal.idryer.org/api"'
-    -DMQTT_BROKER='"mqtt.idryer.org"'
-    -DMQTT_PORT=8883
-    -DMQTT_USE_TLS=1
-```
-
-Ersetzen Sie `board` durch den Wert für Ihr Board (`esp32-c3-devkitm-1`, `seeed_xiao_esp32c3`, usw.).
-
-**2. Kopieren Sie das Beispiel.** Nehmen Sie den Inhalt von [`examples/03_with_improv/03_with_improv.ino`](../../../examples/03_with_improv/03_with_improv.ino) und speichern Sie ihn als `src/main.cpp` in Ihrem Projekt.
-
-**3. Setzen Sie die ChipFamily.** In der kopierten Datei finden Sie die Zeile:
+## Im Code, für den Entwicklerstand
 
 ```cpp
-s_improv.setDeviceInfo(ImprovTypes::ChipFamily::CF_ESP32_C3, ...);
+void setup() {
+    // Nur für den Entwicklerstand: das Netz wird im NVS gespeichert, falls es dort noch fehlt.
+    s_link.seedWifiCredentialsIfEmpty("my-ssid", "my-password");
+    s_link.begin();
+}
 ```
 
-Stellen Sie sicher, dass die ChipFamily Ihrem Chip entspricht: `CF_ESP32_C3`, `CF_ESP32_S3` oder `CF_ESP32`.
+`seedWifiCredentialsIfEmpty()` schreibt das Netz nur, wenn im NVS noch keines liegt; `setWifiCredentials()` überschreibt immer. Vor `begin()` aufrufen.
 
-**4. Flashen:**
+!!! warning
+    Keine Firmware mit Passwort im Code veröffentlichen: jeder, der sie herunterlädt, bekommt das Passwort.
 
-```bash
-pio run -e improv-demo -t upload
+## Prüfen
+
+Im Log:
+
+```text
+[BOOT] WiFi ok, logs enabled
+[INFO ] CLOUD: WiFi connected, IP: 192.168.1.42, RSSI: -55 dBm, …
 ```
 
-**5. Öffnen Sie [improv-wifi.com/serial](https://www.improv-wifi.com/serial/)** in Chrome oder Edge. Klicken Sie auf **Verbinden** und wählen Sie den USB-Port des Geräts aus dem Browser-Dialog.
+## Weiter
 
-**6. Geben Sie die SSID und das Passwort** für Ihr 2,4-GHz-Netzwerk ein. Die Webseite sendet die Anmeldedaten über Serial-Improv an das Board. Das Board speichert sie im NVS.
-
-## Überprüfung
-
-Öffnen Sie Serial Monitor:
-
-```bash
-pio device monitor -b 115200
-```
-
-Nach erfolgreichem Verbindungsaufbau sehen Sie:
-
-```
-[BOOT] WiFi connected, Improv done
-[BOOT] IP: 192.168.1.42  RSSI: -47 dBm
-```
-
-Wenn diese Zeile nicht angezeigt wird, siehe Link zur Fehlerbehebung unten.
-
-!!! note
-    Wenn Anmeldedaten bereits im NVS aus einem vorherigen Lauf gespeichert sind, verbindet sich das Board beim Booten automatisch mit WiFi — Improv ist nicht erforderlich.
-
-## Nächste Schritte
-
-- [02-claim.md](02-claim.md) — Binden Sie das Gerät an Ihr idryer.org-Konto.
-- [../../10-troubleshooting/01-troubleshooting.md](../10-troubleshooting/01-troubleshooting.md) — wenn sich WiFi nicht verbindet.
+[Kopplung mit dem Konto](02-claim.md).

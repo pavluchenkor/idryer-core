@@ -1,85 +1,51 @@
-# ステップ 01 — Improv を使用した WiFi プロビジョニング
+# Wi-Fi
 
-このステップの後、ESP32 は WiFi に接続され、認証情報は NVS に保存されて、次回の再起動時に自動的に再接続できるようになります。ポータルと MQTT は次のステップで設定します。
+ファームウェアにネットワークのパスワードはありません。保存されたネットワークのないデバイスは設定を待ち、受け取るとネットワークを NVS に保存して、以後は自分で接続します。2.4 GHz のネットワークのみです。
 
-## 必要なもの
+## iDryer アプリ（ESPTouch）
 
-**ハードウェア:**
+基本の方法：アプリがネットワークを無線で送ります。配線は不要です。
 
-- ESP32-C3 ボード (DevKit、Super Mini、またはそれと互換性のあるもの)
-- USB ケーブル (ボードに応じて USB-C または Micro-USB)
+1. 電話はデバイスを使うネットワークにつながっている。
+2. **新しいデバイスを接続** → **Wi-Fi** ステップ：ネットワーク名を確認し、パスワードを入力して **デバイスを接続** をタップ。
+3. アプリは最大 90 秒間設定を送信し、**デバイスが接続されました** と表示する。
 
-**ソフトウェア:**
+パスワードが違うと、デバイスは再び設定を待ちます。ステップをやり直してください。
 
-- VS Code の PlatformIO
-- Chrome または Edge ブラウザ (Safari と Firefox は Web Serial API をサポートしていません)
+## USB 経由の Improv
 
-## 手順
+ネットワークがない間、コアはシリアルポートで Improv プロトコルを待ち受けます。
 
-**1. プロジェクトのルートに `platformio.ini` を作成します:**
+1. ボードを USB で接続します。
+2. Chrome または Edge で [improv-wifi.com/serial](https://www.improv-wifi.com/serial/) を開き（Web Serial は Safari と Firefox では動きません）、**Connect** を押してボードのポートを選びます。
+3. ネットワーク名とパスワードを入力します。
 
-```ini
-[env:improv-demo]
-platform   = espressif32
-framework  = arduino
-board      = esp32-c3-devkitm-1
+この間ポートは Improv が使うため、ログはデバイスがネットワークにつながってから表示されます。Improv の動作中はシリアルモニターを閉じてください。
 
-lib_deps =
-    https://github.com/jnthas/Improv-WiFi-Library.git
-    bblanchon/ArduinoJson @ ^6.21.3
-    knolleary/PubSubClient @ ^2.8
-    densaugeo/base64 @ ^1.4.0
-
-build_flags =
-    -DIDRYER_API_BASE='"https://portal.idryer.org/api"'
-    -DMQTT_BROKER='"mqtt.idryer.org"'
-    -DMQTT_PORT=8883
-    -DMQTT_USE_TLS=1
-```
-
-`board` をボードの値に置き換えます (`esp32-c3-devkitm-1`、`seeed_xiao_esp32c3` など)。
-
-**2. 例をコピーします。** [`examples/03_with_improv/03_with_improv.ino`](../../../examples/03_with_improv/03_with_improv.ino) の内容を取得し、プロジェクトの `src/main.cpp` として保存します。
-
-**3. ChipFamily を設定します。** コピーしたファイルで、次の行を見つけます:
+## コードで：開発用ベンチ
 
 ```cpp
-s_improv.setDeviceInfo(ImprovTypes::ChipFamily::CF_ESP32_C3, ...);
+void setup() {
+    // 開発用ベンチ専用：NVS にまだネットワークがなければ保存する。
+    s_link.seedWifiCredentialsIfEmpty("my-ssid", "my-password");
+    s_link.begin();
+}
 ```
 
-ChipFamily がお使いのチップと一致していることを確認します: `CF_ESP32_C3`、`CF_ESP32_S3`、または `CF_ESP32`。
+`seedWifiCredentialsIfEmpty()` は NVS にまだネットワークがないときだけ書き込み、`setWifiCredentials()` は常に上書きします。`begin()` の前に呼んでください。
 
-**4. フラッシュします:**
+!!! warning
+    パスワードをコードに入れたファームウェアを公開しないでください。ダウンロードした全員にパスワードが渡ります。
 
-```bash
-pio run -e improv-demo -t upload
+## 確認
+
+ログ：
+
+```text
+[BOOT] WiFi ok, logs enabled
+[INFO ] CLOUD: WiFi connected, IP: 192.168.1.42, RSSI: -55 dBm, …
 ```
 
-**5. Chrome または Edge で [improv-wifi.com/serial](https://www.improv-wifi.com/serial/) を開きます。** **接続** をクリックし、ブラウザ ダイアログからデバイスの USB ポートを選択します。
+## 次へ
 
-**6. 2.4 GHz ネットワークの SSID とパスワードを入力します。** ウェブ ページは Serial-Improv 経由でボードに認証情報を送信します。ボードは NVS に保存します。
-
-## 検証
-
-Serial Monitor を開きます:
-
-```bash
-pio device monitor -b 115200
-```
-
-接続が成功すると、以下が表示されます:
-
-```
-[BOOT] WiFi connected, Improv done
-[BOOT] IP: 192.168.1.42  RSSI: -47 dBm
-```
-
-この行が表示されない場合は、下のトラブルシューティング リンクを参照してください。
-
-!!! note
-    前回の実行から NVS に認証情報が既に保存されている場合、ボードは起動時に自動的に WiFi に接続します — Improv は不要です。
-
-## 次は?
-
-- [02-claim.md](02-claim.md) — デバイスを idryer.org アカウントにバインドします。
-- [../../10-troubleshooting/01-troubleshooting.md](../10-troubleshooting/01-troubleshooting.md) — WiFi が接続しない場合。
+[アカウントへの紐付け](02-claim.md)。

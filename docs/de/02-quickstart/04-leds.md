@@ -1,95 +1,105 @@
-# Schritt 04 — Anzeige: LED-Streifen gesteuert durch Sensordaten
+# LED-Streifen: Einschalten mit Effekt und Farbe
 
-Nach diesem Schritt ändert ein WS2812B-Streifen die Farbe basierend auf der Luftfeuchtigkeit, und die Helligkeit kann vom Portal über einen `set` Befehl gesteuert werden.
+Nach dieser Seite hat die Karte die Aktion **Turn on** mit Auswahl von Effekt und Farbe sowie **Turn off**.
 
-## Was Sie benötigen
+## Was Sie brauchen
 
-**Hardware:**
-
-- WS2812B LED-Streifen (oder WS2811/SK6812)
-- 330–470 Ω Widerstand auf der Datenleitung
-- 5 V Stromversorgung (Strom hängt von der Streifenlänge ab; 300 LEDs verbrauchen bis zu 18 A)
-
-**Software:**
-
-- Bibliothek `fastled/FastLED @ ^3.6.0`
-
-!!! warning
-    Speisen Sie den Streifen von einer dedizierten 5 V Stromversorgung. Das Speisen über den 3,3 V oder 5 V Pin des Boards ist nur für einen schnellen Rauchtest mit wenigen LEDs akzeptabel.
-
-## Schritte
-
-**1. Fügen Sie FastLED** zu `platformio.ini` hinzu:
+- einen Streifen WS2812B (oder WS2811, SK6812);
+- einen Widerstand 330–470 Ω in der Datenleitung;
+- ein 5-V-Netzteil: eine LED zieht bei vollem Weiß bis zu 60 mA, 60 LEDs bis zu 3,6 A;
+- in `platformio.ini`:
 
 ```ini
 lib_deps =
-    fastled/FastLED @ ^3.6.0
-    ; ... andere Abhängigkeiten
+    fastled/FastLED @ 3.10.3
 ```
 
-**2. Deklarieren Sie den Puffer und Executor** in `main.cpp`. Basierend auf [`iDryer-Storage/src/main.cpp`](../../../../iDryer-Storage/src/main.cpp):
+FastLED 3.10.5 passt zusammen mit dem Kern nicht in den Flash des ESP32-C3 (1,7 MB bei einer Partition von 1,25 MB); mit 3.10.3 sind es 1,16 MB.
+
+!!! warning
+    Den Streifen aus einem eigenen 5-V-Netzteil versorgen und die Massen von Netzteil und Board verbinden. Ein Pin des Boards reicht nur für einen Test mit wenigen LEDs.
+
+## Code
 
 ```cpp
+#include <Arduino.h>
 #include <FastLED.h>
-#include "storage/led_strip/led_strip_executor.h"
+#include <iDryer.h>
 
-#define STORAGE_LED_PIN  4
-#define STORAGE_MAX_LEDS 300
+#define LED_DATA_PIN 4
+#define LED_COUNT    60
 
-static CRGB             s_leds[STORAGE_MAX_LEDS];
-static LedStripExecutor s_executor(s_leds, STORAGE_MAX_LEDS);
-```
+static const iDryer::Config CFG = {
+    .deviceType      = iDryer::DeviceType::Unknown,
+    .unitsCount      = 1,
+    .hardwareVersion = "1.0",
+    .firmwareVersion = "0.1.0",
+    .model           = "LED Strip",
+};
+static iDryer::Link s_link(CFG);
 
-**3. Initialisieren Sie den Streifen** in `setup()`:
+static CRGB s_leds[LED_COUNT];
+static const char* const kEffects[] = { "solid", "breathe" };
+static CRGB s_color   = CRGB::White;
+static bool s_breathe = false;
 
-```cpp
-FastLED.addLeds<WS2812B, STORAGE_LED_PIN, GRB>(s_leds, 60);
-FastLED.setBrightness(128);
-FastLED.clear(true);
-```
+static void onLightOn(uint8_t unit, JsonObjectConst args) {
+    const char* hex = args["color"] | "#FFFFFF";          // "#RRGGBB"
+    s_color   = CRGB(strtoul(hex + 1, nullptr, 16));
+    s_breathe = strcmp(args["effect"] | "solid", "breathe") == 0;
+    s_link.status.mode[unit] = iDryer::UnitMode::LightAnimation;
+    s_link.publishStatusNow();
+}
 
-Ersetzen Sie `60` durch die tatsächliche LED-Anzahl Ihres Streifens.
+static void onLightOff(uint8_t unit, JsonObjectConst) {
+    s_link.status.mode[unit] = iDryer::UnitMode::Idle;
+    s_link.publishStatusNow();
+}
 
-**4. Ändern Sie die Farbe nach Luftfeuchtigkeit** in `loop()`. Farbskala: blau (trocken) → gelb → rot (feucht):
+// Streifen-Frame alle 20 ms: die Farbe, bei breathe weiche Helligkeit.
+static void drawLeds() {
+    const bool on = s_link.status.mode[0] == iDryer::UnitMode::LightAnimation;
+    CRGB c = s_color;
+    c.nscale8(!on ? 0 : s_breathe ? beatsin8(15, 30, 255) : 255);
+    fill_solid(s_leds, LED_COUNT, c);
+    FastLED.show();
+}
 
-```cpp
-if (s_sensorOk) {
-    s_sensor.tick(millis());
-    SensorReading r = s_sensor.get();
-    if (r.ok) {
-        s_link.telemetry.airHumidityPct[0] = r.humidity;
+void setup() {
+    FastLED.addLeds<WS2812B, LED_DATA_PIN, GRB>(s_leds, LED_COUNT);
+    FastLED.setBrightness(128);
 
-        // Humidity 20%–80% → hue from 160 (blue) to 0 (red).
-        float h = constrain(r.humidity, 20.0f, 80.0f);
-        uint8_t hue = (uint8_t)(160.0f - (h - 20.0f) / 60.0f * 160.0f);
-        fill_solid(s_leds, s_executor.ledsCount(), CHSV(hue, 255, 200));
-        FastLED.show();
-    }
+    s_link.begin();
+    s_link.onCommand("revoke", [](JsonObjectConst) { s_link.handleRevoke(); });
+
+    auto& card = s_link.card();
+    card.action("light_on", "LIGHT_ANIMATION", onLightOn)
+        .name("ru", "Включить").name("en", "Turn on")
+        .select("effect", "effect", kEffects, 2, "solid")
+        .color("color", "rgb_color", "#FFFFFF");
+    card.action("light_off", "IDLE", onLightOff)
+        .name("ru", "Выключить").name("en", "Turn off");
+
+    s_link.every(20, drawLeds);
+}
+
+void loop() {
+    s_link.loop();
 }
 ```
 
-**5. Steuern Sie die Helligkeit vom Portal.** Registrieren Sie einen `set` Befehls-Handler in `setup()`:
+## So funktioniert es
 
-```cpp
-s_link.onCommand("set", [](JsonObjectConst data) {
-    int id  = data["id"]  | -1;
-    int val = data["val"] | -1;
-    if (id == MENU_BRIGHTNESS && val >= 0 && val <= 255) {
-        FastLED.setBrightness((uint8_t)val);
-        FastLED.show();
-    }
-});
-```
+- `card().action(id, mode, cb)` deklariert eine Aktion. `mode` ist der Modus der Einheit danach: `LIGHT_ANIMATION` beim Einschalten, `IDLE` beim Ausschalten.
+- `.name("ru", …)` und `.name("en", …)` sind der Name der Taste; in anderen Sprachen zeigt die Karte den englischen.
+- `.select(...)` und `.color(...)` sind die Parameter des Einschaltens. Die Purposes `effect` und `rgb_color` beschriften Portal und App selbst; einen Wert außerhalb der Liste ersetzt der Kern durch den Standardwert.
+- Der Callback bekommt die Parameter in `args` nach ihren IDs, setzt `status.mode` und ruft `publishStatusNow()`.
+- Die Karte wählt nach dem Modus der Einheit: aus zeigt das Formular **Turn on**; an zeigt den Block des leuchtenden Streifens und die Taste **Turn off**.
 
-`MENU_BRIGHTNESS` ist eine Konstante aus [`iDryer-Storage/src/menu/menu_ids.h`](../../../../iDryer-Storage/src/menu/menu_ids.h), generiert von `menu.yaml` über `regen.sh`. In Ihrem eigenen Produkt unterscheiden sich Name und Wert — überprüfen Sie `menu_ids.h` Ihres Projekts.
+## Prüfen
 
-## Überprüfung
+Wählen Sie auf der Karte Effekt und Farbe und tippen Sie auf **Turn on**: der Streifen leuchtet, die Karte zeigt **Turn off**.
 
-Nach dem Flashen sollte der Streifen in der Farbe aufleuchten, die der aktuellen Luftfeuchtigkeit entspricht. Wenn kein Sensor vorhanden ist, bleibt der Streifen aus (Executor erhält keine Daten).
+## Weiter
 
-Öffnen Sie die Geräteeinstellungen im Portal und passen Sie den Helligkeitsschieber an — der Streifen reagiert sofort.
-
-## Nächste Schritte
-
-- [05-rmt-command.md](05-rmt-command.md) — steuern Sie einen Aktuator von einem Portal-Befehl (RMT-Ausgang).
-- [led_strip_executor.h](../../../../iDryer-Storage/src/storage/led_strip/led_strip_executor.h) — Executor-API: Zonen-Puls, Animationen, Helligkeit.
+[Aktionen ohne Modus](05-actions.md).

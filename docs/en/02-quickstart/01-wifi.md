@@ -1,85 +1,51 @@
-# Step 01 — WiFi provisioning with Improv
+# Wi-Fi
 
-After this step your ESP32 will be connected to WiFi and the credentials will be saved to NVS for automatic reconnection on the next reboot. Portal and MQTT come in the next step.
+The firmware has no network password. A device without a saved network waits for settings; once it gets them, it saves the network to NVS and connects on its own from then on. 2.4 GHz networks only.
 
-## What you need
+## The iDryer app (ESPTouch)
 
-**Hardware:**
+The main way: the app sends the network over the air, no wires.
 
-- ESP32-C3 board (DevKit, Super Mini, or compatible)
-- USB cable (USB-C or Micro-USB depending on your board)
+1. The phone is on the network the device will use.
+2. **Connect a new device** → the **Wi-Fi** step: check the network name, enter the password, tap **Connect device**.
+3. The app sends the settings for up to 90 seconds and shows **Device connected**.
 
-**Software:**
+With a wrong password the device waits for settings again: repeat the step.
 
-- PlatformIO in VS Code
-- Chrome or Edge browser (Web Serial API is not supported in Safari or Firefox)
+## Over USB with Improv
 
-## Steps
+While the device has no network, the core listens for the Improv protocol on the serial port.
 
-**1. Create `platformio.ini`** in the root of your project:
+1. Connect the board over USB.
+2. Open [improv-wifi.com/serial](https://www.improv-wifi.com/serial/) in Chrome or Edge (Web Serial does not work in Safari and Firefox), click **Connect** and choose the board's port.
+3. Enter the network name and password.
 
-```ini
-[env:improv-demo]
-platform   = espressif32
-framework  = arduino
-board      = esp32-c3-devkitm-1
+The port is busy with Improv at this time, so the log appears only after the device joins the network. Close the serial monitor while Improv is working.
 
-lib_deps =
-    https://github.com/jnthas/Improv-WiFi-Library.git
-    bblanchon/ArduinoJson @ ^6.21.3
-    knolleary/PubSubClient @ ^2.8
-    densaugeo/base64 @ ^1.4.0
-
-build_flags =
-    -DIDRYER_API_BASE='"https://portal.idryer.org/api"'
-    -DMQTT_BROKER='"mqtt.idryer.org"'
-    -DMQTT_PORT=8883
-    -DMQTT_USE_TLS=1
-```
-
-Replace `board` with the value for your board (`esp32-c3-devkitm-1`, `seeed_xiao_esp32c3`, etc.).
-
-**2. Copy the example.** Take the contents of [`examples/03_with_improv/03_with_improv.ino`](../../../examples/03_with_improv/03_with_improv.ino) and save it as `src/main.cpp` in your project.
-
-**3. Set the ChipFamily.** In the copied file, find the line:
+## In code, for a developer bench
 
 ```cpp
-s_improv.setDeviceInfo(ImprovTypes::ChipFamily::CF_ESP32_C3, ...);
+void setup() {
+    // Developer bench only: the network is saved to NVS if it is not there yet.
+    s_link.seedWifiCredentialsIfEmpty("my-ssid", "my-password");
+    s_link.begin();
+}
 ```
 
-Make sure the ChipFamily matches your chip: `CF_ESP32_C3`, `CF_ESP32_S3`, or `CF_ESP32`.
+`seedWifiCredentialsIfEmpty()` writes the network only if NVS does not have one yet; `setWifiCredentials()` always overwrites. Call them before `begin()`.
 
-**4. Flash:**
+!!! warning
+    Do not release firmware with a password in the code: everyone who downloads it gets the password.
 
-```bash
-pio run -e improv-demo -t upload
+## Check
+
+In the log:
+
+```text
+[BOOT] WiFi ok, logs enabled
+[INFO ] CLOUD: WiFi connected, IP: 192.168.1.42, RSSI: -55 dBm, …
 ```
 
-**5. Open [improv-wifi.com/serial](https://www.improv-wifi.com/serial/)** in Chrome or Edge. Click **Connect** and select the device USB port from the browser dialog.
+## Next
 
-**6. Enter the SSID and password** for your 2.4 GHz network. The web page will send the credentials to the board over Serial-Improv. The board will save them to NVS.
-
-## Verification
-
-Open the Serial Monitor:
-
-```bash
-pio device monitor -b 115200
-```
-
-After a successful connection you will see:
-
-```
-[BOOT] WiFi connected, Improv done
-[BOOT] IP: 192.168.1.42  RSSI: -47 dBm
-```
-
-If this line does not appear, see the troubleshooting link below.
-
-!!! note
-    If credentials are already saved in NVS from a previous run, the board connects to WiFi at boot automatically — Improv is not needed.
-
-## What's next
-
-- [02-claim.md](02-claim.md) — bind the device to your idryer.org account.
-- [../../10-troubleshooting/01-troubleshooting.md](../10-troubleshooting/01-troubleshooting.md) — if WiFi does not connect.
+[Linking to an account](02-claim.md).

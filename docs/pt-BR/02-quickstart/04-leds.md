@@ -1,87 +1,105 @@
-Depois deste passo uma fita WS2812B mudará de cor baseada na umidade e o brilho será controlável a partir do portal via comando `set`.
+# Fita LED: ligar com um efeito e uma cor
 
+Depois desta página, o card tem a ação **Turn on**, com escolha de efeito e cor, e **Turn off**.
 
-**Hardware:**
+## O que você precisa
 
-- Fita LED WS2812B (ou WS2811/SK6812)
-- Resistor 330–470 Ω na linha de dados
-- Fonte de alimentação 5 V (corrente depende do comprimento da fita; 300 LEDs consomem até 18 A)
-
-**Software:**
-
-- Biblioteca `fastled/FastLED @ ^3.6.0`
-
-!!! warning
-    Alimente a fita a partir de uma fonte de alimentação dedicada 5 V. Alimentar através do pino 3,3 V ou 5 V da placa é aceitável apenas para um teste rápido com alguns LEDs.
-
-
-**1. Adicione FastLED** a `platformio.ini`:
+- uma fita WS2812B (ou WS2811, SK6812);
+- um resistor de 330–470 Ω na linha de dados;
+- uma fonte de 5 V: um LED em branco no brilho máximo puxa até 60 mA, 60 LEDs até 3,6 A;
+- no `platformio.ini`:
 
 ```ini
 lib_deps =
-    fastled/FastLED @ ^3.6.0
-    ; ... outras dependências
+    fastled/FastLED @ 3.10.3
 ```
 
-**2. Declare o buffer e executor** em `main.cpp`. Baseado em [`iDryer-Storage/src/main.cpp`](../../../../iDryer-Storage/src/main.cpp):
+O FastLED 3.10.5 junto com o núcleo não cabe na flash do ESP32-C3 (1,7 MB para uma partição de 1,25 MB); com o 3.10.3 são 1,16 MB.
+
+!!! warning
+    Alimente a fita com uma fonte de 5 V separada e ligue os terras da fonte e da placa. Um pino da placa só serve para testar com poucos LEDs.
+
+## Código
 
 ```cpp
+#include <Arduino.h>
+#include <FastLED.h>
+#include <iDryer.h>
 
+#define LED_DATA_PIN 4
+#define LED_COUNT    60
 
-static CRGB             s_leds[STORAGE_MAX_LEDS];
-static LedStripExecutor s_executor(s_leds, STORAGE_MAX_LEDS);
-```
+static const iDryer::Config CFG = {
+    .deviceType      = iDryer::DeviceType::Unknown,
+    .unitsCount      = 1,
+    .hardwareVersion = "1.0",
+    .firmwareVersion = "0.1.0",
+    .model           = "LED Strip",
+};
+static iDryer::Link s_link(CFG);
 
-**3. Inicialize a fita** em `setup()`:
+static CRGB s_leds[LED_COUNT];
+static const char* const kEffects[] = { "solid", "breathe" };
+static CRGB s_color   = CRGB::White;
+static bool s_breathe = false;
 
-```cpp
-FastLED.addLeds<WS2812B, STORAGE_LED_PIN, GRB>(s_leds, 60);
-FastLED.setBrightness(128);
-FastLED.clear(true);
-```
+static void onLightOn(uint8_t unit, JsonObjectConst args) {
+    const char* hex = args["color"] | "#FFFFFF";          // "#RRGGBB"
+    s_color   = CRGB(strtoul(hex + 1, nullptr, 16));
+    s_breathe = strcmp(args["effect"] | "solid", "breathe") == 0;
+    s_link.status.mode[unit] = iDryer::UnitMode::LightAnimation;
+    s_link.publishStatusNow();
+}
 
-Substitua `60` com o número de LED atual de sua fita.
+static void onLightOff(uint8_t unit, JsonObjectConst) {
+    s_link.status.mode[unit] = iDryer::UnitMode::Idle;
+    s_link.publishStatusNow();
+}
 
-**4. Mude a cor por umidade** em `loop()`. Escala de cor: azul (seco) → amarelo → vermelho (úmido):
+// Quadro da fita a cada 20 ms: a cor, brilho suave no breathe.
+static void drawLeds() {
+    const bool on = s_link.status.mode[0] == iDryer::UnitMode::LightAnimation;
+    CRGB c = s_color;
+    c.nscale8(!on ? 0 : s_breathe ? beatsin8(15, 30, 255) : 255);
+    fill_solid(s_leds, LED_COUNT, c);
+    FastLED.show();
+}
 
-```cpp
-if (s_sensorOk) {
-    s_sensor.tick(millis());
-    SensorReading r = s_sensor.get();
-    if (r.ok) {
-        s_link.telemetry.airHumidityPct[0] = r.humidity;
+void setup() {
+    FastLED.addLeds<WS2812B, LED_DATA_PIN, GRB>(s_leds, LED_COUNT);
+    FastLED.setBrightness(128);
 
-        // Umidade 20 %–80 % → hue de 160 (azul) para 0 (vermelho).
-        float h = constrain(r.humidity, 20.0f, 80.0f);
-        uint8_t hue = (uint8_t)(160.0f - (h - 20.0f) / 60.0f * 160.0f);
-        fill_solid(s_leds, s_executor.ledsCount(), CHSV(hue, 255, 200));
-        FastLED.show();
-    }
+    s_link.begin();
+    s_link.onCommand("revoke", [](JsonObjectConst) { s_link.handleRevoke(); });
+
+    auto& card = s_link.card();
+    card.action("light_on", "LIGHT_ANIMATION", onLightOn)
+        .name("ru", "Включить").name("en", "Turn on")
+        .select("effect", "effect", kEffects, 2, "solid")
+        .color("color", "rgb_color", "#FFFFFF");
+    card.action("light_off", "IDLE", onLightOff)
+        .name("ru", "Выключить").name("en", "Turn off");
+
+    s_link.every(20, drawLeds);
+}
+
+void loop() {
+    s_link.loop();
 }
 ```
 
-**5. Controle o brilho a partir do portal.** Registre um manipulador de comando `set` em `setup()`:
+## Como funciona
 
-```cpp
-s_link.onCommand("set", [](JsonObjectConst data) {
-    int id  = data["id"]  | -1;
-    int val = data["val"] | -1;
-    if (id == MENU_BRIGHTNESS && val >= 0 && val <= 255) {
-        FastLED.setBrightness((uint8_t)val);
-        FastLED.show();
-    }
-});
-```
+- `card().action(id, mode, cb)` declara uma ação. `mode` é o modo da unidade depois dela: `LIGHT_ANIMATION` ao ligar, `IDLE` ao desligar.
+- `.name("ru", …)` e `.name("en", …)` são o nome do botão; nos outros idiomas o card mostra o inglês.
+- `.select(...)` e `.color(...)` são os parâmetros de ligar. O portal e o app dão nome sozinhos aos purposes `effect` e `rgb_color`; um valor fora da lista o núcleo troca pelo valor padrão.
+- O callback recebe os parâmetros em `args` pelos ids, define `status.mode` e chama `publishStatusNow()`.
+- O card escolhe pelo modo da unidade: desligada mostra o formulário **Turn on**; ligada mostra o bloco da fita acesa e o botão **Turn off**.
 
-`MENU_BRIGHTNESS` é uma constante de [`iDryer-Storage/src/menu/menu_ids.h`](../../../../iDryer-Storage/src/menu/menu_ids.h), gerada a partir de `menu.yaml` via `regen.sh`. No seu próprio produto o nome e o valor diferirão — verifique `menu_ids.h` do seu projeto.
+## Verificação
 
+No card escolha um efeito e uma cor e toque em **Turn on**: a fita acende e o card mostra **Turn off**.
 
-Após gravar, a fita deve acender-se na cor correspondente à umidade atual. Se nenhum sensor estiver presente, a fita permanece apagada (o executor não recebe dados).
+## Próximo passo
 
-Abra as configurações do dispositivo no portal e ajuste o controle deslizante de brilho — a fita responde imediatamente.
-
-
-- [05-rmt-command.md](05-rmt-command.md) — acione um atuador a partir de um comando do portal (saída RMT).
-- [led_strip_executor.h](../../../../iDryer-Storage/src/storage/led_strip/led_strip_executor.h) — API executor: zone pulse, animações, brilho.
-
----
+[Ações sem modo](05-actions.md).

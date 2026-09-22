@@ -1,71 +1,68 @@
-# Schritt 02 — Claim: Bindung an das Portal
+# Kopplung mit dem Konto
 
-Nach diesem Schritt wird Ihr Gerät in Ihrem Konto auf [portal.idryer.org](https://portal.idryer.org/) mit Status Online angezeigt. Alle nachfolgenden Neustarts sind automatisch — kein erneuter Claim erforderlich.
+Die Kopplung ist ein einmaliger Vorgang: das Gerät bekommt ein einmaliges Kopplungstoken, tauscht es beim Portal gegen ein dauerhaftes Geheimnis und speichert das Geheimnis im NVS. Danach verbindet es sich nach jedem Neustart selbst mit dem Portal. Solange es kein Geheimnis hat, ist das Gerät im Einrichtungsmodus und wartet auf ein Token.
 
-## Was ist Claiming
+## In der iDryer-App
 
-Claiming ist ein einmaliges Verfahren, bei dem sich der ESP32 bei der idryer.org Cloud registriert und an Ihr Konto bindet. Das Gerät generiert eine 8-stellige PIN mit einer Gültigkeit von 10 Minuten. Sie geben die PIN im Portal ein — die Bindung ist fertig.
+1. Das Gerät ist im Netz (siehe [WLAN](01-wifi.md)), das Telefon im selben Netz.
+2. **Neues Gerät verbinden** → Schritt **Kopplung** (ist das Gerät schon im Netz, oben im Fenster auf den Chip des Schritts tippen) → **Koppeln**.
+3. Die App findet das Gerät im lokalen Netz, holt beim Portal ein Token, übergibt es dem Gerät und wartet, bis das Portal bestätigt, dass das Gerät online ist.
+4. Nach **Gerät gekoppelt** steht das Gerät in der Liste im Portal und in der App.
 
-Nach dem Claim wird eine `deviceId` im NVS gespeichert — die eindeutige Kennung des Geräts in der Cloud. Bei nachfolgenden Neustarts verbindet sich der ESP32 direkt mit MQTT, ohne den Claim-Fluss zu wiederholen.
+Das Log vor der Kopplung:
 
-## Was Sie benötigen
+```text
+[BOOT] WiFi ok, logs enabled
+[INFO ] CLOUD: WiFi connected, IP: 192.168.1.42, RSSI: -55 dBm, …
+…
+[INFO ] CLOUD: binding-v3: no secret — awaiting pairing token (SETUP)
+```
 
-- ESP32 geflasht von [Schritt 01](01-wifi.md) und mit WiFi verbunden
-- Ein Konto auf [portal.idryer.org](https://portal.idryer.org/)
-- USB-Kabel und einen offenen Serial Monitor
+Danach:
 
-## Schritte
+```text
+[INFO ] CLOUD: binding-v3: pairing token received (… chars)
+[INFO ] CLOUD: binding-v3: activating with pairing token (serial=DEVICE_… mcu=-)
+[INFO ] CLOUD: binding-v3: activated, deviceId=… -> Ready
+…
+[INFO ] MQTT: Connected! …
+```
 
-**1. Überprüfen Sie, dass der Sketch Auto-Claim enthält.** Die folgende Zeile muss in `setup()` sein (sie ist bereits im Beispiel `03_with_improv` vorhanden):
+Der Web-Installer für Firmware übergibt das Token über USB mit dem Befehl `PAIR_TOKEN` (siehe unten).
+
+## Entkopplung
+
+Eine Entkopplung in der App oder im Portal erreicht das Gerät als Befehl `revoke`. Jede Firmware braucht den Handler:
 
 ```cpp
-s_cloud.setUnclaimedCallback([](void*) { s_cloud.requestClaim(); }, nullptr);
+// Entkopplung in der App oder im Portal: Geheimnis löschen und auf neue Kopplung warten.
+s_link.onCommand("revoke", [](JsonObjectConst) { s_link.handleRevoke(); });
 ```
 
-Dieser Callback wird automatisch ausgelöst, wenn das Gerät das Internet erreicht und erkennt, dass es noch nicht beansprucht wurde.
+`handleRevoke()` löscht das Geheimnis, das Netz bleibt: das Gerät wartet wieder auf eine Kopplung. Ohne Handler bleibt das Geheimnis im Gerät, und neu koppeln lässt es sich erst nach `WIPE_IDENTITY`.
 
-**2. Öffnen Sie Serial Monitor** und starten Sie das Board neu:
+## USB-Befehle
 
-```bash
-pio device monitor -b 115200
+Nach dem Beitritt zum Netz nimmt der Kern Zeilen über die serielle Schnittstelle an (115200, jede Zeile endet mit einem Zeilenumbruch):
+
+| Befehl | Antwort | Wirkung |
+|---|---|---|
+| `STATUS` | `STATUS:state=… wifi=… ip=… cloud=… serial=… mcu=… fw=… part=…` | Zustand: `state` ist `bound` (gekoppelt) oder `setup` (wartet auf Token), `cloud` ist `online`/`offline` |
+| `WIPE_IDENTITY` | `WIPE_IDENTITY:OK` | löscht das Geheimnis wie `revoke`; das Netz bleibt |
+| `PAIR_TOKEN:<Token>` | `PAIR_TOKEN:OK`, `PAIR_TOKEN:ERROR`, `PAIR_TOKEN:ERROR:ALREADY_BOUND` | übergibt ein Kopplungstoken; ein gekoppeltes Gerät nimmt kein Token an |
+
+```text
+STATUS
+STATUS:state=setup wifi=1 ip=192.168.1.42 cloud=offline serial=DEVICE_… mcu=- fw=0.1.0 part=…
 ```
 
-**3. Warten Sie auf die PIN im Protokoll.** Nach WiFi → Provisioning → Warten auf Claim:
+Bevor das Gerät im Netz ist, belegt Improv den Port, und die Befehle antworten nicht. In einem Build mit `IDRYER_DEV_REPL` gehört der Port dem Produkt, und diese Befehle gibt es nicht: siehe [Ausführliche Einrichtung](99-detailed-setup.md).
 
-```
-[CLOUD] WiFi connected, IP: 192.168.1.42, RSSI: -47 dBm
-[CLOUD] Provisioning device...
-[CLOUD] Provision OK: isNew=1 isClaimed=0
-[CLOUD] Registering device for claim...
-[CLOUD] PIN: 3847291 (expires in 600s)
-```
+## Wenn es nicht klappt
 
-Das Gerät wartet. Die PIN ist 10 Minuten lang gültig.
+- die App findet das Gerät nicht: Telefon und Gerät im selben Netz; Gastnetze blockieren oft die Gerätesuche;
+- `PAIR_TOKEN:ERROR:ALREADY_BOUND` oder das Gerät gehört zu einem anderen Konto: im Portal entkoppeln oder `WIPE_IDENTITY` senden und neu koppeln.
 
-**4. Gehen Sie zu [portal.idryer.org](https://portal.idryer.org/)** und navigieren Sie zu **Gerät hinzufügen**.
+## Weiter
 
-**5. Geben Sie die PIN** aus dem Serial Monitor ein (7 Ziffern, keine Leerzeichen).
-
-**6. Bestätigen Sie die Bindung** im Portal. Der Serial Monitor zeigt dann:
-
-```
-[CLOUD] Device claimed! deviceId=...
-[CLOUD] Connecting to MQTT...
-[CLOUD] MQTT connected!
-[RT] Cloud Online
-```
-
-## Überprüfung
-
-Öffnen Sie die Geräteliste im Portal — das Gerät sollte mit Status **Online** angezeigt werden. Die eingebaute LED blinkt dann einmal pro 500 ms (wenn Sie das Beispiel `01_blink_status` verwenden).
-
-!!! note
-    Wenn die PIN abgelaufen ist (mehr als 10 Minuten vergangen) — starten Sie das Board neu. Auto-Claim generiert eine neue PIN.
-
-!!! warning
-    Wenn das Gerät bereits von einem anderen Konto beansprucht wurde, geben Sie den Befehl `wipe` im Serial Monitor mit aktiviertem `IDRYER_DEV_REPL=1` ein. Das NVS wird gelöscht, das Board wird neu gestartet und das Claiming beginnt von vorne.
-
-## Nächste Schritte
-
-- [03-telemetry.md](03-telemetry.md) — verbinden Sie einen Sensor und veröffentlichen Sie Messwerte im Portal.
-- [02-onboarding.md](02-onboarding.md) — detaillierte Onboarding-Dokumentation für REPL- und Improv-Pfade.
+[Telemetrie](03-telemetry.md).

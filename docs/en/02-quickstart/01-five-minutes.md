@@ -1,95 +1,146 @@
 ---
-title: "Start an idryer-core device in 5 minutes"
-description: "A quick developer start: build a minimal ESP32 device with idryer-core, connect Wi-Fi and MQTT, and verify commands."
+title: "Run a device on idryer-core in 5 minutes"
+description: "Your first device on idryer-core: a PlatformIO project, minimal firmware, Wi-Fi and linking to your account in the iDryer app."
 ---
 
-# Start an idryer-core device in 5 minutes
+# Run a device on idryer-core in 5 minutes
 
-This page helps you quickly check that an ESP32 device can start with `idryer-core`, connect to the network, and exchange data. Use it as the first technical test before building your own dryer, heated chamber, lighting, or another module.
+After this page the ESP32 is on the network, linked to your account and visible on the [portal.idryer.org](https://portal.idryer.org/) portal and in the iDryer app. You need: an ESP32-C3 board (DevKit, Super Mini or compatible), a USB cable, PlatformIO in VS Code, a phone with the iDryer app, a 2.4 GHz Wi-Fi network.
 
-After this page your ESP32 will be flashed, will connect to WiFi, and will appear in [portal.idryer.org](https://portal.idryer.org/) with status Online. Requirements: ESP32-C3 (DevKit, Super Mini, or compatible), USB cable, PlatformIO in VS Code.
+## 1. PlatformIO project
 
-## 1. Prepare secrets.h
-
-Copy [`examples/secrets.h.example`](https://github.com/pavluchenkor/idryer-core/blob/main/examples/secrets.h.example) to `include/secrets.h` in your project and set your WiFi SSID and password (2.4 GHz only):
-
-```cpp
-#define WIFI_SSID      "your-ssid"
-#define WIFI_PASSWORD  "your-password"
+```text
+my-device/
+├── platformio.ini
+├── lib/
+│   └── idryer-core/      ← a copy, a git submodule or a symbolic link
+└── src/
+    └── main.cpp
 ```
 
-Add `include/secrets.h` to `.gitignore`.
-
-## 2. Configure platformio.ini
-
-Create `platformio.ini` in the project root:
+`platformio.ini`:
 
 ```ini
-[env:blink-demo]
+[env:my-device]
 platform    = espressif32
 framework   = arduino
 board       = esp32-c3-devkitm-1
 
-lib_deps =
-    file://path/to/idryer-core
-    bblanchon/ArduinoJson @ ^6.21.0
-    knolleary/PubSubClient
+; ESPAsyncTCP is the ESP8266 transport from espMqttClient dependencies: it does not build on ESP32.
+lib_ignore = ESPAsyncTCP
 
 build_flags =
     -DIDRYER_API_BASE='"https://portal.idryer.org/api"'
+    -DMQTT_BROKER='"mqtt.idryer.org"'
+    -DMQTT_PORT=8883
     -DMQTT_USE_TLS=1
+    ; Board without USB-UART (ESP32-C3 SuperMini): Serial over USB.
+    -DARDUINO_USB_MODE=1
+    -DARDUINO_USB_CDC_ON_BOOT=1
 ```
 
-Change `board` to match your board. Replace `path/to/idryer-core` with the actual path to the library.
+The core libraries (MQTT, ArduinoJson, WebSockets, Improv) come on their own from the core's `library.json`. A board with USB-UART does not need the last two flags; set `board` for your board.
 
-## 3. Copy the 01_blink_status example
+## 2. Code
 
-Copy the contents of [`examples/01_blink_status/01_blink_status.ino`](https://github.com/pavluchenkor/idryer-core/blob/main/examples/01_blink_status/01_blink_status.ino) into `src/main.cpp` of your project. The example requires no sensors or additional dependencies — only a minimal composition root.
+Copy the [`01_blink_status`](https://github.com/pavluchenkor/idryer-core/blob/main/examples/01_blink_status/01_blink_status.ino) example into `src/main.cpp`:
 
-## 4. Flash
+```cpp
+#include <Arduino.h>
+#include <iDryer.h>
 
-```bash
-pio run -e blink-demo -t upload
+#ifndef LED_PIN
+#define LED_PIN 8   // ESP32-C3 SuperMini
+#endif
+
+static const iDryer::Config CFG = {
+    .deviceType      = iDryer::DeviceType::Unknown,   // your own device
+    .unitsCount      = 1,
+    .hasAirTemp      = true,
+    .hardwareVersion = "1.0",
+    .firmwareVersion = "0.1.0",
+    .model           = "Blink Status",
+};
+static iDryer::Link s_link(CFG);
+
+// Blink period by state; 0 means do not blink.
+static uint32_t blinkPeriodMs() {
+    if (s_link.isOnline()) return 1000;
+    if (!s_link.isBound()) return 200;
+    return 0;
+}
+
+void setup() {
+    Serial.begin(115200);
+    pinMode(LED_PIN, OUTPUT);
+
+    s_link.begin();
+    // Unlinking: the core erases the secret and waits for pairing again.
+    s_link.onCommand("revoke", [](JsonObjectConst) { s_link.handleRevoke(); });
+}
+
+void loop() {
+    s_link.loop();
+
+    // The core publishes telemetry fields itself, every 30 s (every 60 s when idle).
+    s_link.telemetry.airTempC[0] = temperatureRead();
+
+    const uint32_t period = blinkPeriodMs();
+    digitalWrite(LED_PIN, period ? (millis() / (period / 2)) % 2 : HIGH);
+}
 ```
 
-## 5. Open Serial Monitor
+The firmware has neither a network password nor account data: the device gets the network and the pairing from the app.
+
+## 3. Flash and open the log
 
 ```bash
+pio run -t upload
 pio device monitor -b 115200
 ```
 
-Expected log sequence:
+While the device has no Wi-Fi, the log is silent: the core keeps the port for Improv. The LED blinks fast: the device is waiting for a network and pairing.
 
-```
-[CLOUD] Init: serial=DEVICE_XXXXXXXXXXXX deviceId=
-[CLOUD] Connecting to WiFi...
-[CLOUD] WiFi connected, IP: 192.168.1.42, RSSI: -47 dBm
-[CLOUD] Provisioning device...
-[CLOUD] Provision OK: isNew=1 isClaimed=0
-[CLOUD] Registering device for claim...
-[CLOUD] PIN: 1234567 (expires in 600s)
-```
+## 4. Wi-Fi and pairing in the app
 
-After entering the PIN in the portal (step 6):
+1. Connect the phone to the Wi-Fi network the device will use and sign in to the iDryer app with your portal account.
+2. On the home screen, tap **Connect a new device**: the **Wi-Fi** step opens.
+3. Check the network name, enter the password and tap **Connect device**. The app sends the settings for up to 90 seconds; when the device joins, **Device connected** appears. Tap **Next**.
+4. On the **Pairing** step, tap **Pair**. The app finds the device on the network, gets a one-time pairing token from the portal and hands it to the device.
+5. After **Device paired**, the device appears in the device list on the portal and in the app.
 
-```
-[CLOUD] Device claimed! deviceId=...
-[CLOUD] Connecting to MQTT...
-[CLOUD] MQTT connected!
-[RT] Cloud Online
+The log after joining the network:
+
+```text
+[BOOT] WiFi ok, logs enabled
+[INFO ] CLOUD: WiFi connected, IP: 192.168.1.42, RSSI: -55 dBm, …
+…
+[INFO ] CLOUD: binding-v3: no secret — awaiting pairing token (SETUP)
 ```
 
-If the device stopped at the `PIN: ...` message — that is expected; proceed to step 6.
+After pairing:
 
-## 6. Claim the device in the portal
+```text
+[INFO ] CLOUD: binding-v3: pairing token received (… chars)
+[INFO ] CLOUD: binding-v3: activating with pairing token (serial=DEVICE_… mcu=-)
+[INFO ] CLOUD: binding-v3: activated, deviceId=… -> Ready
+…
+[INFO ] MQTT: Connected! …
+```
 
-Open [portal.idryer.org](https://portal.idryer.org/), go to **Add device**, and enter the PIN from Serial Monitor. After a successful claim the device will transition to `Online` and the built-in LED will blink every 500 ms.
+## 5. Check
 
-Detailed claim flow: [Onboarding](02-onboarding.md).
+- the device is online on the portal and in the app;
+- the card shows the ESP32 chip temperature;
+- the LED blinks once a second. Steady on or off means no connection to the portal.
 
-## What to do next
+## If it did not work
 
-- Add a sensor — [04-patterns/01-add-sensor.md](../04-patterns/01-add-sensor.md)
-- Add a peripheral — [04-patterns/02-add-peripheral.md](../04-patterns/02-add-peripheral.md)
-- Full API reference — [03-public-api/01-link-api-reference.md](../03-public-api/01-link-api-reference.md)
-- How it works internally — [05-architecture/01-composition-root.md](../05-architecture/01-composition-root.md)
+- the app did not see the device connect: check the password and that the network is 2.4 GHz; with a wrong password the device waits for settings again. Other ways to pass the network: [Wi-Fi](01-wifi.md);
+- the **Pairing** step did not find the device: the phone and the device must be on the same network; guest networks often block device discovery. More: [Linking to an account](02-claim.md);
+- build and flags: [Detailed setup](99-detailed-setup.md).
+
+## Next
+
+- [Telemetry](03-telemetry.md): a sensor and your own value on the card.
+- [Core examples](https://github.com/pavluchenkor/idryer-core/tree/main/examples): card actions, your own sensors and controls.

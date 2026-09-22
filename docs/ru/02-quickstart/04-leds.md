@@ -1,95 +1,105 @@
-# Шаг 04 — Индикация: LED-лента по данным датчика
+# LED-лента: включение с эффектом и цветом
 
-После этого шага WS2812B-лента будет менять цвет в зависимости от влажности, а яркостью можно управлять с портала командой `set`.
+После этой страницы на карточке появятся действия **Включить** — с выбором эффекта и цвета — и **Выключить**.
 
 ## Что понадобится
 
-**Железо:**
-
-- LED-лента WS2812B (или WS2811/SK6812)
-- Резистор 330–470 Ом на линии данных
-- Блок питания 5 В (ток зависит от длины ленты; 300 светодиодов — до 18 А)
-
-**ПО:**
-
-- Библиотека `fastled/FastLED @ ^3.6.0`
-
-!!! warning
-    Подключайте ленту к отдельному источнику питания 5 В. Питание через пин 3.3 В или 5 V платы допустимо только для проверки с несколькими светодиодами.
-
-## Шаги
-
-**1. Добавить FastLED** в `platformio.ini`:
+- лента WS2812B (или WS2811, SK6812);
+- резистор 330–470 Ом в линию данных;
+- блок питания 5 В: светодиод на полной яркости белого берёт до 60 мА, 60 светодиодов — до 3,6 А;
+- в `platformio.ini`:
 
 ```ini
 lib_deps =
-    fastled/FastLED @ ^3.6.0
-    ; ... остальные зависимости
+    fastled/FastLED @ 3.10.3
 ```
 
-**2. Объявить буфер и executor** в `main.cpp`. Основано на [`iDryer-Storage/src/main.cpp`](../../../../iDryer-Storage/src/main.cpp):
+FastLED 3.10.5 вместе с ядром не помещается во флеш ESP32-C3 (1,7 МБ при разделе 1,25 МБ); с 3.10.3 — 1,16 МБ.
+
+!!! warning
+    Ленту питайте от отдельного блока 5 В, земли блока и платы соедините. От вывода платы — только проверка на нескольких светодиодах.
+
+## Код
 
 ```cpp
+#include <Arduino.h>
 #include <FastLED.h>
-#include "storage/led_strip/led_strip_executor.h"
+#include <iDryer.h>
 
-#define STORAGE_LED_PIN  4
-#define STORAGE_MAX_LEDS 300
+#define LED_DATA_PIN 4
+#define LED_COUNT    60
 
-static CRGB             s_leds[STORAGE_MAX_LEDS];
-static LedStripExecutor s_executor(s_leds, STORAGE_MAX_LEDS);
-```
+static const iDryer::Config CFG = {
+    .deviceType      = iDryer::DeviceType::Unknown,
+    .unitsCount      = 1,
+    .hardwareVersion = "1.0",
+    .firmwareVersion = "0.1.0",
+    .model           = "LED Strip",
+};
+static iDryer::Link s_link(CFG);
 
-**3. Инициализировать ленту** в `setup()`:
+static CRGB s_leds[LED_COUNT];
+static const char* const kEffects[] = { "solid", "breathe" };
+static CRGB s_color   = CRGB::White;
+static bool s_breathe = false;
 
-```cpp
-FastLED.addLeds<WS2812B, STORAGE_LED_PIN, GRB>(s_leds, 60);
-FastLED.setBrightness(128);
-FastLED.clear(true);
-```
+static void onLightOn(uint8_t unit, JsonObjectConst args) {
+    const char* hex = args["color"] | "#FFFFFF";          // "#RRGGBB"
+    s_color   = CRGB(strtoul(hex + 1, nullptr, 16));
+    s_breathe = strcmp(args["effect"] | "solid", "breathe") == 0;
+    s_link.status.mode[unit] = iDryer::UnitMode::LightAnimation;
+    s_link.publishStatusNow();
+}
 
-Укажите реальное количество светодиодов вместо `60`.
+static void onLightOff(uint8_t unit, JsonObjectConst) {
+    s_link.status.mode[unit] = iDryer::UnitMode::Idle;
+    s_link.publishStatusNow();
+}
 
-**4. Менять цвет по влажности** в `loop()`. Цветовая шкала: синий (сухо) → жёлтый → красный (влажно):
+// Кадр ленты раз в 20 мс: цвет, для breathe — плавная яркость.
+static void drawLeds() {
+    const bool on = s_link.status.mode[0] == iDryer::UnitMode::LightAnimation;
+    CRGB c = s_color;
+    c.nscale8(!on ? 0 : s_breathe ? beatsin8(15, 30, 255) : 255);
+    fill_solid(s_leds, LED_COUNT, c);
+    FastLED.show();
+}
 
-```cpp
-if (s_sensorOk) {
-    s_sensor.tick(millis());
-    SensorReading r = s_sensor.get();
-    if (r.ok) {
-        s_link.telemetry.airHumidityPct[0] = r.humidity;
+void setup() {
+    FastLED.addLeds<WS2812B, LED_DATA_PIN, GRB>(s_leds, LED_COUNT);
+    FastLED.setBrightness(128);
 
-        // Влажность 20%–80% → оттенок от 160 (синий) до 0 (красный).
-        float h = constrain(r.humidity, 20.0f, 80.0f);
-        uint8_t hue = (uint8_t)(160.0f - (h - 20.0f) / 60.0f * 160.0f);
-        fill_solid(s_leds, s_executor.ledsCount(), CHSV(hue, 255, 200));
-        FastLED.show();
-    }
+    s_link.begin();
+    s_link.onCommand("revoke", [](JsonObjectConst) { s_link.handleRevoke(); });
+
+    auto& card = s_link.card();
+    card.action("light_on", "LIGHT_ANIMATION", onLightOn)
+        .name("ru", "Включить").name("en", "Turn on")
+        .select("effect", "effect", kEffects, 2, "solid")
+        .color("color", "rgb_color", "#FFFFFF");
+    card.action("light_off", "IDLE", onLightOff)
+        .name("ru", "Выключить").name("en", "Turn off");
+
+    s_link.every(20, drawLeds);
+}
+
+void loop() {
+    s_link.loop();
 }
 ```
 
-**5. Управление яркостью с портала.** Зарегистрируйте обработчик команды `set` в `setup()`:
+## Как это работает
 
-```cpp
-s_link.onCommand("set", [](JsonObjectConst data) {
-    int id  = data["id"]  | -1;
-    int val = data["val"] | -1;
-    if (id == MENU_BRIGHTNESS && val >= 0 && val <= 255) {
-        FastLED.setBrightness((uint8_t)val);
-        FastLED.show();
-    }
-});
-```
-
-`MENU_BRIGHTNESS` — константа из [`iDryer-Storage/src/menu/menu_ids.h`](../../../../iDryer-Storage/src/menu/menu_ids.h), сгенерированного из `menu.yaml` через `regen.sh`. В вашем продукте имя и значение будут свои — смотрите `menu_ids.h` своего проекта.
+- `card().action(id, mode, cb)` объявляет действие. `mode` — режим юнита после него: `LIGHT_ANIMATION` у включения, `IDLE` у выключения.
+- `.name("ru", …)` и `.name("en", …)` — название кнопки; на других языках карточка показывает английское.
+- `.select(...)` и `.color(...)` — параметры включения. `purpose` `effect` и `rgb_color` портал и приложение подписывают сами; значение не из списка ядро заменяет значением по умолчанию.
+- Колбэк получает параметры в `args` по их id, выставляет `status.mode` и вызывает `publishStatusNow()`.
+- Карточка выбирает по режиму юнита: не горит — форма **Включить**; горит — блок включённой подсветки и кнопка **Выключить**.
 
 ## Проверка
 
-После прошивки лента должна засветиться цветом, соответствующим текущей влажности. При отсутствии датчика — лента остаётся тёмной (executor не получает данных).
-
-На портале откройте настройки устройства и измените яркость ползунком — лента ответит немедленно.
+На карточке выберите эффект и цвет, нажмите **Включить** — лента загорится, карточка покажет **Выключить**.
 
 ## Что дальше
 
-- [05-rmt-command.md](05-rmt-command.md) — управлять исполнительным механизмом командой с портала (RMT-выход).
-- [led_strip_executor.h](../../../../iDryer-Storage/src/storage/led_strip/led_strip_executor.h) — API executor: зонные pulse, анимации, яркость.
+[Действия без режима](05-actions.md).

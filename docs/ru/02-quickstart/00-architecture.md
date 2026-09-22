@@ -1,74 +1,82 @@
 # Как устроена idryer-core
 
-idryer-core — библиотека для ESP32, которая берёт на себя весь cloud-стек: WiFi-provisioning через Improv-Serial, claim-протокол привязки к аккаунту idryer.org, MQTT-сессию с TLS и автореконнектом, маршрутизацию команд от портала и периодическую публикацию телеметрии.
+idryer-core — библиотека для ESP32. Она берёт на себя всё, что связывает устройство с порталом и приложением:
 
-Вы пишете только то, что специфично вашему устройству: читаете датчики, управляете периферией. Весь остальной код — внутри библиотеки.
+- Wi-Fi: сеть передаёт приложение iDryer (ESPTouch) или веб-страница по USB (Improv);
+- привязку к аккаунту одноразовым токеном и отвязку;
+- защищённую MQTT-сессию с переподключением;
+- доступ по локальной сети: приложение управляет устройством и без интернета;
+- публикацию телеметрии и статуса, доставку команд;
+- обновление прошивки по воздуху;
+- карточку устройства на портале и в приложении.
 
-## mqtt_contract.yaml — единственный источник правды
+Вы пишете только своё: читаете датчики, управляете нагрузкой, объявляете, что показать на карточке и какие операции она запускает.
 
-Файл [`contracts/mqtt_contract.yaml`](../../../contracts/mqtt_contract.yaml) определяет:
-
-- **capabilities** — какая периферия есть у каждого типа устройства (нагреватель, LED-лента, датчик);
-- **поля телеметрии** — имена и типы данных в MQTT-пакете;
-- **TypeScript-типы** — для портала.
-
-Из этого файла генерируется код автоматически:
-
-| Что генерируется | Куда |
-|---|---|
-| `iDryer::Config` (has* флаги) | `src/_generated/iDryer_api.h` |
-| MQTT topics (C++ константы) | `contracts/_generated/mqtt_topics.h` |
-| TypeScript-типы | `contracts/_generated/mqtt-api.types.ts` |
-
-!!! warning
-    Не редактируйте файлы в `src/_generated/` и `contracts/_generated/` вручную — они перезаписываются при следующей регенерации.
-
-## Как добавить новую периферию
-
-Процедура одинакова для любой новой capability — кнопки, датчика CO2, RFID-ридера.
-
-**1.** Добавить запись в `capability_vocabulary` в [`contracts/mqtt_contract.yaml`](../../../contracts/mqtt_contract.yaml):
-
-```yaml
-co2:
-  json_key: "co2"
-  config_flag: "hasCo2"
-  telemetry_field: "co2Ppm"
-  telemetry_type: "uint16_t"
-  description: "Датчик CO2 (ppm)"
-```
-
-**2.** Запустить регенерацию:
-
-```bash
-cd contracts
-./regen.sh
-```
-
-После этого в `iDryer::Config` появится поле `hasCo2`, в TypeScript — `HardwareUnitConfigCapabilities.co2`.
-
-**3.** В `main.cpp` устройства установить флаг:
+## Одна точка входа: `iDryer::Link`
 
 ```cpp
+#include <iDryer.h>
+
 static const iDryer::Config CFG = {
-    // ...
-    .hasCo2 = true,
+    .deviceType      = iDryer::DeviceType::Unknown,   // своё устройство
+    .unitsCount      = 1,
+    .hasAirTemp      = true,                          // ячейка температуры
+    .hardwareVersion = "1.0",
+    .firmwareVersion = "0.1.0",
+    .model           = "My Device",
 };
+static iDryer::Link s_link(CFG);
+
+void setup() {
+    s_link.begin();
+    s_link.onCommand("revoke", [](JsonObjectConst) { s_link.handleRevoke(); });
+}
+
+void loop() {
+    s_link.loop();
+    s_link.telemetry.airTempC[0] = readTemperature();   // ваш код
+}
 ```
 
-**4.** Прошить устройство. Портал прочитает `co2: true` из MQTT-топика `/info` и отобразит соответствующий UI-блок автоматически.
+| Вы делаете | Ядро делает |
+|---|---|
+| заполняете `s_link.telemetry.*` | публикует раз в 30 с, в простое — раз в 60 с |
+| меняете `s_link.status.*` (режим, уставка, время) и вызываете `publishStatusNow()` | доставляет статус; карточка переключается по режиму |
+| объявляете `s_link.card()`: датчики, контролы, действия | собирает card-манифест и публикует его |
+| регистрируете `s_link.onCommand(...)` | передаёт команды из облака и из локальной сети |
 
-Для типов периферии, которых нет в контракте, создайте PR в репозиторий idryer-core с добавлением в `capability_vocabulary`. После мержа — `regen.sh`, и поле появится в `Config`.
+## Карточка устройства
 
-## Два рабочих продукта
+Портал и приложение рисуют карточку по card-манифесту, который присылает устройство:
 
-**iDryer Storage Link** — ESP32-C3 с LED-лентой WS2812B и датчиком температуры/влажности SHT31. Управляет подсветкой стеллажа с катушками филамента.
+- флаги `Config.has*` дают готовые ячейки: температура, влажность, мощность нагрева, вентилятор и другие;
+- `card().sensor(...)` добавляет свою величину по пути в телеметрии;
+- `card().action(...)` объявляет операцию: режим юнита после неё и параметры запуска.
 
-**iHeater Link** — ESP32-C3 с RMT-выходом на нагреватель iHeater. Поддерживает интеграции с Bambu Lab, Klipper/Moonraker и Home Assistant.
+Кода на портале для этого не нужно. Подробно — [Карточка устройства: card-манифест](../09-add-product/02-add-widget.md).
 
-Оба продукта подключают idryer-core через PlatformIO `lib_deps` и реализуют только продуктовую логику.
+## `mqtt_contract.yaml` — источник правды
+
+[`contracts/mqtt_contract.yaml`](../../../contracts/mqtt_contract.yaml) описывает протокол: топики, поля телеметрии и статуса, возможности устройств, card-манифест. Из него генерируются:
+
+| Что | Куда |
+|---|---|
+| `iDryer::Config` (флаги `has*`) и структуры API | `src/_generated/iDryer_api.h` |
+| MQTT-топики | `contracts/_generated/mqtt_topics.h` |
+| UART-протокол ESP32 ↔ контроллер | `contracts/_generated/uart_protocol.h` |
+| типы TypeScript для портала | `contracts/_generated/mqtt-api.types.ts` |
+
+!!! warning
+    Файлы в `_generated/` не правят руками: `contracts/regen.sh` перезаписывает их из контракта.
+
+Своя величина не требует правки контракта: её объявляет `card().sensor(...)`. Контракт меняют, когда новая возможность нужна всем продуктам: сначала `mqtt_contract.yaml`, потом `regen.sh`, потом код.
+
+## Продукты на ядре
+
+- **iDryer Link** — модуль связи сушилки: ESP32 рядом с контроллером, обмен по UART.
+- **iDryer Storage** — подсветка стеллажа с катушками: адресная лента и датчик SHT31.
+- **iHeater Link** — управление нагревателем iHeater, интеграции с Bambu Lab, Klipper/Moonraker и Home Assistant.
 
 ## Что дальше
 
-- [01-wifi.md](01-wifi.md) — подключить ESP32 к WiFi через Improv-Serial.
-- [../../../README.md](../../../README.md) — краткий обзор библиотеки и кодогенерации.
+[Запустить за 5 минут](01-five-minutes.md).

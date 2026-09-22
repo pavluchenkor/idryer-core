@@ -1,147 +1,83 @@
 # Detailed setup
 
-If this is your first time here — go to [Get started in 5 minutes](01-five-minutes.md); this page covers advanced setup and troubleshooting.
+The short path is [Run in 5 minutes](01-five-minutes.md). This page covers the environment, build flags, logs and development mode.
 
-Short path: wire up the library, flash an example, see the blinking LED and the device in the portal.
+## The core in the project
 
-## What to prepare
+The core lives in `lib/idryer-core` of the PlatformIO project: as a copy, a git submodule or a symbolic link to a shared clone. Its `library.json` brings the dependencies: MQTT, ArduinoJson, WebSockets, Improv. The project's `lib_deps` holds only the libraries of your sensors.
 
-- ESP32 board (recommended: ESP32-C3 DevKit, Super Mini, XIAO ESP32-S3, Waveshare ESP32-S3 Zero).
-- PlatformIO with framework `arduino`, platform `espressif32`.
-- WiFi 2.4 GHz with internet access.
-- Account at [portal.idryer.org](https://portal.idryer.org/) for claiming.
+Boards of the products built on the core: ESP32-C3 (DevKit, Super Mini), ESP32-S3 (XIAO ESP32-S3, Waveshare ESP32-S3 Zero).
 
-## Step 1. Wire up the library
-
-In your product's `platformio.ini`:
+## `platformio.ini`
 
 ```ini
 [env:my-device]
-platform   = espressif32
-framework  = arduino
-board      = esp32-c3-devkitm-1
+platform    = espressif32
+framework   = arduino
+board       = esp32-c3-devkitm-1
 
-lib_deps =
-    file://../../lib/idryer-core
-    bblanchon/ArduinoJson @ ^6.21.0
-    knolleary/PubSubClient
-    links2004/WebSockets             ; only needed for mqtt_with_local_ws
+; ESPAsyncTCP is the ESP8266 transport from espMqttClient dependencies: it does not build on ESP32.
+lib_ignore = ESPAsyncTCP
 
 build_flags =
     -DIDRYER_API_BASE='"https://portal.idryer.org/api"'
+    -DMQTT_BROKER='"mqtt.idryer.org"'
+    -DMQTT_PORT=8883
     -DMQTT_USE_TLS=1
+    ; Board without USB-UART (ESP32-C3 SuperMini): Serial over USB.
+    -DARDUINO_USB_MODE=1
+    -DARDUINO_USB_CDC_ON_BOOT=1
 ```
 
-## Step 2. Create `secrets.h`
+| Flag | Why |
+|---|---|
+| `IDRYER_API_BASE` | portal API address: activation, pairing |
+| `MQTT_BROKER`, `MQTT_PORT` | the portal broker |
+| `MQTT_USE_TLS=1` | secure connection to the broker |
+| `lib_ignore = ESPAsyncTCP` | ESP8266 transport from the MQTT client dependencies: it does not build on ESP32 |
+| `ARDUINO_USB_MODE`, `ARDUINO_USB_CDC_ON_BOOT` | Serial over USB on boards without USB-UART |
 
-Copy [`examples/secrets.h.example`](https://github.com/pavluchenkor/idryer-core/blob/main/examples/secrets.h.example) to `include/secrets.h` in your project and fill in your SSID/password. The file must be in `.gitignore`.
+String macros need quotes both outside and inside.
 
-```cpp
-#define WIFI_SSID      "your-ssid"
-#define WIFI_PASSWORD  "your-password"
-```
+## Publishing periods
 
-`IDRYER_API_BASE` is normally set via `build_flags`, not through secrets.h.
+The `Config.telemetryPeriodMs`, `telemetryPeriodIdleMs`, `statusPeriodMs`, `statusPeriodIdleMs` fields; zero means the contract value:
 
-## Step 3. Open the first example
+| What | Working | Idle |
+|---|---|---|
+| telemetry | 30 s | 60 s |
+| status | immediately on a change of mode, setpoint or time; reconciliation every 60 s | reconciliation every 5 min |
 
-The simplest one is [`examples/01_blink_status/01_blink_status.ino`](https://github.com/pavluchenkor/idryer-core/blob/main/examples/01_blink_status/01_blink_status.ino). Copy it as your starting point:
+"Idle" means no unit is in an active mode.
 
-- Requires no sensors, peripherals, or LAN WS.
-- Requires no manual `handleCommand` — the built-in fallback in `IdryerRuntime` handles basic commands.
-- LED blinks when the device is online — that is the success indicator.
-
-## Step 4. Flash and observe
+## Logs
 
 ```bash
-pio run -e my-device -t upload
 pio device monitor -b 115200
 ```
 
-Expected log sequence:
+While the device has no network, the log is silent: the port is busy with Improv. Logs turn on with the `[BOOT] WiFi ok, logs enabled` line. After that the `STATUS`, `WIPE_IDENTITY`, `PAIR_TOKEN` commands work: see [Linking to an account](02-claim.md).
 
-```
-[CSM] state: Idle → WifiConnecting
-[CSM] state: WifiConnecting → Provisioning
-[CSM] state: Provisioning → AwaitingClaim     ← waiting for claim
-[CSM] PIN: 1234567   expires in 600s          ← if auto-claim is enabled
-...
-[CSM] state: AwaitingClaim → Ready
-[CSM] state: Ready → MqttConnecting
-[CSM] state: MqttConnecting → Online          ← ready, LED starts blinking
-[RT]  Cloud Online
-```
-
-## Step 5. Claim the device to your account
-
-Auto-claim is already enabled in the example. The PIN appears in the log. Enter it at [portal.idryer.org](https://portal.idryer.org/) → "Add device". After claiming, `CloudStateMachine` transitions to `Online`.
-
-## What to do next
-
-The following examples each introduce one new level of complexity:
-
-| Example | What is added |
-|---------|--------------|
-| [`minimal_mqtt_only`](https://github.com/pavluchenkor/idryer-core/blob/main/examples/minimal_mqtt_only/minimal_mqtt_only.ino) | custom `handleCommand`, handling `commands/invoke` and `commands/set` |
-| [`03_with_improv`](https://github.com/pavluchenkor/idryer-core/blob/main/examples/03_with_improv/03_with_improv.ino) | WiFi provisioning via Improv (no hardcoded credentials) |
-| [`mqtt_with_local_ws`](https://github.com/pavluchenkor/idryer-core/blob/main/examples/mqtt_with_local_ws/mqtt_with_local_ws.ino) | local LAN WebSocket server + `DevicePublisher` (one publish — two transports) |
-
-## Dev REPL via Serial (no portal, no browser)
-
-An alternative path for developers — see the full claim flow directly in a standard Serial monitor, without Improv and without the portal UI.
-
-In `platformio.ini`, create a dev environment with the flag `-DIDRYER_DEV_REPL=1`:
+## Development mode: `IDRYER_DEV_REPL`
 
 ```ini
 [env:my-device-dev]
-platform   = espressif32
-framework  = arduino
-board      = esp32-c3-devkitm-1
+extends = env:my-device
 build_flags =
     ${env:my-device.build_flags}
     -DIDRYER_DEV_REPL=1
 ```
 
-What the flag enables:
-- HAL logs to `Serial` start **immediately** from boot (no silence until WiFi connects).
-- Improv provisioning is **disabled** — Serial is free for interactive commands.
-- A simple REPL appears in `main.cpp`: `wifi`, `claim`, `status`, `wipe`, `restart`, `help`.
+With the flag:
 
-Full flow:
+- logs go to the port right after power-on;
+- Improv and the `STATUS`, `WIPE_IDENTITY`, `PAIR_TOKEN` commands are off: your code reads the incoming lines of the port;
+- the network comes from the app (ESPTouch) or from code: `seedWifiCredentialsIfEmpty()` before `begin()`, see [Wi-Fi](01-wifi.md).
 
-```bash
-pio run -e my-device-dev -t upload
-pio device monitor -b 115200
-```
+Release firmware is built without the flag.
 
-In the monitor:
+## Next
 
-```
-[boot] iDryer dev REPL ready — type 'help'
-> wifi MyHomeWiFi MyPassword
-[wifi] saving 'MyHomeWiFi' / '****'
-[CSM] state: WifiConnecting → Provisioning
-[CSM] state: Provisioning → AwaitingClaim
-> claim
-CLAIM_PIN:12345678:600
-[claim] PIN=1234567, valid 600 s — enter in portal
-[CSM] state: AwaitingClaim → Ready → Online
-> status
-[status] wifi=3 ip=192.168.0.140 rssi=-44 online=1 serial=DEVICE_AABBCCDDEEFF
-> wipe
-[wipe] erasing NVS + reboot…
-```
-
-The REPL accepts commands regardless of the line-ending setting in the Serial monitor (`\n`, `\r`, or idle timeout 120 ms) — works in any terminal, including `pio device monitor`, Arduino IDE Serial Monitor, `screen`, `picocom`.
-
-The production build (`-e my-device-prod`, without `IDRYER_DEV_REPL`) uses Improv via Chrome (`https://www.improv-wifi.com/`) and contains no REPL code — the flag is compile-time, saving Flash.
-
-`secrets.h` with `WIFI_SSID/WIFI_PASSWORD` (Step 2) remains a separate path for headless CI/auto-flash scenarios — works in both environments.
-
-After any of the examples are up and running, read:
-
-- [05-architecture/01-composition-root.md](../05-architecture/01-composition-root.md) — object order in `main.cpp`.
-- [05-architecture/03-data-flow.md](../05-architecture/03-data-flow.md) — how data moves.
-- [04-patterns/](../04-patterns/) — recipes: add sensor, peripheral, transport.
-- [09-add-product/01-add-new-product.md](../09-add-product/01-add-new-product.md) — full checklist for a new product.
-- [10-troubleshooting/01-troubleshooting.md](../10-troubleshooting/01-troubleshooting.md) — what to do if the stack is stuck.
+- [Core examples](https://github.com/pavluchenkor/idryer-core/tree/main/examples).
+- [How to add a new product](../09-add-product/01-add-new-product.md).
+- [Device card: the card manifest](../09-add-product/02-add-widget.md).
