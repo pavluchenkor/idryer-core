@@ -102,8 +102,16 @@ public:
     bool isLocalConnected() const { return false; }
 #endif
 
+    /// Копия исходящих telemetry / status / weights — для зеркала на
+    /// HA-брокер (сущности HA берут значения по путям card-манифеста).
+    /// Вызывается после отправки в MQTT и локальный WS.
+    using MirrorFn = void (*)(void* ctx, const char* kind, JsonDocument& doc);
+    void setMirror(MirrorFn fn, void* ctx) { mirrorFn_ = fn; mirrorCtx_ = ctx; }
+
 private:
     MqttClient*  mqtt_;
+    MirrorFn     mirrorFn_  = nullptr;
+    void*        mirrorCtx_ = nullptr;
 #if defined(ESP32) || defined(ESP_PLATFORM)
     LocalAccess* local_;
 #else

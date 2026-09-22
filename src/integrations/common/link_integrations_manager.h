@@ -40,8 +40,7 @@
 #include "../bambu/bambu_client.h"
 #include "../moonraker/moonraker_client.h"
 #include "../home_assistant/ha_integration_adapter.h"
-#include "../home_assistant/ha_publisher.h"
-#include "../home_assistant/ha_builder.h"
+#include "../home_assistant/ha_card_projection.h"
 #include "../../uart/uart_protocol.h"
 
 #if defined(ESP32) || defined(ESP_PLATFORM)
@@ -104,24 +103,9 @@ public:
     /// @brief Returns the currently active integration.
     ActiveIntegration getActive() const { return selection_.active; }
 
-    /**
-     * @brief Публикует sensor-state одного юнита в HA-топики.
-     *
-     * Тонкая обёртка над HaPublisher::publishUnitState. Шлёт ровно те
-     * sensor-поля, что объявлены через HaCapabilities. Управляющие entities
-     * (mode_control / set_temp / ...) — продукт публикует сам.
-     */
-    bool publishHaUnitState(uint8_t unitId,
-                             float temperatureC, float humidityPct,
-                             int heaterPowerPct, bool fanOn) {
-        return haPublisher_.publishUnitState(unitId, temperatureC, humidityPct,
-                                              heaterPowerPct, fanOn);
-    }
-
-    /// Generic HA Discovery builder — продукт регистрирует свои controls
-    /// (button/number/select) через возвращаемый объект. Публикуется при
-    /// HA-коннекте, сообщения роутятся в зарегистрированные колбэки.
-    ha::HaBuilder& haBuilder() { return haBuilder_; }
+    /// Сущности HA строит генератор из card-манифеста: менеджер передаёт ему
+    /// смену соединения и входящие сообщения брокера HA.
+    void setHaProjection(ha::HaCardProjection* projection) { haCard_ = projection; }
 
     /// @brief Must be called every iteration of the main loop.
     void loop();
@@ -165,20 +149,6 @@ public:
 
     /// @brief Sets the MQTT client ID used for the HA MQTT connection.
     void setHaClientId(const char* clientId) { haClient_.setClientId(clientId); }
-
-    /**
-     * @brief Passes device identity info for HA MQTT Discovery payloads.
-     *
-     * Call once before @c begin(), typically from @c Link::begin() after loading
-     * the device identity. If not called, discovery will be skipped.
-     */
-    void setDeviceInfo(const char* deviceId, uint8_t unitsCount,
-                       const char* hwVersion = "unknown",
-                       const char* fwVersion = "unknown");
-
-    /// @brief Какие sensor entity публиковать в HA Discovery.
-    /// Если не задано — все true (legacy-совместимость).
-    void setHaCapabilities(const ha::HaCapabilities& caps) { haCapabilities_ = caps; }
 
     ha::HaMqttClient* haMqttClient() { return haClient_.mqttClient(); }
 
@@ -226,16 +196,9 @@ private:
     BambuClient             bambuClient_;
     MoonrakerClient         moonrakerClient_;
     HaIntegrationAdapter    haClient_;
-    ha::HaPublisher         haPublisher_;
-    ha::HaBuilder           haBuilder_;
+    ha::HaCardProjection*   haCard_ = nullptr;
 
     UartDeviceType          deviceType_ = UartDeviceType::Dryer;
-
-    char    haDeviceId_[48]  = {0};
-    uint8_t haUnitsCount_    = 1;
-    char    haHwVersion_[16] = {0};
-    char    haFwVersion_[16] = {0};
-    ha::HaCapabilities haCapabilities_{};
 
     HaConfig         ha_;
     BambuConfig      bambu_;

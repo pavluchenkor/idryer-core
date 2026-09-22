@@ -31,7 +31,7 @@
  * передаёт в команду запуска, в меню они не пишутся. Изменилось меню —
  * манифест перепубликуется сам (pollMenu).
  *
- * Raw fnptr (не std::function) — как в HaBuilder. Только stateless лямбды.
+ * Raw fnptr (не std::function) — как в onCommand. Только stateless лямбды.
  */
 
 #pragma once

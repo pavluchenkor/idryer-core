@@ -69,6 +69,11 @@ public:
 
     bool publish(const char* topic, const char* payload, bool retained = false);
     bool subscribe(const char* topic);
+    bool unsubscribe(const char* topic);
+
+    /// Завещание (LWT): брокер опубликует @p payload retained в @p topic,
+    /// если соединение оборвётся. Применяется при следующем connect().
+    void setWill(const char* topic, const char* payload);
 
     using MessageCallback = Callback<void(const char*, const char*)>;
     void setMessageCallback(MessageCallback::FnPtr fn, void* ctx = nullptr) { messageCallback_.set(fn, ctx); }
@@ -84,6 +89,8 @@ private:
     bool initialized_ = false;
 
     char clientId_[32];
+    char willTopic_[HA_TOPIC_BUFFER_SIZE] = {0};
+    char willPayload_[16] = {0};
     char username_[64];
     char password_[64];
 

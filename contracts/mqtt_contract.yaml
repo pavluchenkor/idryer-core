@@ -3221,188 +3221,91 @@ mqtt_only:
 # `known_mismatches.<id>` указывают на записи в том файле.
 
 # ─────────────────────────────────────────────────────────────────────────────
-# HA-PUBLISHER топики (publishing к локальному HA-broker)
+# HA-ТОПИКИ (устройство ↔ локальный HA-broker)
 # ─────────────────────────────────────────────────────────────────────────────
-# Топики публикуются устройством в namespace idryer/{serial}/..., но летят
-# на локальный HA MQTT-broker. Живут отдельно от topic-namespace портала.
+# Летят на локальный HA MQTT-broker (HaConfig.host), не на портал. Значения —
+# те же JSON, что уходят на портал: сущность HA берёт поле шаблоном по пути из
+# card-манифеста (см. ha_discovery_topics).
 ha_integration_topics:
   topics:
-    - pattern: "idryer/{serial}/alerts"
+    - pattern: "idryer/{serial}/telemetry"
       direction: device_to_ha_broker
-      note: "Алерты для HA dashboard."
-    - pattern: "idryer/{serial}/{unit}/{sensorName}"
+      retained: true
+      note: "Копия telemetry портала (units[i].temperature, heaterPower, …)."
+    - pattern: "idryer/{serial}/status"
       direction: device_to_ha_broker
-      note: "Per-sensor значения (temperature/humidity и т.п.)."
-    - pattern: "idryer/{serial}/{unit}/set_mode"
-      direction: bidirectional
-    - pattern: "idryer/{serial}/{unit}/{cmdSuffix}"
+      retained: true
+      note: "Копия status портала (units[i].mode, …)."
+    - pattern: "idryer/{serial}/weights"
+      direction: device_to_ha_broker
+      retained: true
+      note: "Копия weights портала: {weights: [{sensorId, value, unitId}]}."
+    - pattern: "idryer/{serial}/ha/availability"
+      direction: device_to_ha_broker
+      retained: true
+      payload: "online | offline (LWT)"
+    - pattern: "idryer/{serial}/ha/{object}/set"
       direction: ha_to_device
-      suffixes: ["set_temp", "set_duration"]
-    - pattern: "idryer/{serial}/{unit}/target_temp"
+      note: "Команда сущности HA: значение поля параметра, значение контрола или нажатие кнопки (PRESS)."
+    - pattern: "idryer/{serial}/ha/{object}/state"
       direction: device_to_ha_broker
-    - pattern: "idryer/{serial}/{unit}/target_duration"
-      direction: device_to_ha_broker
+      retained: true
+      note: "Текущее значение поля параметра действия; прибор хранит его до нажатия кнопки действия."
   notes:
     - "Для портала используется `mqtt_only[suffix=integrations/status]`."
-    - "Направление: устройство ↔ локальный HA-broker (адрес из HaConfig)."
     - |
       HA broker discovery: если HaConfig.host пустой/невалидный — выполняется fallback
       `MDNS.queryService("home-assistant","tcp")`. Берётся первый IP/port из ответа mDNS.
-      Парсится только IP+port из mDNS-ответа.
     - |
       ⚠️ NAMESPACE COLLISION RISK: префикс `idryer/{serial}/*` совпадает с топиками портала.
       Разделение обеспечивается ТОЛЬКО разными broker-endpoint'ами (HaConfig.host vs portal MQTT host).
-      Если по ошибке указать ОДИН и тот же broker для портала и HA — топики смешиваются:
-      портал увидит alerts/per-sensor топики (которые ему не предназначены), HA-dashboard увидит
-      portal-команды (commands/start и т.п.). Перед prod-деплоем убедиться что host'ы разные.
+      Один и тот же broker для портала и HA смешает топики — перед prod-деплоем убедиться, что host'ы разные.
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 9. HA-DISCOVERY топики (Home Assistant MQTT Discovery)
+# 9. HA-DISCOVERY — генерируется из card-манифеста
 # ─────────────────────────────────────────────────────────────────────────────
-# Публикуются устройством в namespace `homeassistant/...` для авто-регистрации
-# entities в Home Assistant. Broker — тот же, что и у ha_integration_topics
-# (HaConfig.host, не портал). Все retained=true (HA читает retained при старте).
-# Подписки/команды от HA приходят в namespace idryer/... (см. ha_integration_topics).
+# Сущности HA строит ядро по card-манифесту устройства (entities + actions):
+# что на карточке портала, то и в HA. Ручных HA-сущностей у продуктов нет.
 ha_discovery_topics:
   namespace: "homeassistant"
   broker: "HaConfig.host (локальный)"
   retained: true
-  qos: 0
+  topic: "homeassistant/{component}/idryer_{serial}/{object}/config"
+  components: [sensor, binary_sensor, number, select, text, button]
   identifiers:
     device_uid: "idryer_{serial}"
-    entity_uid: "idryer_{serial}_{unitStr}_{name}"
-    unit_format: "{unitStr} = U1|U2|U3"
+    entity_uid: "idryer_{serial}_{object}"
   device_block:
-    description: "Общий device-блок присутствует во всех discovery payload."
-    fields:
-      identifiers: ["idryer_{serial}"]
-      name: "iDryer {serial}"
-      model: "{hwVersion}"
-      manufacturer: "iDryer"
-      sw_version: "{fwVersion}"
-  topics:
-    - kind: sensor
-      pattern: "homeassistant/sensor/idryer_{serial}_{unitStr}_{name}/config"
-      entities:
-        - {
-            name: "temperature",
-            unit: "°C",
-            device_class: "temperature",
-            icon: "mdi:thermometer",
-            state_topic: "idryer/{serial}/{unitStr}/temperature",
-          }
-        - {
-            name: "humidity",
-            unit: "%",
-            device_class: "humidity",
-            icon: "mdi:water-percent",
-            state_topic: "idryer/{serial}/{unitStr}/humidity",
-          }
-        - {
-            name: "heater_power",
-            unit: "%",
-            device_class: null,
-            icon: "mdi:radiator",
-            state_topic: "idryer/{serial}/{unitStr}/heater_power",
-          }
-        - {
-            name: "mode",
-            unit: null,
-            device_class: null,
-            icon: "mdi:state-machine",
-            state_topic: "idryer/{serial}/{unitStr}/mode",
-          }
-        - {
-            name: "weight",
-            unit: "g",
-            device_class: "weight",
-            icon: "mdi:weight-gram",
-            state_topic: "idryer/{serial}/{unitStr}/weight",
-          }
-      payload_shape:
-        name: "iDryer {unitStr} {entityName}"
-        unique_id: "idryer_{serial}_{unitStr}_{entityName}"
-        state_topic: "idryer/{serial}/{unitStr}/{entityName}"
-        device_class: "{see entities[].device_class}"
-        unit_of_measurement: "{see entities[].unit}"
-        icon: "{see entities[].icon}"
-        device: "{see device_block}"
-
-    - kind: binary_sensor
-      pattern: "homeassistant/binary_sensor/idryer_{serial}_{unitStr}_{name}/config"
-      entities:
-        - {
-            name: "fan",
-            payload_on: "ON",
-            payload_off: "OFF",
-            state_topic: "idryer/{serial}/{unitStr}/fan",
-          }
-      payload_shape:
-        name: "iDryer {unitStr} fan"
-        unique_id: "idryer_{serial}_{unitStr}_fan"
-        state_topic: "idryer/{serial}/{unitStr}/fan"
-        payload_on: "ON"
-        payload_off: "OFF"
-        device: "{see device_block}"
-
-    - kind: sensor_alerts
-      pattern: "homeassistant/sensor/idryer_{serial}_alerts/config"
-      note: "Один общий alerts-sensor на устройство (не per-unit)."
-      payload_shape:
-        name: "iDryer {serial} alerts"
-        unique_id: "idryer_{serial}_alerts"
-        state_topic: "idryer/{serial}/alerts"
-        device: "{see device_block}"
-
-    - kind: select
-      pattern: "homeassistant/select/idryer_{serial}_{unitStr}_mode_control/config"
-      entities:
-        - { name: "mode_control", options: ["IDLE", "DRYING", "STORAGE"] }
-      payload_shape:
-        name: "iDryer {unitStr} mode"
-        unique_id: "idryer_{serial}_{unitStr}_mode_control"
-        state_topic: "idryer/{serial}/{unitStr}/mode"
-        command_topic: "idryer/{serial}/{unitStr}/set_mode"
-        options: ["IDLE", "DRYING", "STORAGE"]
-        device: "{see device_block}"
-
-    - kind: number
-      pattern: "homeassistant/number/idryer_{serial}_{unitStr}_{cmdSuffix}/config"
-      entities:
-        - {
-            name: "set_temp",
-            unit: "°C",
-            min: 0,
-            max: 90,
-            step: 1,
-            state_topic: "idryer/{serial}/{unitStr}/target_temp",
-            command_topic: "idryer/{serial}/{unitStr}/set_temp",
-          }
-        - {
-            name: "set_duration",
-            unit: "s",
-            min: 0,
-            max: 86400,
-            step: 60,
-            state_topic: "idryer/{serial}/{unitStr}/target_duration",
-            command_topic: "idryer/{serial}/{unitStr}/set_duration",
-          }
-      payload_shape:
-        name: "iDryer {unitStr} {entityName}"
-        unique_id: "idryer_{serial}_{unitStr}_{entityName}"
-        state_topic: "{see entities[].state_topic}"
-        command_topic: "{see entities[].command_topic}"
-        min: "{see entities[].min}"
-        max: "{see entities[].max}"
-        step: "{see entities[].step}"
-        unit_of_measurement: "{see entities[].unit}"
-        device: "{see device_block}"
-
-  notes:
-    - "Все discovery-сообщения публикуются с retained=true — HA забирает их при подключении к broker'у."
-    - "{unitStr} формируется через formatUnitId() и равен 'U1'/'U2'/'U3'."
-    - "Discovery-payload не содержит availability_topic — устройство онлайн-статус не публикует в HA namespace."
-    - "Точные диапазоны min/max для number — ориентировочные; задаются прошивкой."
+    identifiers: ["idryer_{serial}"]
+    name: "{Config.model}"
+    model: "{Config.model}"
+    manufacturer: "iDryer"
+    serial_number: "{serial}"
+    sw_version: "{Config.firmwareVersion}"
+    hw_version: "{Config.hardwareVersion}"
+  availability_topic: "idryer/{serial}/ha/availability"
+  names: "Только английские: язык HA прибору неизвестен, а из латиницы HA собирает читаемые entity_id. Источник — name.en действия, purpose параметра, класс датчика; при нескольких юнитах — префикс «U{n} »."
+  mapping:
+    - "entities[] sensor / binary_sensor с путём units[0].* → на каждый юнит: object u{n}_{id}, state_topic idryer/{serial}/{source}, value_template — путь с индексом юнита."
+    - "entities[] sensor с source weights → на каждый юнит: сумма value датчиков с unitId юнита."
+    - "entities[] с путём вне units[] → одна сущность на устройство: object {id}."
+    - "entities[] number / select / button (контролы) → одна сущность на устройство: object {id}; команда — invoke card.{id} {value}."
+    - "entities[] rfid → не публикуется: значения нет."
+    - "status.units[i].mode → sensor на юнит: object u{n}_mode (если у действий есть mode)."
+    - "actions[] → на каждый юнит кнопка u{n}_{actionId}; параметры number / select / color → number / select / text u{n}_{actionId}_{paramId} с пределами юнита (limits, в т.ч. потолок max_by)."
+    - "Нажатие кнопки → invoke card.{actionId} {unitId, args: текущие значения полей юнита} тем же путём, что вызов из локальной сети (fromLocal): числа зажимаются в пределы, действуют гейты обновления прошивки."
+    - "actions[] с параметром stages (профиль) → не публикуются: стадии берутся из профилей портала."
+  device_class_map:
+    temperature: temperature
+    heater_temp: temperature
+    humidity: humidity
+    power: power_factor
+    weight: weight
+    fan: running
+    servo: opening
+  cleanup:
+    - "При подключении к HA-broker устройство удаляет пустым retained свои discovery-конфиги, которых нет в текущем наборе (под node_id idryer_{serial}), и конфиги прежнего формата homeassistant/{component}/idryer_{serial}_*/config."
+    - "Манифест изменился (пределы из меню, число юнитов) — discovery перепубликуется, лишнее удаляется."
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 10. BAMBU LAN MQTT (printer-side topics для прямого LAN-подключения)

@@ -40,15 +40,13 @@ void isoTimestamp(char* buf, size_t bufSize)
 
 LinkIntegrationsManager::LinkIntegrationsManager(idryer::MqttClient* mqtt,
                                                  LinkIntegrationsStore* store)
-    : mqtt_(mqtt), store_(store),
-      haPublisher_(haClient_.mqttClient()),
-      haBuilder_(&haPublisher_, haClient_.mqttClient())
+    : mqtt_(mqtt), store_(store)
 {
-    // Маршрутизируем входящие сообщения с HA-брокера в haBuilder
-    // (он сам отфильтрует по своему prefix `idryer_ha/{deviceId}/...`).
+    // Входящие с HA-брокера — генератору сущностей (команды и уборка).
     haClient_.mqttClient()->setMessageCallback(
         [](void* ctx, const char* topic, const char* payload) {
-            static_cast<LinkIntegrationsManager*>(ctx)->haBuilder_.handleIncoming(topic, payload);
+            auto* mgr = static_cast<LinkIntegrationsManager*>(ctx);
+            if (mgr->haCard_) mgr->haCard_->handleIncoming(topic, payload);
         }, this);
 }
 
@@ -75,15 +73,9 @@ void LinkIntegrationsManager::begin()
 
     haClient_.setStateChangeCallback([](void* ctx, HaConnectionState s) {
         auto* mgr = static_cast<LinkIntegrationsManager*>(ctx);
-        if (s == HaConnectionState::Connected && mgr->haDeviceId_[0] != '\0') {
-            mgr->haPublisher_.publishDiscovery(mgr->haDeviceId_, mgr->haUnitsCount_,
-                                               mgr->haHwVersion_, mgr->haFwVersion_,
-                                               mgr->haCapabilities_);
-            // Продуктовые controls (если зарегистрированы через link.ha()).
-            mgr->haBuilder_.setDeviceId(mgr->haDeviceId_);
-            mgr->haBuilder_.republishAll();
-        } else if (s != HaConnectionState::Connected) {
-            mgr->haPublisher_.resetDiscoveryPublished();
+        if (mgr->haCard_) {
+            if (s == HaConnectionState::Connected) mgr->haCard_->onConnected();
+            else                                   mgr->haCard_->onDisconnected();
         }
         mgr->publishStatus();
     }, this);
@@ -265,28 +257,6 @@ void LinkIntegrationsManager::loop()
     // только дошив отложенной публикации, если событие случилось до коннекта.
     if (statusPublishPending_ && mqtt_ && mqtt_->isConnected()) {
         publishStatus();
-    }
-}
-
-// =============================================================================
-// Device info for HA discovery
-// =============================================================================
-
-void LinkIntegrationsManager::setDeviceInfo(const char* deviceId, uint8_t unitsCount,
-                                             const char* hwVersion, const char* fwVersion)
-{
-    if (deviceId && deviceId[0]) {
-        strncpy(haDeviceId_, deviceId, sizeof(haDeviceId_) - 1);
-        haDeviceId_[sizeof(haDeviceId_) - 1] = '\0';
-    }
-    haUnitsCount_ = unitsCount > 0 ? unitsCount : 1;
-    if (hwVersion && hwVersion[0]) {
-        strncpy(haHwVersion_, hwVersion, sizeof(haHwVersion_) - 1);
-        haHwVersion_[sizeof(haHwVersion_) - 1] = '\0';
-    }
-    if (fwVersion && fwVersion[0]) {
-        strncpy(haFwVersion_, fwVersion, sizeof(haFwVersion_) - 1);
-        haFwVersion_[sizeof(haFwVersion_) - 1] = '\0';
     }
 }
 

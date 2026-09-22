@@ -15,7 +15,7 @@ static void copyStr(char* dst, size_t dstSize, const char* src) {
 
 CardBuilder::Entity* CardBuilder::alloc_(Kind kind, const char* id, const char* label) {
     if (!id || !id[0]) return nullptr;
-    // Повторная регистрация того же id — замена (как в onCommand/HaBuilder).
+    // Повторная регистрация того же id — замена (как в onCommand).
     for (uint8_t i = 0; i < count_; ++i) {
         if (strcmp(entities_[i].id, id) == 0) {
             entities_[i] = Entity{};

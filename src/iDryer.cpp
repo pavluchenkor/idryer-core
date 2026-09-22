@@ -186,6 +186,7 @@ struct Link::Impl {
           cloud(&wifi, &credentials, &api, &mqtt),
           pub(&mqtt, &local),
           intManager(&mqtt, &intStore),
+          haCard(intManager.haMqttClient()),
           improv(&Serial),
           profile(this->cfg, credentials, &cloud),
           runtime(&cloud, &dispatcher, &profile, &mqtt) {}
@@ -212,6 +213,8 @@ struct Link::Impl {
     // Integrations.
     idryer::cloud::LinkIntegrationsStore   intStore;
     idryer::cloud::LinkIntegrationsManager intManager;
+    // Home Assistant из card-манифеста: сущности, значения, команды.
+    idryer::ha::HaCardProjection           haCard;
 
     // WiFi provisioning over Serial.
     ImprovWiFi improv;
@@ -266,8 +269,6 @@ struct Link::Impl {
     // Auto-publish throttling (millis).
     uint32_t lastTelemetryMs = 0;
     uint32_t lastStatusMs    = 0;
-    uint32_t lastHaStateMs   = 0;
-    static constexpr uint32_t kHaStatePeriodMs = 5000;
 
     // sessionNum tracker: backend status.handler.ts requires sessionNum > 0
     // for active modes (DRYING/STORAGE/PROFILE). Increment on transition
@@ -460,19 +461,30 @@ bool Link::begin() {
     impl_->intStore.begin();
     if (identity.serialNumber[0] != '\0') {
         impl_->intManager.setHaClientId(identity.serialNumber);
-        impl_->intManager.setDeviceInfo(identity.serialNumber,
-                                        impl_->cfg.unitsCount,
-                                        impl_->cfg.hardwareVersion,
-                                        impl_->cfg.firmwareVersion);
-        // Capabilities → HA Discovery публикует только реальные sensor entity.
-        idryer::ha::HaCapabilities caps;
-        caps.airTemp     = impl_->cfg.hasAirTemp;
-        caps.airHumidity = impl_->cfg.hasAirHumidity;
-        caps.heaterPower = impl_->cfg.hasHeater;
-        caps.fan         = impl_->cfg.hasFan;
-        caps.weight      = impl_->cfg.hasWeight;
-        impl_->intManager.setHaCapabilities(caps);
+        impl_->haCard.setDevice(identity.serialNumber, impl_->cfg.model,
+                                impl_->cfg.firmwareVersion, impl_->cfg.hardwareVersion);
     }
+    // HA строится из card-манифеста: нажатие в HA — тот же invoke, что из
+    // локальной сети; значения — копия telemetry / status / weights.
+    impl_->intManager.setHaProjection(&impl_->haCard);
+    impl_->haCard.setInvokeHandler([](void* ctx, JsonObjectConst command) {
+        static_cast<Link*>(ctx)->dispatchCommand("invoke", command, /*fromLocal=*/true);
+    }, this);
+    impl_->pub.setMirror([](void* ctx, const char* kind, JsonDocument& doc) {
+        static_cast<Link*>(ctx)->impl_->haCard.mirror(kind, doc);
+    }, this);
+    impl_->haCard.setManifestSource([](void* ctx, JsonDocument& doc) -> uint8_t {
+        auto* self = static_cast<Link*>(ctx);
+        self->impl_->card.buildJson(doc, self->impl_->cfg);
+        return self->impl_->cfg.unitsCount;
+    }, this);
+    // Сущности есть — сразу значения, не дожидаясь периода: в простое статус
+    // уходит раз в 5 минут.
+    impl_->haCard.setPublishedHandler([](void* ctx) {
+        auto* self = static_cast<Link*>(ctx);
+        self->publishStatusNow();
+        self->publishTelemetryNow();
+    }, this);
     // Map facade DeviceType → SDK UartDeviceType.
     switch (impl_->cfg.deviceType) {
         case DeviceType::Dryer:
@@ -956,21 +968,9 @@ void Link::loop() {
         }
     }
 
-    // Авто-публикация sensor state в HA. Шлёт ровно поля из HaCapabilities.
-    // Безопасно вызывать всегда — внутри проверка connected/discovery published.
-    // Управляющие entities (controls) — продукт публикует сам.
-    if (now - impl_->lastHaStateMs >= Impl::kHaStatePeriodMs) {
-        impl_->lastHaStateMs = now;
-        const auto& cfg = impl_->cfg;
-        for (uint8_t i = 0; i < cfg.unitsCount && i < MAX_UNITS; ++i) {
-            const float temp     = telemetry.airTempC[i];
-            const float hum      = telemetry.airHumidityPct[i];
-            const int   powerPct = (int)(heaterPowerToPublish(impl_->heaterAvg[i], status.mode[i],
-                                                              telemetry.heaterPower01[i]) * 100.0f);
-            const bool  fan      = telemetry.fanOn[i];
-            impl_->intManager.publishHaUnitState(i, temp, hum, powerPct, fan);
-        }
-    }
+    // Home Assistant: команды, discovery из манифеста и уборка — порциями.
+    // На время загрузки прошивки молчит, как и остальные интеграции.
+    if (!impl_->otaActive) impl_->haCard.loop();
 
     // Cooperative scheduler — продуктовые задачи зарегистрированные через every().
     // Защита от wrap millis() через signed-сравнение.
@@ -1065,6 +1065,7 @@ void Link::publishCardNow() {
     if (ok) {
         impl_->cardPublished = true;
         impl_->card.markPublished(impl_->cfg.unitsCount);
+        impl_->haCard.requestRepublish();   // HA — та же декларация
     }
 }
 
@@ -1447,10 +1448,6 @@ idryer::cloud::LinkIntegrationsManager* Link::integrationsManager() {
     return &impl_->intManager;
 }
 
-idryer::ha::HaBuilder& Link::ha() {
-    return impl_->intManager.haBuilder();
-}
-
 idryer::MqttClient* Link::mqttClient() {
     return &impl_->mqtt;
 }
@@ -1498,7 +1495,9 @@ void Link::setUnitsCount(uint8_t n) {
     // CONTRACT (mqtt_contract.yaml §units): MCU Hello — авторитетный источник
     // числа юнитов; вызывается из onHello(). Config.unitsCount в firmware должен
     // совпадать с реальным числом физических слотов, а не быть потолком MAX.
+    if (impl_->cfg.unitsCount == n) return;
     impl_->cfg.unitsCount = n;
+    impl_->haCard.requestRepublish();   // сущности HA — на каждый юнит
 }
 
 void Link::setIgnoreExternalCmd(bool flag) {
@@ -1534,6 +1533,9 @@ void Link::setWaitForMcuSerial(bool wait) {
 }
 
 iDryer::McuSerialResult Link::setMcuSerial(const char* mcuSerial) {
+    // Прежние версии ядра называли прибор в HA серийником контроллера —
+    // эти конфиги тоже убираются при подключении к HA.
+    impl_->haCard.setLegacyId(mcuSerial);
     return impl_->cloud.setMcuSerial(mcuSerial);
 }
 

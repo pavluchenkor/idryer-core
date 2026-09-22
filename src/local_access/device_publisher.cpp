@@ -41,12 +41,16 @@ bool DevicePublisher::publishCardRaw(const char* json, size_t len) {
 
 bool DevicePublisher::publishTelemetry(JsonDocument& doc) {
     wsPublish("telemetry", doc);
-    return mqtt_->publishTelemetry(doc);
+    const bool ok = mqtt_->publishTelemetry(doc);
+    if (mirrorFn_) mirrorFn_(mirrorCtx_, "telemetry", doc);
+    return ok;
 }
 
 bool DevicePublisher::publishStatus(JsonDocument& doc) {
     wsPublish("status", doc);
-    return mqtt_->publishStatus(doc);
+    const bool ok = mqtt_->publishStatus(doc);
+    if (mirrorFn_) mirrorFn_(mirrorCtx_, "status", doc);
+    return ok;
 }
 
 bool DevicePublisher::publishConfig(JsonDocument& doc) {
@@ -113,7 +117,9 @@ bool DevicePublisher::publishRfid(JsonDocument& doc) {
 
 bool DevicePublisher::publishWeights(JsonDocument& doc) {
     wsPublish("weights", doc);
-    return mqtt_->publishWeights(doc);
+    const bool ok = mqtt_->publishWeights(doc);
+    if (mirrorFn_) mirrorFn_(mirrorCtx_, "weights", doc);
+    return ok;
 }
 
 bool DevicePublisher::publishRfidWriteResult(JsonDocument& doc) {

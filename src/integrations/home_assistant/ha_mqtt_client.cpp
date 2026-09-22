@@ -123,14 +123,18 @@ bool HaMqttClient::connect(const char* clientId,
         password_[sizeof(password_) - 1] = '\0';
     }
 
+    const char* willTopic = willTopic_[0] ? willTopic_ : nullptr;
+    const char* willMsg   = willTopic ? willPayload_ : nullptr;
     bool connected = false;
     if (username && username[0] != '\0') {
-        connected = mqttClient_.connect(clientId_, username, password);
+        connected = mqttClient_.connect(clientId_, username, password,
+                                        willTopic, 1, true, willMsg);
         HAL_LOG_INFO("HA_MQTT", "Connecting with auth: %s@%s:%d",
                      clientId_, discoveryResult_.ip.toString().c_str(),
                      discoveryResult_.port);
     } else {
-        connected = mqttClient_.connect(clientId_);
+        connected = mqttClient_.connect(clientId_, nullptr, nullptr,
+                                        willTopic, 1, true, willMsg);
         HAL_LOG_INFO("HA_MQTT", "Connecting without auth: %s@%s:%d",
                      clientId_, discoveryResult_.ip.toString().c_str(),
                      discoveryResult_.port);
@@ -174,6 +178,18 @@ bool HaMqttClient::subscribe(const char* topic) {
     bool ok = mqttClient_.subscribe(topic);
     HAL_LOG_INFO("HA_MQTT", "Subscribe %s: %s", topic, ok ? "OK" : "FAIL");
     return ok;
+}
+
+bool HaMqttClient::unsubscribe(const char* topic) {
+    if (!isConnected() || !topic) return false;
+    return mqttClient_.unsubscribe(topic);
+}
+
+void HaMqttClient::setWill(const char* topic, const char* payload) {
+    strncpy(willTopic_, topic ? topic : "", sizeof(willTopic_) - 1);
+    willTopic_[sizeof(willTopic_) - 1] = '\0';
+    strncpy(willPayload_, payload ? payload : "", sizeof(willPayload_) - 1);
+    willPayload_[sizeof(willPayload_) - 1] = '\0';
 }
 
 bool HaMqttClient::publish(const char* topic, const char* payload, bool retained) {
