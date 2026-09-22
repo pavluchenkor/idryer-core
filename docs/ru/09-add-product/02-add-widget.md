@@ -1,248 +1,210 @@
-> **⚠ Устаревший перевод (на 2026-05-27).**
-> Концепция виджета изменилась: теперь виджет — это **карточка устройства на дашборде портала** (React-компонент конкретного продукта), а не сгенерированный артефакт из `contracts/widgets/`. Старый слой `widget-registry`/`contracts/widgets/` удалён.
-> Актуальным источником истины является английская версия в [../en/09-add-product/02-add-widget.md](../../en/09-add-product/02-add-widget.md). Этот перевод будет обновлён отдельно.
+---
+title: "Карточка устройства: card-манифест"
+description: "Как прошивка на idryer-core описывает свою карточку через s_link.card(): сенсоры, действия с параметрами запуска, что уходит на портал и что рисуют портал и приложение."
+---
+
+# Карточка устройства: card-манифест
+
+Портал и мобильное приложение строят карточку любого устройства из его **card-манифеста** — описания, которое прошивка публикует о себе: что показать и чем можно управлять. Новому типу устройства не нужен код ни на портале, ни в приложении.
+
+Манифест — часть фасада `iDryer::Link` (`s_link.card()`). Низкоуровневый runtime (`IdryerRuntime`) его не публикует.
+
+Меню и карточка — разные вещи. Меню — зеркало настроек прибора: значение, изменённое с портала, записывается в память устройства. Карточка показывает измерения и запускает операции: параметры запуска уходят одной командой и в меню не пишутся. Параметр запуска может взять пределы и значение по умолчанию из пункта меню.
 
 ---
 
-# Добавить виджет и поддержку нового устройства
+## Как это работает
 
-Полный цикл: от форка репозитория до принятого PR. Охватывает firmware, контракт, React-виджет и тестирование на портале.
+```text
+прошивка: объявления s_link.card()
+   │  ядро собирает JSON и публикует его retained (QoS 1) в idryer/{key}/card
+   ▼
+бэкенд портала: проверяет манифест (лимиты, допустимые типы и поля), сохраняет
+   ▼
+портал и приложение: рисуют карточку
+   │  пользователь нажимает кнопку
+   ▼
+idryer/{key}/commands/invoke  {"unitId":"U1","action":"card.<id>","args":{…}}
+   ▼
+ядро передаёт "card.<id>" в ваш колбэк
+```
 
-Если вам нужна только прошивка без нового виджета — см. [01-add-new-product.md](01-add-new-product.md).
+Ядро публикует манифест после подключения к MQTT и перепубликует, когда меняется декларация или пункт меню, от которого она зависит.
 
 ---
 
-## Предварительные требования
+## Сущности: что показать
 
-- Python 3.9+ с `pip install pyyaml jsonschema`
-- Node.js 18+
-- PlatformIO CLI
-- Доступ к порталу iDryer для тестирования UIKit
+Сенсоры из словаря экосистемы добавляются по флагам `Config`, объявлять их не нужно:
 
----
-
-## Шаг 1. Fork и клонирование
-
-1. Форкните репозиторий `idryer-core` на GitHub.
-2. Склонируйте форк локально:
-
-    ```bash
-    git clone https://github.com/<ваш-ник>/idryer-core.git
-    cd idryer-core
-    git checkout -b feature/my-new-device
-    ```
-
-3. Убедитесь, что контракт проходит валидацию в текущем состоянии:
-
-    ```bash
-    cd contracts
-    ./regen.sh --firmware-only
-    ```
-
----
-
-## Шаг 2. Редактирование контракта
-
-Все изменения вносятся в `contracts/mqtt_contract.yaml`. Правила в одном changeset:
-
-!!! warning
-    Не редактируйте файлы в `_generated/` — они перезаписываются генераторами.
-
-### 2a. Capability vocabulary (новый тип периферии)
-
-Если устройство имеет новый тип железа (например, CO2-сенсор), добавьте запись в секцию `capability_vocabulary`:
-
-```yaml
-capability_vocabulary:
-  co2:
-    description: "CO2-сенсор (ppm)"
-    config_flag: hasAirCo2
-    telemetry_field: airCo2Ppm
-```
-
-Это автоматически добавит поле `hasAirCo2: bool` в `iDryer::Config` при следующей регенерации.
-
-### 2b. Canonical roles (новая роль + виджет)
-
-Если устройство предоставляет новый элемент меню, зарегистрируйте роль в `canonical_roles`:
-
-```yaml
-canonical_roles:
-  co2.read:
-    type: float
-    widget: Co2Display
-    unit: ppm
-    labels:
-      ru: "CO₂"
-      en: "CO₂"
-```
-
-Значение `widget` — имя React-компонента, который вы напишете на шаге 5.
-
-### 2c. Invoke actions (если виджет отправляет команды)
-
-Если виджет вызывает действие на устройстве, добавьте описание в `invoke_actions`:
-
-```yaml
-invoke_actions:
-  my_device:
-    co2.calibrate:
-      description: "Запустить калибровку CO2-сенсора"
-      args:
-        targetPpm:
-          type: uint16
-          description: "Референсное значение CO2 (ppm)"
-          required: true
-```
-
-### 2d. Device profile (новый тип устройства)
-
-Добавьте профиль в `device_profiles`:
-
-```yaml
-device_profiles:
-  my_device:
-    description: "Моё устройство"
-    capabilities: [led, co2]
-    invoke_actions: [co2.calibrate]
-```
-
-Значения `capabilities` берутся из `capability_vocabulary`, определённой на шаге 2a.
-
----
-
-## Шаг 3. Валидация и регенерация
-
-```bash
-cd contracts
-./regen.sh
-```
-
-Флаги:
-
-| Флаг | Что делает |
+| Флаг `Config` | Ячейка карточки |
 |---|---|
-| (без флага) | Валидация + все генераторы + копирование на портал |
-| `--firmware-only` | Только firmware-генераторы, без копирования на портал |
-| `--help` | Справка |
+| `hasAirTemp` | температура воздуха |
+| `hasAirHumidity` | влажность |
+| `hasHeaterTemp` | температура нагревателя |
+| `hasHeater` | мощность нагрева |
+| `hasFan` | вентилятор вкл / выкл |
+| `hasServo` | заслонка открыта / закрыта |
+| `hasWeight` | весовые модули (топик `weights`) |
+| `hasRfid` | у камеры есть RFID-ридер |
 
-При успехе в `_generated/` обновятся:
+Своё значение: добавьте его в телеметрию и объявите сенсор с JSON-путём:
 
-- `uart_protocol.h`, `mqtt_topics.h` — C++ заголовки
-- `iDryer_api.h` — фасад Config/DeviceType
-- `mqtt-api.types.ts` — TypeScript-типы
-- `scaffolds/my_device/` — заготовка PlatformIO-проекта
-- На портале обновятся файлы в `src/components/widgets/`
-
-Если `regen.sh` завершается с ошибкой, исправьте проблему до продолжения.
-
----
-
-## Шаг 4. Реализация прошивки
-
-Воспользуйтесь сгенерированным scaffold-проектом:
-
-```bash
-cp -r contracts/_generated/scaffolds/my_device/ ~/my_device_fw/
-cd ~/my_device_fw
+```cpp
+s_link.onTelemetryPublish([](JsonObject root) {
+    root["units"][0]["co2ppm"] = g_co2;
+});
+s_link.card().sensor("co2", "CO2", "ppm", "units[0].co2ppm");
 ```
 
-Заполните TODO-секции в `src/main.cpp`:
+Простые контролы — тоже сущности: `button`, `number`, `select`. Значение уходит сразу, как пользователь его изменил, ядро вызывает ваш колбэк:
 
-- `onOnline()` — загрузка конфига из NVS, инициализация железа.
-- `loop()` — опрос сенсоров, вызов `s_runtime.publishTelemetry(tel)`.
-- `buildInfoJson()` — уже заполнен генератором по capabilities.
-- `onInvoke()` — реакция на `co2.calibrate`.
-
-Подробнее — [01-add-new-product.md](01-add-new-product.md).
+```cpp
+static const char* kModes[] = { "auto", "on", "off" };
+s_link.card().select("mode", "Mode", kModes, 3, [](const char* opt) { onMode(opt); });
+s_link.card().number("threshold", "Threshold", 100, 400, 10, "", [](float v) { onThreshold(v); });
+s_link.card().button("purge", "Purge", []() { onPurge(); });
+```
 
 ---
 
-## Шаг 5. Создание React-виджета
+## Действия: операции с параметрами запуска
 
-Виджеты живут в `contracts/widgets/` и копируются на портал через `regen.sh`.
+Действие — операция прибора: начать сушку, нагреть, включить подсветку, остановить. У него есть **режим** — режим юнита после действия (`status.units[].mode`) — и **параметры** со смыслом (`purpose`). Что показать, карточка решает по текущему режиму юнита:
 
-!!! note
-    Не редактируйте виджеты напрямую в `portal/src/components/widgets/` — при следующем запуске `regen.sh` изменения будут перезаписаны. Редактируйте только в `contracts/widgets/`.
+- режим юнита совпал с режимом действия → прибор занят им: блок сессии и кнопка «Стоп» (действие с режимом `IDLE`);
+- иначе → форма запуска; действий запуска несколько → переключатель режимов.
 
-### Создать файл виджета
+Пример: нагреваемый шкаф хранения на одном ESP32. Целевая температура — пункт меню `target_temp` (30–50 °C, по умолчанию 45).
 
-```tsx
-// contracts/widgets/Co2Display.tsx
-import type { WidgetProps } from "./widget-props";
+```cpp
+#include <menu_meta.h>
+#include <menu_cache.h>
+#include <menu_bindings.h>          // menu_sync_state_to_cache
+#include <card/card_menu_bridge.h>
 
-export function Co2DisplayWidget({ device }: WidgetProps) {
-  const unit = device.units[0];
-  const co2 = unit?.co2Ppm ?? null;
-  return (
-    <div style={{ padding: "8px 16px" }}>
-      {co2 !== null ? `${co2} ppm` : "—"}
-    </div>
-  );
+static void onStorage(uint8_t unit, JsonObjectConst args) {
+    s_targetC = args["temperature"].as<float>();   // уже в пределах 30..50
+    s_link.status.mode[unit]        = iDryer::UnitMode::Storage;
+    s_link.status.targetTempC[unit] = s_targetC;
+    s_link.publishStatusNow();
+}
+
+static void onStop(uint8_t unit, JsonObjectConst) {
+    s_link.status.mode[unit]        = iDryer::UnitMode::Idle;
+    s_link.status.targetTempC[unit] = 0.0f;
+    s_link.publishStatusNow();
+}
+
+void setup() {
+    menu.initDefaults();
+    menu.loadFromNVS();
+    menu_sync_state_to_cache();     // значения меню — в кэш, из него читает карточка
+    s_link.begin();
+
+    auto& card = s_link.card();
+    idryer::card_menu::attach(card);
+    card.action("storage", "STORAGE", onStorage)
+        .name("ru", "Хранение").name("en", "Storage")
+        .param("temperature", "target_temperature", MENU_TARGET_TEMP);
+    card.action("stop", "IDLE", onStop)
+        .name("ru", "Стоп").name("en", "Stop");
 }
 ```
 
-### Зарегистрировать в index.ts
+Что получает колбэк:
 
-```ts
-// contracts/widgets/index.ts
-export { Co2DisplayWidget } from "./Co2Display";
-```
+- числа зажаты в пределы юнита, отсутствующее число заменено значением по умолчанию;
+- `unit` — индекс юнита из `unitId` (`"U1"` → 0); команда для юнита, которого у прибора нет, игнорируется;
+- после запуска выставьте `status.mode` и вызовите `publishStatusNow()` — по статусу карточка переключится на блок сессии.
 
-### Зарегистрировать в widget-registry.tsx (на портале)
+### API действий
 
-После следующего `regen.sh` файл появится в `portal/src/components/widgets/Co2Display.tsx`. Добавьте запись в `widget-registry.tsx` вручную:
-
-```tsx
-import { Co2DisplayWidget } from "./Co2Display";
-
-export const WIDGET_REGISTRY: Record<WidgetName, React.ComponentType<WidgetProps>> = {
-  // ...
-  Co2Display: Co2DisplayWidget,
-};
-```
-
----
-
-## Шаг 6. Тестирование в UIKit
-
-Откройте `portal/src/pages/UiKitPage.tsx` и добавьте секцию с mock-данными в группу **Device Dashboard Widgets**:
-
-```tsx
-<KitSection title="Co2Display">
-  <Co2DisplayWidget device={MOCK_DEVICE} item={MOCK_CO2_ITEM} socket={null} />
-</KitSection>
-```
-
-Откройте портал локально и перейдите на `/uikit` — виджет должен отобразиться без логина.
-
----
-
-## Шаг 7. PR-чеклист
-
-Перед отправкой PR убедитесь, что:
-
-- [ ] `./contracts/regen.sh` завершается без ошибок
-- [ ] `_generated/*` добавлены в коммит (не в `.gitignore`)
-- [ ] `contracts/widgets/` — новый файл виджета добавлен
-- [ ] `contracts/widgets/index.ts` — виджет экспортирован
-- [ ] `widget-registry.tsx` на портале — виджет зарегистрирован
-- [ ] Виджет виден в `/uikit` без ошибок в консоли
-- [ ] Scaffold в `_generated/scaffolds/my_device/` корректно отражает capabilities
-- [ ] Описание PR содержит: что за устройство, какие capabilities, какой виджет
-
-Отправьте PR против ветки `main` репозитория `idryer-core`.
-
----
-
-## Полный список изменений в одном PR
-
-| Файл | Тип изменения |
+| Вызов | Что делает |
 |---|---|
-| `contracts/mqtt_contract.yaml` | Источник правды |
-| `contracts/_generated/*` | Автогенерация — добавляются целиком |
-| `contracts/widgets/MyWidget.tsx` | Новый файл |
-| `contracts/widgets/index.ts` | +1 строка экспорта |
-| *(на портале после `regen.sh`)* | `src/components/widgets/MyWidget.tsx` — копия |
-| *(на портале вручную)* | `src/components/widgets/widget-registry.tsx` — +1 запись |
-| *(на портале вручную)* | `src/pages/UiKitPage.tsx` — +1 секция в KitGroup |
+| `card.action(id, mode, cb)` | действие; `mode` — режим юнита после него, `nullptr` — режим не меняется |
+| `.param(id, purpose, MENU_ID)` | число: пределы, шаг, значение по умолчанию и единица — из пункта меню |
+| `.param(id, purpose, min, max, step, def[, unit])` | число со своими пределами |
+| `.ceiling(MENU_ID)` | верхний предел предыдущего параметра — значение этого пункта меню (например, максимальная температура воздуха) |
+| `.stages(id, "stages", MENU_ID)` | стадии профиля `[{temperature, ramp, hold}]`, секунды; температура стадии — в пределах пункта меню |
+| `.select(id, purpose, options, count[, def])` | выбор из списка; значение не из списка заменяется значением по умолчанию |
+| `.color(id, purpose, "#FFFFFF")` | цвет `#RRGGBB` |
+| `.deviceClass("identify")`, `.deviceClass("clear_errors")` | постоянные кнопки шапки: вызов прибора, сброс ошибок |
+| `.name("ru", "…").name("en", "…")` | название действия, если карточке незнаком его режим |
+
+Значения `purpose`: `target_temperature`, `target_humidity`, `duration` (минуты, 0 — без ограничения), `stages`, `start_stage` (с 0), `effect`, `rgb_color`. По ним карточка подписывает поля и подключает возможности портала: пресет сушки заполняет `target_temperature` и `duration` у действия с режимом `DRYING`, профиль сушки — `stages`.
+
+Колбэки — функции или лямбды без захвата. Строки `name` и варианты выбора хранятся указателями — нужны литералы или статические массивы.
+
+---
+
+## Что уходит на портал
+
+Шкаф из примера публикует (`Config`: `hasAirTemp`, `hasAirHumidity`, `hasHeaterTemp`, `hasHeater`, `hasFan`):
+
+```json
+{
+  "v": 2,
+  "entities": [
+    {"id": "temp", "type": "sensor", "device_class": "temperature", "unit": "°C", "source": "telemetry", "path": "units[0].temperature"},
+    {"id": "humidity", "type": "sensor", "device_class": "humidity", "unit": "%", "source": "telemetry", "path": "units[0].humidity"},
+    {"id": "heater_temp", "type": "sensor", "device_class": "heater_temp", "unit": "°C", "source": "telemetry", "path": "units[0].heaterTemp"},
+    {"id": "power", "type": "sensor", "device_class": "power", "unit": "%", "source": "telemetry", "path": "units[0].heaterPower"},
+    {"id": "fan", "type": "binary_sensor", "device_class": "fan", "source": "telemetry", "path": "units[0].fanStatus"}
+  ],
+  "actions": [
+    {"id": "storage", "mode": "STORAGE", "name": {"ru": "Хранение", "en": "Storage"}, "action": "card.storage",
+     "params": [{"id": "temperature", "purpose": "target_temperature", "type": "number",
+                 "limits": [30, 50], "step": 1, "default": 45, "unit": "°C"}]},
+    {"id": "stop", "mode": "IDLE", "name": {"ru": "Стоп", "en": "Stop"}, "action": "card.stop"}
+  ]
+}
+```
+
+`limits` и `default` пришли из пункта меню. С `.ceiling()` у параметра появляется ещё `max_by` — заголовок пункта меню, который срезал верхний предел; карточка называет его, когда значение выше предела.
+
+---
+
+## Что рисуют портал и приложение
+
+Схема, не скриншот. Ожидание:
+
+```text
+┌─ DIY Storage Cabinet ────────────── [Ожидание] ─┐
+│ | 24.8 °C | 41 %  | 25.1 °C |                   │  ← температура, влажность, нагреватель
+│ | 0 %     | выкл            |                   │  ← мощность, вентилятор (серые: 0 / выкл)
+│ [Темп. 45 °C          ]  [Хранение]             │  ← действие "storage"
+└─────────────────────────────────────────────────┘
+```
+
+После «Хранение» прибор сообщает режим `STORAGE`, и та же карточка показывает блок сессии (цель и сколько длится хранение) и кнопку «Стоп» — действие с режимом `IDLE`.
+
+Правила с обеих сторон:
+
+- ячейка серая, когда значения нет; мощность — ещё и при 0; вентилятор и заслонка — в состоянии выкл / закрыта;
+- значение вне пределов не подменяется: запуск блокируется, под формой — причина;
+- у прошивки с действиями в манифесте кнопки вызова и сброса ошибок есть, только если она объявила действия с `identify` / `clear_errors`.
+
+Где появляется карточка:
+
+| | Портал | Приложение |
+|---|---|---|
+| тип устройства — не продукт iDryer | карточка дашборда из манифеста, действия на ней; страница устройства — показания и действия (если в манифесте есть действия) | главная — показания; действия — на странице устройства |
+| `deviceType = Dryer` | карточка сушилки с теми же действиями из манифеста | главная — мониторинг; действия — на странице устройства |
+
+---
+
+## Ограничения
+
+| | Ядро | Бэкенд портала |
+|---|---|---|
+| сущностей | 16 объявленных + автоматические | 32 |
+| рядов layout | 8 | 16 |
+| id в ряду | 4 | 4 |
+| действий | 8 | 8 |
+| параметров у действия | 4 (`IDRYER_CARD_MAX_PARAMS`) | 6 |
+| языков `name` | `ru`, `en` | до 4 |
+
+`id`: строчные латинские буквы, цифры и `_`, до 24 символов; у сущностей и действий общее пространство id. Документ манифеста ограничен 4096 байтами; если не помещается, ядро пишет в лог `manifest overflows` и не публикует его.
+
+Сам формат — `contracts/mqtt_contract.yaml`, раздел `mqtt_only`, `suffix: card`.

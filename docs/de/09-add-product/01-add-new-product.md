@@ -1,156 +1,130 @@
 ---
 title: "Neues Produkt auf Basis von idryer-core hinzufügen"
-description: "Checkliste für ein neues iDryer-Gerät: Profil, Befehle, Telemetrie, MQTT, Portal und Grenze zwischen Bibliothek und Produktcode."
+description: "Checkliste für ein neues iDryer-Gerät auf der Fassade iDryer::Link: Projekt, minimale Firmware, WLAN und Kopplung in der App, Telemetrie, Einstellungsmenü, Gerätekarte, Vertrag."
 ---
 
 # Neues Produkt auf Basis von idryer-core hinzufügen
 
-Diese Anleitung ist für neue Produkte auf Basis von `idryer-core`: Filamenttrockner, Heizblock, Beleuchtung, Sensor oder anderes Modul. Sie zeigt, was in der Bibliothek bleibt und was in den konkreten Produktcode gehört.
+Nutzen Sie diese Anleitung, wenn Sie ein neues Produkt auf `idryer-core` bauen: einen Filamenttrockner, einen Heizblock, eine Beleuchtung, einen Sensor oder ein anderes Modul. Sie zeigt, was der Core für Sie erledigt und was der Produktcode ergänzen muss.
 
-Eine praktische Checkliste zum Erstellen eines neuen Geräts auf der Basis von `idryer-core`.
-
-Zwei Szenarien:
-
-- **Minimal** — MQTT + Cloud nur. Ausreichend für die meisten einfachen Geräte.
-- **Erweitert** — MQTT + lokaler WS-Zugriff über LAN. Für Geräte, die lokalen Zugriff ohne die Cloud benötigen.
+Ein vollständiges, baubares Beispiel ist der beheizte Lagerschrank aus der Dokumentation Build-Your-Own-iDryer (`example/09-cabinet`): er geht alles auf dieser Seite durch.
 
 ---
 
-## Szenario 1: Minimales MQTT-only-Gerät
+## Worauf ein Produkt aufbaut
 
-Minimales Set: WiFi, MQTT, Cloud State Machine, ein Profil.
+Ein Produkt spricht mit dem Core über ein einziges Objekt — die Fassade `iDryer::Link` (`<iDryer.h>`). In `s_link.begin()` und `s_link.loop()` erledigt der Core:
 
-Referenz: [`examples/minimal_mqtt_only/`](../../../examples/minimal_mqtt_only/)
+- er übernimmt das WLAN aus der iDryer-App per Funk (ESPTouch) oder aus dem Web-Installer per USB (Improv) und hält die Verbindung;
+- er koppelt das Gerät an ein Konto: wartet auf ein einmaliges Kopplungstoken — aus der App über das lokale Netz oder über die serielle Schnittstelle (`PAIR_TOKEN:<token>`) — und tauscht es im Portal gegen ein dauerhaftes Geheimnis;
+- er verbindet sich mit MQTT und veröffentlicht `telemetry` und `status` in den Perioden aus `Config`;
+- er meldet sich im lokalen Netz an (mDNS `_idryer._tcp`) und nimmt Befehle der App über WebSocket an;
+- er veröffentlicht das Card-Manifest der Gerätekarte.
 
-### 1. Implementieren Sie IProfile
+Die Klassen darunter (`IdryerRuntime`, `CloudStateMachine`, `LocalAccess` und andere) sind Interna des Cores: das Kopplungstoken erreicht den Cloud-Teil nur innerhalb von `iDryer::Link`. Bauen Sie ein Produkt auf der Fassade.
+
+---
+
+## 1. Projekt
+
+`idryer-core` kommt nach `lib/idryer-core/` (Kopie oder symbolischer Link); die Bibliotheken des Cores holt PlatformIO aus dessen `library.json`. Minimale `platformio.ini`:
+
+```ini
+[env:my-device]
+platform    = espressif32
+framework   = arduino
+board       = esp32-c3-devkitm-1
+
+; ESP8266-Transport aus den Abhängigkeiten von espMqttClient: baut nicht auf ESP32
+lib_ignore = ESPAsyncTCP
+
+build_flags =
+    -DIDRYER_API_BASE='"https://portal.idryer.org/api"'
+    -DMQTT_BROKER='"mqtt.idryer.org"'
+    -DMQTT_PORT=8883
+    -DMQTT_USE_TLS=1
+```
+
+Ohne `lib_ignore = ESPAsyncTCP` bricht der Build in `ESPAsyncTCP.cpp` ab; ohne `MQTT_BROKER` und `MQTT_PORT` kompiliert der Core nicht.
+
+---
+
+## 2. Minimale Firmware
 
 ```cpp
-// src/mydevice/my_profile.h
-#include <profiles/IProfile.h>
+#include <iDryer.h>
 
-class MyProfile : public idryer::IProfile {
-public:
-    void onOnline() override;
-    void loop() override;
-    void getConfig(JsonDocument& out) override;
-    bool applyConfig(int id, int val) override;
-    void buildInfoJson(char* buf, size_t len) const override;
+static const iDryer::Config CFG = {
+    .deviceType      = iDryer::DeviceType::Unknown,   // kein iDryer-Produkt: die Karte kommt aus dem Manifest
+    .unitsCount      = 1,
+    .hasAirTemp      = true,
+    .hasAirHumidity  = true,
+    .hardwareVersion = "1.0",
+    .firmwareVersion = "0.1.0",
+    .model           = "My Device",
 };
-```
-
-### 2. Montieren Sie die Composition Root
-
-```cpp
-#include <idryer_core.h>
-
-static idryer::ArduinoWifiStore       s_wifiStore;
-static idryer::ArduinoWifiManager     s_wifi;
-static idryer::ArduinoCredentialStore s_credentials;
-static idryer::ArduinoHttpClient      s_http;
-
-static idryer::cloud::HttpApi           s_api(&s_http, IDRYER_API_BASE);
-static idryer::MqttClient               s_mqtt;
-static idryer::cloud::CloudStateMachine s_cloud(&s_wifi, &s_credentials, &s_api, &s_mqtt);
-static idryer::ActionDispatcher         s_dispatcher;
-
-static MyProfile             s_profile;
-static idryer::IdryerRuntime s_runtime(&s_cloud, &s_dispatcher, &s_profile, &s_mqtt);
-```
-
-### 3. Registrieren Sie den Command Handler und starten Sie
-
-```cpp
-static void handleCommand(const char* cmd, JsonObjectConst data) {
-    const char* action = data["action"] | "";
-    if (strcmp(cmd, "get_config") == 0 ||
-        (strcmp(cmd, "invoke") == 0 && strcmp(action, "device.getConfig") == 0))
-    {
-        StaticJsonDocument<256> doc;
-        s_profile.getConfig(doc);
-        s_mqtt.publishConfig(doc);
-        return;
-    }
-    if (strcmp(cmd, "invoke") == 0) { s_dispatcher.handleInvoke(data); return; }
-    if (strcmp(cmd, "set") == 0)    { s_dispatcher.handleSet(data);    return; }
-}
+static iDryer::Link s_link(CFG);
 
 void setup() {
-    Serial.begin(115200);
-    idryer::hal::initArduinoHal(&Serial);
-    // ... load WiFi credentials, seedSerialFromMac ...
-    s_runtime.setCommandHandler(handleCommand);
-    s_runtime.begin();
+    s_link.begin();
+    // Gerät im Portal entkoppelt: Geheimnis löschen, auf neue Kopplung warten.
+    s_link.onCommand("revoke", [](JsonObjectConst) { s_link.handleRevoke(); });
 }
 
 void loop() {
-    s_runtime.loop();
+    s_link.loop();
+    s_link.telemetry.airTempC[0]       = readTemp();       // Ihre Sensorfunktionen
+    s_link.telemetry.airHumidityPct[0] = readHumidity();
 }
 ```
+
+`s_link.begin()` startet WLAN, Kopplung, MQTT und lokalen Zugriff; `s_link.loop()` muss ständig laufen, ohne `delay()`. Der Befehl `revoke` kommt vom Portal, wenn das Gerät vom Konto entkoppelt wird: `handleRevoke()` löscht das Geheimnis, und das Gerät wartet auf ein neues Kopplungstoken.
 
 ---
 
-## Szenario 2: MQTT + Local WS Gerät
+## 3. WLAN und Kopplung — nichts im Code
 
-Erweitert Minimal. Fügt `LocalAccess` (LAN WebSocket + mDNS) und `DevicePublisher` hinzu — ein dünner Wrapper zum Veröffentlichen auf beiden Transporte in einem Aufruf.
+Die Firmware enthält weder das WLAN-Passwort noch Kontodaten. Der Nutzer verbindet das Gerät in der iDryer-App: **Neues Gerät verbinden** → Schritt **WLAN** (die App sendet das Netz per ESPTouch) → Schritt **Kopplung** (die App findet das Gerät per mDNS, holt beim Portal ein einmaliges Token und übergibt es dem Gerät; das Gerät aktiviert das Token im Portal selbst). Bis das WLAN steht, bleibt die serielle Schnittstelle still: der Core hält sie für den Web-Installer (Improv) frei.
 
-Referenz: [`examples/mqtt_with_local_ws/`](../../../examples/mqtt_with_local_ws/)
-
-### Zusätzliche Objekte
-
-```cpp
-#include <local_access/local_access.h>
-#include <local_access/device_publisher.h>
-
-static idryer::LocalAccess     s_local;
-static idryer::DevicePublisher s_pub(&s_mqtt, &s_local);
-```
-
-### Command Handler — einer für beide Transporte
-
-```cpp
-static void handleCommand(const char* cmd, JsonObjectConst data) {
-    const char* action = data["action"] | "";
-    if (strcmp(cmd, "get_config") == 0 ||
-        (strcmp(cmd, "invoke") == 0 && strcmp(action, "device.getConfig") == 0))
-    {
-        StaticJsonDocument<256> doc;
-        s_profile.getConfig(doc);
-        s_pub.publishConfig(doc);   // → MQTT + WS
-        return;
-    }
-    if (strcmp(cmd, "invoke") == 0) { s_dispatcher.handleInvoke(data); return; }
-    if (strcmp(cmd, "set") == 0)    { s_dispatcher.handleSet(data);    return; }
-}
-```
-
-### Initialisierung in setup()
-
-```cpp
-s_credentials.seedSerialFromMac();
-{
-    idryer::DeviceIdentity identity;
-    s_credentials.load(identity);
-    s_local.initMdns(identity.serialNumber);   // mDNS before WS starts
-    s_local.begin(identity.serialNumber, identity.token);
-    s_local.setCommandSink(handleCommand);     // same handler
-    s_local.setTokenRefreshCallback([]() {
-        idryer::DeviceIdentity id;
-        s_credentials.load(id);
-        s_local.updateToken(id.token);
-    });
-}
-s_runtime.setCommandHandler(handleCommand);
-s_runtime.begin();
-```
-
-### loop()
-
-```cpp
-void loop() {
-    s_runtime.loop();
-    s_local.loop();
-    // product logic — sensors, telemetry via s_pub
-}
-```
+Schritt für Schritt und mit dem erwarteten Log — Build-Your-Own-iDryer, Kapitel „Firmware-Start auf dem Core“.
 
 ---
+
+## 4. Daten: Telemetrie und Status
+
+- Die Flags `has*` in `Config` legen fest, welche Vokabularfelder in die Telemetrie gehen und welche Zellen auf der Karte erscheinen.
+- Schreiben Sie Werte in `s_link.telemetry` (`airTempC`, `airHumidityPct`, `heaterTempC`, `heaterPower01`, `fanOn`, `servoOpen`) und `s_link.status` (`mode`, `targetTempC`, `durationS`, `elapsedS`); der Core veröffentlicht sie in den Perioden aus `Config`, `s_link.publishStatusNow()` sendet den Status sofort.
+- Ein eigenes Feld — über `s_link.onTelemetryPublish()`, auf die Karte — über `s_link.card().sensor()`; siehe [Gerätekarte](02-add-widget.md).
+
+---
+
+## 5. Einstellungen: das Menü
+
+Einstellungen werden in `src/menu/menu.yaml` beschrieben; der Generator `menu_gen.py` macht daraus C++-Code, die Speicherung im NVS und das Menü-JSON ([Menü als Protokoll](../08-contracts/02-menu-as-protocol.md)). Der Produktcode:
+
+- lädt das Menü vor `s_link.begin()`: `menu.initDefaults()`, `menu.loadFromNVS()`, `menu_sync_state_to_cache()`;
+- veröffentlicht es mit `menu_buildFullJson()` und `s_link.devicePublisher()->publishConfigRaw()` — beim Online-Gehen und auf den Befehl `get_config`;
+- übernimmt den Befehl `set` mit `menu_apply_by_bind()` (Wert, NVS und Cache auf einmal) und veröffentlicht das Menü erneut.
+
+Der vollständige Code — Build-Your-Own-iDryer, Kapitel „Menü aus YAML“.
+
+---
+
+## 6. Gerätekarte
+
+Was die Karte zeigt und welche Operationen sie startet, wird mit `s_link.card()` deklariert — [Gerätekarte: das Card-Manifest](02-add-widget.md).
+
+---
+
+## 7. Vertrag
+
+Wenn Sie neue Topics hinzufügen oder Payloads ändern:
+
+1. aktualisieren Sie `contracts/mqtt_contract.yaml`;
+2. führen Sie `contracts/regen.sh` aus und committen Sie die erzeugten Dateien.
+
+---
+
+## Zwei-Chip-Geräte
+
+Für einen ESP32, der über UART mit einem eigenen Controller arbeitet (zum Beispiel RP2040), hat der Core die UART-Brücke `idryer_uart.h`; die funktionierende Vorlage ist die Firmware `idryer-link`.

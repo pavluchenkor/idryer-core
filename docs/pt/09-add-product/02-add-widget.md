@@ -1,248 +1,210 @@
-> **⚠ Tradução desatualizada (em 2026-05-27).**
-> O conceito de widget foi redefinido: agora um widget é um **cartão de dispositivo no dashboard do portal** (componente React específico do produto), não um artefacto gerado a partir de `contracts/widgets/`. A camada antiga `widget-registry`/`contracts/widgets/` foi removida.
-> A versão em inglês em [../en/09-add-product/02-add-widget.md](../../en/09-add-product/02-add-widget.md) é a fonte da verdade atual. Esta tradução será atualizada separadamente.
+---
+title: "Cartão do dispositivo: o card manifest"
+description: "Como um firmware sobre idryer-core descreve o seu cartão com s_link.card(): sensores, ações com parâmetros de arranque, o que segue para o portal e o que o portal e a aplicação desenham."
+---
+
+# Cartão do dispositivo: o card manifest
+
+O portal e a aplicação móvel constroem o cartão de qualquer dispositivo a partir do seu **card manifest** — uma descrição que o firmware publica sobre si próprio: o que mostrar e o que pode ser controlado. Um novo tipo de dispositivo não precisa de código no portal nem na aplicação.
+
+O manifesto faz parte da fachada `iDryer::Link` (`s_link.card()`). O runtime de baixo nível (`IdryerRuntime`) não o publica.
+
+O menu e o cartão são coisas diferentes. O menu espelha as definições do dispositivo: um valor alterado no portal é escrito na memória do dispositivo. O cartão mostra medições e lança operações: os parâmetros de arranque seguem com um comando e não são escritos no menu. Um parâmetro de arranque pode obter os limites e o valor por omissão de um item do menu.
 
 ---
 
-# Adicionar um Widget e um Novo Dispositivo
+## Como funciona
 
-Ciclo completo: desde a bifurcação do repositório até ao PR mesclado. Abrange firmware, contrato, widget React e testes de portal.
+```text
+firmware: declarações s_link.card()
+   │  o core constrói o JSON e publica-o retained (QoS 1) em idryer/{key}/card
+   ▼
+backend do portal: valida o manifesto (limites, tipos e campos permitidos), guarda-o
+   ▼
+portal e aplicação: desenham o cartão
+   │  o utilizador carrega num botão
+   ▼
+idryer/{key}/commands/invoke  {"unitId":"U1","action":"card.<id>","args":{…}}
+   ▼
+o core encaminha "card.<id>" para o seu callback
+```
 
-Se você apenas precisar de firmware sem um novo widget — consulte [01-add-new-product.md](01-add-new-product.md).
+O core publica o manifesto depois de a ligação MQTT estar estabelecida e volta a publicá-lo quando muda a declaração ou um item do menu de que ela depende.
 
 ---
 
-## Pré-requisitos
+## Entidades: o que mostrar
 
-- Python 3.9+ com `pip install pyyaml jsonschema`
-- Node.js 18+
-- PlatformIO CLI
-- Acesso ao portal iDryer para testes UIKit
+Os sensores do vocabulário do ecossistema são adicionados pelas flags de `Config`; não os declara:
 
----
-
-## Passo 1. Bifurcar e Clonar
-
-1. Bifurque o repositório `idryer-core` no GitHub.
-2. Clone sua bifurcação localmente:
-
-    ```bash
-    git clone https://github.com/<your-username>/idryer-core.git
-    cd idryer-core
-    git checkout -b feature/my-new-device
-    ```
-
-3. Verifique se o contrato passa na validação no estado atual:
-
-    ```bash
-    cd contracts
-    ./regen.sh --firmware-only
-    ```
-
----
-
-## Passo 2. Editar o Contrato
-
-Todas as alterações vão para `contracts/mqtt_contract.yaml`. Mantenha tudo em um único changeset.
-
-!!! aviso
-    Não edite ficheiros em `_generated/` — são sobrescritos pelos geradores.
-
-### 2a. Vocabulário de capacidades (novo tipo de periférico)
-
-Se o dispositivo tiver um novo tipo de hardware (por exemplo, um sensor de CO2), adicione uma entrada na secção `capability_vocabulary`:
-
-```yaml
-capability_vocabulary:
-  co2:
-    description: "CO2 sensor (ppm)"
-    config_flag: hasAirCo2
-    telemetry_field: airCo2Ppm
-```
-
-Isto adiciona automaticamente o campo `hasAirCo2: bool` a `iDryer::Config` na próxima regeneração.
-
-### 2b. Funções canónicas (nova função + widget)
-
-Se o dispositivo expõe um novo item de menu, registar a função em `canonical_roles`:
-
-```yaml
-canonical_roles:
-  co2.read:
-    type: float
-    widget: Co2Display
-    unit: ppm
-    labels:
-      ru: "CO₂"
-      en: "CO₂"
-```
-
-O valor `widget` é o nome do componente React que você escreverá no Passo 5.
-
-### 2c. Ações de invocação (se o widget envia comandos)
-
-Se o widget acionara uma ação no dispositivo, descreva-a em `invoke_actions`:
-
-```yaml
-invoke_actions:
-  my_device:
-    co2.calibrate:
-      description: "Start CO2 sensor calibration"
-      args:
-        targetPpm:
-          type: uint16
-          description: "Reference CO2 value (ppm)"
-          required: true
-```
-
-### 2d. Perfil de dispositivo (novo tipo de dispositivo)
-
-Adicione o perfil a `device_profiles`:
-
-```yaml
-device_profiles:
-  my_device:
-    description: "My device"
-    capabilities: [led, co2]
-    invoke_actions: [co2.calibrate]
-```
-
-Os valores de capacidade vêm do `capability_vocabulary` definido no passo 2a.
-
----
-
-## Passo 3. Validar e Regenerar
-
-```bash
-cd contracts
-./regen.sh
-```
-
-Sinalizadores:
-
-| Sinalizador | Efeito |
+| Flag de `Config` | Célula do cartão |
 |---|---|
-| (nenhum) | Validar + todos os geradores + copiar para portal |
-| `--firmware-only` | Apenas geradores de firmware, pular cópia de portal |
-| `--help` | Mostrar ajuda |
+| `hasAirTemp` | temperatura do ar |
+| `hasAirHumidity` | humidade |
+| `hasHeaterTemp` | temperatura do aquecedor |
+| `hasHeater` | potência de aquecimento |
+| `hasFan` | ventilador ligado / desligado |
+| `hasServo` | registo aberto / fechado |
+| `hasWeight` | módulos de pesagem (topic `weights`) |
+| `hasRfid` | a unidade tem leitor RFID |
 
-No sucesso, `_generated/` é atualizado com:
+Valor próprio: adicione-o à telemetria e declare um sensor com o caminho JSON:
 
-- `uart_protocol.h`, `mqtt_topics.h` — cabeçalhos C++
-- `iDryer_api.h` — fachada Config/DeviceType
-- `mqtt-api.types.ts` — tipos TypeScript
-- `scaffolds/my_device/` — esqueleto do projeto PlatformIO
-- No portal: ficheiros em `src/components/widgets/`
-
-Se `regen.sh` sair com um erro, corrija o problema antes de continuar.
-
----
-
-## Passo 4. Implementar Firmware
-
-Use o projeto de andaime gerado:
-
-```bash
-cp -r contracts/_generated/scaffolds/my_device/ ~/my_device_fw/
-cd ~/my_device_fw
+```cpp
+s_link.onTelemetryPublish([](JsonObject root) {
+    root["units"][0]["co2ppm"] = g_co2;
+});
+s_link.card().sensor("co2", "CO2", "ppm", "units[0].co2ppm");
 ```
 
-Preencha as secções TODO em `src/main.cpp`:
+Os controlos simples também são entidades: `button`, `number`, `select`. O valor é enviado assim que o utilizador o altera e o core chama o seu callback:
 
-- `onOnline()` — carregue a configuração do NVS, inicialize o hardware.
-- `loop()` — sonde sensores, chame `s_runtime.publishTelemetry(tel)`.
-- `buildInfoJson()` — já preenchido pelo gerador a partir de capacidades.
-- `onInvoke()` — manipule `co2.calibrate`.
-
-Para detalhes, consulte [01-add-new-product.md](01-add-new-product.md).
+```cpp
+static const char* kModes[] = { "auto", "on", "off" };
+s_link.card().select("mode", "Mode", kModes, 3, [](const char* opt) { onMode(opt); });
+s_link.card().number("threshold", "Threshold", 100, 400, 10, "", [](float v) { onThreshold(v); });
+s_link.card().button("purge", "Purge", []() { onPurge(); });
+```
 
 ---
 
-## Passo 5. Criar o Widget React
+## Ações: operações com parâmetros de arranque
 
-Os widgets vivem em `contracts/widgets/` e são copiados para o portal por `regen.sh`.
+Uma ação é uma operação do dispositivo: iniciar a secagem, aquecer, ligar a luz, parar. Tem um **modo** — o modo da unidade depois da ação (`status.units[].mode`) — e **parâmetros** com um significado (`purpose`). O cartão decide o que mostrar pelo modo atual da unidade:
 
-!!! nota
-    Não edite widgets diretamente em `portal/src/components/widgets/` — serão sobrescritos na próxima execução de `regen.sh`. Edite apenas em `contracts/widgets/`.
+- o modo da unidade coincide com o modo de uma ação → o dispositivo está ocupado com ela: bloco de sessão e botão Parar (a ação com modo `IDLE`);
+- caso contrário → o formulário de arranque; várias ações de arranque → um seletor de modo.
 
-### Criar o ficheiro de widget
+Exemplo: um armário de armazenamento aquecido com um ESP32. A temperatura alvo é o item do menu `target_temp` (30–50 °C, por omissão 45).
 
-```tsx
-// contracts/widgets/Co2Display.tsx
-import type { WidgetProps } from "./widget-props";
+```cpp
+#include <menu_meta.h>
+#include <menu_cache.h>
+#include <menu_bindings.h>          // menu_sync_state_to_cache
+#include <card/card_menu_bridge.h>
 
-export function Co2DisplayWidget({ device }: WidgetProps) {
-  const unit = device.units[0];
-  const co2 = unit?.co2Ppm ?? null;
-  return (
-    <div style={{ padding: "8px 16px" }}>
-      {co2 !== null ? `${co2} ppm` : "—"}
-    </div>
-  );
+static void onStorage(uint8_t unit, JsonObjectConst args) {
+    s_targetC = args["temperature"].as<float>();   // já dentro de 30..50
+    s_link.status.mode[unit]        = iDryer::UnitMode::Storage;
+    s_link.status.targetTempC[unit] = s_targetC;
+    s_link.publishStatusNow();
+}
+
+static void onStop(uint8_t unit, JsonObjectConst) {
+    s_link.status.mode[unit]        = iDryer::UnitMode::Idle;
+    s_link.status.targetTempC[unit] = 0.0f;
+    s_link.publishStatusNow();
+}
+
+void setup() {
+    menu.initDefaults();
+    menu.loadFromNVS();
+    menu_sync_state_to_cache();     // valores do menu na cache que o cartão lê
+    s_link.begin();
+
+    auto& card = s_link.card();
+    idryer::card_menu::attach(card);
+    card.action("storage", "STORAGE", onStorage)
+        .name("ru", "Хранение").name("en", "Storage")
+        .param("temperature", "target_temperature", MENU_TARGET_TEMP);
+    card.action("stop", "IDLE", onStop)
+        .name("ru", "Стоп").name("en", "Stop");
 }
 ```
 
-### Registar em index.ts
+O que o callback recebe:
 
-```ts
-// contracts/widgets/index.ts
-export { Co2DisplayWidget } from "./Co2Display";
-```
+- os números são limitados aos limites da unidade; um número em falta é substituído pelo valor por omissão;
+- `unit` — índice da unidade a partir de `unitId` (`"U1"` → 0); um comando para uma unidade que o dispositivo não tem é ignorado;
+- depois do arranque, defina `status.mode` e chame `publishStatusNow()` — pelo estado, o cartão passa para o bloco de sessão.
 
-### Registar em widget-registry.tsx (no portal)
+### API das ações
 
-Após a próxima execução de `regen.sh`, o ficheiro aparecerá em `portal/src/components/widgets/Co2Display.tsx`. Adicione uma entrada a `widget-registry.tsx` manualmente:
-
-```tsx
-import { Co2DisplayWidget } from "./Co2Display";
-
-export const WIDGET_REGISTRY: Record<WidgetName, React.ComponentType<WidgetProps>> = {
-  // ...
-  Co2Display: Co2DisplayWidget,
-};
-```
-
----
-
-## Passo 6. Testar em UIKit
-
-Abra `portal/src/pages/UiKitPage.tsx` e adicione uma secção com dados simulados dentro do grupo **Device Dashboard Widgets**:
-
-```tsx
-<KitSection title="Co2Display">
-  <Co2DisplayWidget device={MOCK_DEVICE} item={MOCK_CO2_ITEM} socket={null} />
-</KitSection>
-```
-
-Abra o portal localmente e navegue para `/uikit` — o widget deve renderizar sem um login.
-
----
-
-## Passo 7. Checklist de PR
-
-Antes de submeter o PR, verifique que:
-
-- [ ] `./contracts/regen.sh` completa sem erros
-- [ ] `_generated/*` é confirmado (não em `.gitignore`)
-- [ ] `contracts/widgets/` — novo ficheiro de widget adicionado
-- [ ] `contracts/widgets/index.ts` — widget exportado
-- [ ] `widget-registry.tsx` no portal — widget registado
-- [ ] O widget renderiza em `/uikit` sem erros de consola
-- [ ] O andaime em `_generated/scaffolds/my_device/` reflete corretamente as capacidades
-- [ ] A descrição do PR declara: propósito do dispositivo, capacidades, nome do widget
-
-Submeta o PR contra o ramo `main` do repositório `idryer-core`.
-
----
-
-## Todas as Alterações em Um PR
-
-| Ficheiro | Tipo de mudança |
+| Chamada | O que faz |
 |---|---|
-| `contracts/mqtt_contract.yaml` | Fonte de verdade |
-| `contracts/_generated/*` | Auto-gerado — confirmado integralmente |
-| `contracts/widgets/MyWidget.tsx` | Novo ficheiro |
-| `contracts/widgets/index.ts` | +1 linha de exportação |
-| *(portal, após `regen.sh`)* | `src/components/widgets/MyWidget.tsx` — cópia |
-| *(portal, manual)* | `src/components/widgets/widget-registry.tsx` — +1 entrada |
-| *(portal, manual)* | `src/pages/UiKitPage.tsx` — +1 secção em KitGroup |
+| `card.action(id, mode, cb)` | uma ação; `mode` — modo da unidade a seguir, `nullptr` — o modo não muda |
+| `.param(id, purpose, MENU_ID)` | um número: limites, passo, valor por omissão e unidade do item do menu |
+| `.param(id, purpose, min, max, step, def[, unit])` | um número com limites próprios |
+| `.ceiling(MENU_ID)` | o limite superior do parâmetro anterior é o valor desse item do menu (por exemplo, a temperatura máxima do ar) |
+| `.stages(id, "stages", MENU_ID)` | etapas do perfil `[{temperature, ramp, hold}]`, segundos; temperatura da etapa dentro dos limites do item do menu |
+| `.select(id, purpose, options, count[, def])` | escolha numa lista; um valor fora da lista é substituído pelo valor por omissão |
+| `.color(id, purpose, "#FFFFFF")` | uma cor `#RRGGBB` |
+| `.deviceClass("identify")`, `.deviceClass("clear_errors")` | botões fixos do cabeçalho: localizar o dispositivo, limpar erros |
+| `.name("ru", "…").name("en", "…")` | o nome da ação, quando o cartão não conhece o modo |
+
+Valores de `purpose`: `target_temperature`, `target_humidity`, `duration` (minutos, 0 — sem limite), `stages`, `start_stage` (a partir de 0), `effect`, `rgb_color`. O cartão usa-os para os rótulos dos campos e para funções do portal: o preset de secagem preenche `target_temperature` e `duration` de uma ação com modo `DRYING`, um perfil de secagem preenche `stages`.
+
+Os callbacks são funções ou lambdas sem capturas. As strings de `name` e as opções de seleção são guardadas como ponteiros — use literais ou arrays estáticos.
+
+---
+
+## O que segue para o portal
+
+O armário acima publica (`Config`: `hasAirTemp`, `hasAirHumidity`, `hasHeaterTemp`, `hasHeater`, `hasFan`):
+
+```json
+{
+  "v": 2,
+  "entities": [
+    {"id": "temp", "type": "sensor", "device_class": "temperature", "unit": "°C", "source": "telemetry", "path": "units[0].temperature"},
+    {"id": "humidity", "type": "sensor", "device_class": "humidity", "unit": "%", "source": "telemetry", "path": "units[0].humidity"},
+    {"id": "heater_temp", "type": "sensor", "device_class": "heater_temp", "unit": "°C", "source": "telemetry", "path": "units[0].heaterTemp"},
+    {"id": "power", "type": "sensor", "device_class": "power", "unit": "%", "source": "telemetry", "path": "units[0].heaterPower"},
+    {"id": "fan", "type": "binary_sensor", "device_class": "fan", "source": "telemetry", "path": "units[0].fanStatus"}
+  ],
+  "actions": [
+    {"id": "storage", "mode": "STORAGE", "name": {"ru": "Хранение", "en": "Storage"}, "action": "card.storage",
+     "params": [{"id": "temperature", "purpose": "target_temperature", "type": "number",
+                 "limits": [30, 50], "step": 1, "default": 45, "unit": "°C"}]},
+    {"id": "stop", "mode": "IDLE", "name": {"ru": "Стоп", "en": "Stop"}, "action": "card.stop"}
+  ]
+}
+```
+
+`limits` e `default` vieram do item do menu. Com `.ceiling()`, o parâmetro recebe ainda `max_by` — o título do item do menu que cortou o limite superior; o cartão indica-o quando um valor está acima do limite.
+
+---
+
+## O que o portal e a aplicação desenham
+
+Esquema, não captura de ecrã. Em repouso:
+
+```text
+┌─ DIY Storage Cabinet ─────────────── [Ocioso] ─┐
+│ | 24.8 °C | 41 %  | 25.1 °C |                  │  ← temperatura, humidade, aquecedor
+│ | 0 %     | desligado       |                  │  ← potência, ventilador (cinzentos: 0 / desligado)
+│ [Temp. 45 °C          ]  [Armazenamento]       │  ← ação "storage"
+└────────────────────────────────────────────────┘
+```
+
+Depois do arranque, o dispositivo reporta o modo `STORAGE` e o mesmo cartão mostra o bloco de sessão (temperatura alvo e tempo em armazenamento) e o botão Parar — a ação com modo `IDLE`.
+
+Regras dos dois lados:
+
+- uma célula fica cinzenta quando não há valor; a potência, também com 0; o ventilador e o registo, no estado desligado / fechado;
+- um valor fora dos limites não é substituído: o arranque fica bloqueado e o motivo aparece por baixo do formulário;
+- num firmware com ações no manifesto, os botões localizar e limpar erros só existem se ele declarar ações com `identify` / `clear_errors`.
+
+Onde o cartão aparece:
+
+| | Portal | Aplicação |
+|---|---|---|
+| um tipo de dispositivo que não é um produto iDryer | cartão do dashboard a partir do manifesto, com as ações; página do dispositivo — leituras e ações (se o manifesto tiver ações) | início — leituras; ações — na página do dispositivo |
+| `deviceType = Dryer` | o cartão do secador com as mesmas ações do manifesto | início — monitorização; ações — na página do dispositivo |
+
+---
+
+## Limites
+
+| | Core | Backend do portal |
+|---|---|---|
+| entidades | 16 declaradas + automáticas | 32 |
+| linhas de layout | 8 | 16 |
+| ids por linha | 4 | 4 |
+| ações | 8 | 8 |
+| parâmetros por ação | 4 (`IDRYER_CARD_MAX_PARAMS`) | 6 |
+| idiomas de `name` | `ru`, `en` | até 4 |
+
+`id`: letras latinas minúsculas, dígitos e `_`, até 24 caracteres; entidades e ações partilham um espaço de nomes. O documento do manifesto está limitado a 4096 bytes; se não couber, o core escreve `manifest overflows` no log e não o publica.
+
+O formato em si — `contracts/mqtt_contract.yaml`, secção `mqtt_only`, `suffix: card`.

@@ -7,64 +7,34 @@
 | File | Owner | Describes |
 |------|-------|-----------|
 | `src/menu/menu.yaml` | your product | device menu: parameters, actions, structure |
-| `contracts/mqtt_contract.yaml` | idryer-core | list of known meanings: what each `role:` means and how the portal displays it |
+| `contracts/mqtt_contract.yaml` | idryer-core | list of known meanings: `canonical_roles` with labels in several languages |
 | `frontend-v2/src/contracts/mqtt-api.types.ts` | generated | TypeScript types for the portal |
 
-**`role:`** — a semantic name for a menu item. The firmware says "I have `iheater.heat_start`" rather than "I have button number 35". This is the stable contract between device and portal — internal firmware names can change, `role:` stays fixed.
+**`role:`** — a semantic name for a menu item. The firmware says "I have `iheater.heat_temp`" rather than "I have item number 35". Internal firmware names can change, `role:` stays fixed.
 
-**Widget** — how the portal displays this item: a button, slider, toggle, or a complex component (color picker, profile editor). Determined by the contract via `role:`, not by the firmware.
+The menu is the mirror of the device settings. The firmware publishes every item of `menu.yaml`, with or without `role:`. The portal draws each item by its type: value, toggle, action, submenu. `role:` gives the item a label from the contract in the user's language; without `role:` the portal shows the name the device sent.
 
-A menu item with `role:` is visible to the portal. Without `role:` — private, shown only on the device display.
+The menu does not build the device card. What the card shows and which operations it starts is described by the card manifest — see [Device card: the card manifest](../09-add-product/02-add-widget.md). A card action can take the limits and the default of its parameter from a menu item.
 
 ---
 
 ## 1. Firmware build (`pio run`)
 
-`menu.yaml` → `pre_gen_menu.py` validates every `role:` against `canonical_roles` in the contract → if a role is unknown, the build fails with an error and a list of valid roles → `menu_gen.py` generates C++ files into `src/menu/`
-
-Validation is built into the build step — it is physically impossible to use a non-existent role silently.
+`menu.yaml` → `menu_gen.py` checks every `role:` against `canonical_roles` in the contract → if a role is unknown, the build fails with an error and a list of valid roles → the generator writes C++ files into `src/menu/`.
 
 ## 2. Updating TypeScript for the portal (`regen.sh`)
 
-`mqtt_contract.yaml` → `gen_ts_types.py` generates `mqtt-api.types.ts` → file is copied to `frontend-v2/src/contracts/`
+`mqtt_contract.yaml` → `gen_ts_types.py` generates `mqtt-api.types.ts` and the role labels `roles.{lang}.json` → the files are copied to the portal.
 
-Run manually when the contract changes. Commit the result.
+Run it when the contract changes. Commit the result.
 
 ## 3. Runtime: device ↔ portal
 
-Device connects → publishes menu to MQTT topic `config` → portal reads each item with field `r:` → looks up `CanonicalRoles[r].widget` → renders widget from `WIDGET_REGISTRY`.
+The firmware publishes the menu to the `config` topic (the product code does it on the `get_config` command; iDryer products also do it when they come online) → the portal backend stores it → the portal gets it with `GET /devices/:id/menu-config` → each item is drawn by its type `t` (`val`, `tog`, `act`, `sub`), the label is `canonical_roles[r].labels[lang]`, then English, then the name `n` from the device.
 
 Parameters (`min`, `max`, `val`) come from the menu item itself — the firmware knows the current values.
 
----
-
-## How to add a new action to the portal dashboard
-
-`role:` is not a free-form field. The value must come from the closed list in `canonical_roles` in the contract. You cannot invent a role on the fly — the build will fail. See available roles in `contracts/mqtt_contract.yaml` → `canonical_roles` section, or in `menu.template.yaml`.
-
-**1. Pick a role from the contract.** If none fits — add it to `mqtt_contract.yaml` → `canonical_roles` first, then run `regen.sh`:
-
-```yaml
-canonical_roles:
-  my.action: { type: action, widget: button }
-```
-
-**2. Add an item to `menu.yaml`:**
-
-```yaml
-- id: my_action
-  type: action
-  role: my.action
-  title: { ru: "МОЁ ДЕЙСТВИЕ", en: "MY ACTION" }
-```
-
-**3. Handle it in firmware (`main.cpp`):**
-
-```cpp
-if (action == "my.action") { /* do the thing */ }
-```
-
-`pio run` → validation → C++ → firmware publishes `r: "my.action"` → portal renders a button.
+The portal changes a value with `commands/set { "id": <id>, "val": <value> }`.
 
 ---
 
@@ -73,7 +43,7 @@ if (action == "my.action") { /* do the thing */ }
 ```yaml
 - id: my_param
   type: value
-  role: my.param        # only if it should appear on the portal; omit for display-only
+  role: my.param        # optional: a label from the contract
   title: { ru: "ПАРАМЕТР", en: "PARAM" }
   unit: { ru: "°C", en: "°C" }
   vtype: uint16
@@ -86,13 +56,29 @@ if (action == "my.action") { /* do the thing */ }
   default: 50
 ```
 
-`bind` = NVS key. `persist: true` = value survives reboot.
-Portal changes the value via `commands/set { "id": <id>, "val": <value> }`.
+`bind` = NVS key. `persist: true` = the value survives a reboot.
+
+`role:` is not a free-form field: the value must come from `canonical_roles` in the contract, otherwise the build fails. See the list in `contracts/mqtt_contract.yaml` → `canonical_roles` or in `menu.template.yaml`. A new role is added to the contract first, then `regen.sh`.
+
+---
+
+## How to add an operation to the device card
+
+Operations (start, stop, heat, light) are declared as card actions, not as menu items. Their limits can be taken from a menu item:
+
+```cpp
+idryer::card_menu::attach(s_link.card());
+s_link.card().action("storage", "STORAGE", onStorage)
+    .param("temperature", "target_temperature", MENU_TARGET_TEMP);
+s_link.card().action("stop", "IDLE", onStop);
+```
+
+The full description — [Device card: the card manifest](../09-add-product/02-add-widget.md).
 
 ---
 
 ## What NOT to do
 
-- Don't add `widget:` to `menu.yaml` — the widget is determined by the contract via `role:`, not by the firmware
-- Don't edit `mqtt-api.types.ts` by hand — it is generated by `regen.sh`
-- Don't touch `Config.hasXxx` flags for new actions — those are only for telemetry (sensors, states)
+- Don't add `widget:` to `menu.yaml`. The `widget` field of `canonical_roles` is reference data: the portal and the app do not read it.
+- Don't edit `mqtt-api.types.ts` by hand — it is generated by `regen.sh`.
+- Don't touch `Config.hasXxx` flags for new actions — those are only for telemetry (sensors, states).

@@ -6,93 +6,79 @@
 
 | Datei | Besitzer | Beschreibt |
 |------|-------|-----------|
-| `src/menu/menu.yaml` | Ihr Produkt | Geräte-Menü: Parameter, Aktionen, Struktur |
-| `contracts/mqtt_contract.yaml` | idryer-core | Liste bekannter Bedeutungen: Was bedeutet jede `role:` und wie zeigt das Portal sie an |
+| `src/menu/menu.yaml` | Ihr Produkt | Gerätemenü: Parameter, Aktionen, Struktur |
+| `contracts/mqtt_contract.yaml` | idryer-core | Liste bekannter Bedeutungen: `canonical_roles` mit Beschriftungen in mehreren Sprachen |
 | `frontend-v2/src/contracts/mqtt-api.types.ts` | generiert | TypeScript-Typen für das Portal |
 
-**`role:`** — Ein semantischer Name für ein Menü-Element. Die Firmware sagt "Ich habe `iheater.heat_start`", anstatt "Ich habe Knopf Nummer 35". Dies ist der stabile Vertrag zwischen Gerät und Portal — interne Firmware-Namen können sich ändern, `role:` bleibt fix.
+**`role:`** — ein semantischer Name für einen Menüpunkt. Die Firmware sagt „ich habe `iheater.heat_temp`“ statt „ich habe Punkt Nummer 35“. Interne Namen der Firmware können sich ändern, `role:` bleibt fest.
 
-**Widget** — Wie das Portal dieses Element anzeigt: Knopf, Schieber, Umschalter, oder eine komplexe Komponente (Farbwähler, Profileditor). Bestimmt durch den Vertrag über `role:`, nicht durch die Firmware.
+Das Menü spiegelt die Geräteeinstellungen. Die Firmware veröffentlicht jeden Punkt aus `menu.yaml`, mit oder ohne `role:`. Das Portal zeichnet jeden Punkt nach seinem Typ: Wert, Schalter, Aktion, Untermenü. `role:` gibt dem Punkt eine Beschriftung aus dem Vertrag in der Sprache des Nutzers; ohne `role:` zeigt das Portal den Namen, den das Gerät geschickt hat.
 
-Ein Menü-Element mit `role:` ist sichtbar für das Portal. Ohne `role:` — privat, nur auf der Geräteanzeige.
+Die Gerätekarte baut nicht das Menü. Was die Karte zeigt und welche Operationen sie startet, beschreibt das Card-Manifest — siehe [Gerätekarte: das Card-Manifest](../09-add-product/02-add-widget.md). Eine Aktion der Karte kann Grenzen und Standardwert ihres Parameters aus einem Menüpunkt übernehmen.
 
 ---
 
-## 1. Firmware-Erstellung (`pio run`)
+## 1. Firmware-Build (`pio run`)
 
-`menu.yaml` → `pre_gen_menu.py` validiert jede `role:` gegen `canonical_roles` im Vertrag → wenn eine Rolle unbekannt ist, schlägt der Build mit Fehler und einer Liste gültiger Rollen fehl → `menu_gen.py` generiert C++ Dateien in `src/menu/`
-
-Validierung ist in den Build-Schritt eingebaut — Es ist physikalisch unmöglich, eine nicht existierende Rolle stumm zu verwenden.
+`menu.yaml` → `menu_gen.py` prüft jede `role:` gegen `canonical_roles` im Vertrag → ist eine Rolle unbekannt, bricht der Build mit einem Fehler und einer Liste gültiger Rollen ab → der Generator schreibt C++-Dateien nach `src/menu/`.
 
 ## 2. TypeScript für das Portal aktualisieren (`regen.sh`)
 
-`mqtt_contract.yaml` → `gen_ts_types.py` generiert `mqtt-api.types.ts` → Datei wird zu `frontend-v2/src/contracts/` kopiert
+`mqtt_contract.yaml` → `gen_ts_types.py` erzeugt `mqtt-api.types.ts` und die Rollenbeschriftungen `roles.{lang}.json` → die Dateien werden ins Portal kopiert.
 
-Manuell ausführen, wenn sich der Vertrag ändert. Das Ergebnis committen.
+Ausführen, wenn sich der Vertrag ändert. Das Ergebnis committen.
 
 ## 3. Laufzeit: Gerät ↔ Portal
 
-Gerät verbindet → veröffentlicht Menü auf MQTT-Thema `config` → Portal liest jedes Element mit Feld `r:` → schlägt `CanonicalRoles[r].widget` auf → rendert Widget aus `WIDGET_REGISTRY`.
+Die Firmware veröffentlicht das Menü im Topic `config` (das macht der Produktcode beim Befehl `get_config`; iDryer-Produkte auch, wenn sie online gehen) → das Portal-Backend speichert es → das Portal holt es mit `GET /devices/:id/menu-config` → jeder Punkt wird nach seinem Typ `t` (`val`, `tog`, `act`, `sub`) gezeichnet, die Beschriftung ist `canonical_roles[r].labels[lang]`, dann Englisch, dann der Name `n` vom Gerät.
 
-Parameter (`min`, `max`, `val`) kommen vom Menü-Element selbst — die Firmware kennt die aktuellen Werte.
+Parameter (`min`, `max`, `val`) kommen aus dem Menüpunkt selbst — die Firmware kennt die aktuellen Werte.
 
----
-
-## Wie man eine neue Aktion zum Portal-Dashboard hinzufügt
-
-`role:` ist kein freies Feld. Der Wert muss aus der geschlossenen Liste in `canonical_roles` im Vertrag stammen. Sie können eine Rolle nicht ad hoc erfinden — der Build schlägt fehl. Siehe verfügbare Rollen in `contracts/mqtt_contract.yaml` → `canonical_roles` Sektion, oder in `menu.template.yaml`.
-
-**1. Wählen Sie eine Rolle aus dem Vertrag.** Wenn keine passt — fügen Sie sie zuerst zu `mqtt_contract.yaml` → `canonical_roles` hinzu, dann führen Sie `regen.sh` aus:
-
-```yaml
-canonical_roles:
-  my.action: { type: action, widget: button }
-```
-
-**2. Fügen Sie ein Element zu `menu.yaml` hinzu:**
-
-```yaml
-- id: my_action
-  type: action
-  role: my.action
-  title: { ru: "МОЁ ДЕЙСТВИЕ", en: "MY ACTION" }
-```
-
-**3. Behandeln Sie es in Firmware (`main.cpp`):**
-
-```cpp
-if (action == "my.action") { /* do the thing */ }
-```
-
-`pio run` → Validierung → C++ → Firmware veröffentlicht `r: "my.action"` → Portal rendert Knopf.
+Das Portal ändert einen Wert mit `commands/set { "id": <id>, "val": <value> }`.
 
 ---
 
-## Wie man eine Einstellung (NVS-Parameter) hinzufügt
+## Eine Einstellung hinzufügen (NVS-Parameter)
 
 ```yaml
 - id: my_param
   type: value
-  role: my.param        # only if it should appear on the portal; omit for display-only
+  role: my.param        # optional: eine Beschriftung aus dem Vertrag
   title: { ru: "ПАРАМЕТР", en: "PARAM" }
   unit: { ru: "°C", en: "°C" }
   vtype: uint16
   min: 0
   max: 100
   step: 1
-  bind: my_param        # NVS key (≤ 15 chars)
+  bind: my_param        # NVS-Schlüssel (≤ 15 Zeichen)
   persist: true
   scope: global
   default: 50
 ```
 
-`bind` = NVS-Schlüssel. `persist: true` = Wert bleibt über Neustart.
-Portal ändert den Wert über `commands/set { "id": <id>, "val": <value> }`.
+`bind` = NVS-Schlüssel. `persist: true` = der Wert übersteht einen Neustart.
+
+`role:` ist kein freies Feld: der Wert muss aus `canonical_roles` im Vertrag stammen, sonst schlägt der Build fehl. Die Liste steht in `contracts/mqtt_contract.yaml` → `canonical_roles` oder in `menu.template.yaml`. Eine neue Rolle kommt zuerst in den Vertrag, danach `regen.sh`.
+
+---
+
+## Eine Operation zur Gerätekarte hinzufügen
+
+Operationen (Start, Stopp, Heizen, Licht) werden als Aktionen der Karte deklariert, nicht als Menüpunkte. Ihre Grenzen können aus einem Menüpunkt kommen:
+
+```cpp
+idryer::card_menu::attach(s_link.card());
+s_link.card().action("storage", "STORAGE", onStorage)
+    .param("temperature", "target_temperature", MENU_TARGET_TEMP);
+s_link.card().action("stop", "IDLE", onStop);
+```
+
+Die vollständige Beschreibung — [Gerätekarte: das Card-Manifest](../09-add-product/02-add-widget.md).
 
 ---
 
 ## Was man NICHT tun sollte
 
-- Fügen Sie nicht `widget:` zu `menu.yaml` hinzu — das Widget wird durch den Vertrag über `role:` bestimmt, nicht durch die Firmware
-- Bearbeiten Sie nicht `mqtt-api.types.ts` von Hand — sie wird durch `regen.sh` generiert
-- Ändern Sie nicht `Config.hasXxx` Flags für neue Aktionen — diese sind nur für Telemetrie (Sensoren, Status)
+- Kein `widget:` in `menu.yaml` eintragen. Das Feld `widget` in `canonical_roles` ist Referenzinformation: Portal und App lesen es nicht.
+- `mqtt-api.types.ts` nicht von Hand bearbeiten — es wird von `regen.sh` erzeugt.
+- Die Flags `Config.hasXxx` nicht für neue Aktionen anfassen — sie sind nur für Telemetrie (Sensoren, Zustände).

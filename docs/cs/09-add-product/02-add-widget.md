@@ -1,248 +1,210 @@
-> **⚠ Zastaralý překlad (k 2026-05-27).**
-> Koncept widgetu byl změněn: widget je nyní **karta zařízení na dashboardu portálu** (produktově specifická komponenta React), ne generovaný artefakt z `contracts/widgets/`. Stará vrstva `widget-registry`/`contracts/widgets/` byla odstraněna.
-> Aktuálním zdrojem pravdy je anglická verze v [../en/09-add-product/02-add-widget.md](../../en/09-add-product/02-add-widget.md). Tento překlad bude aktualizován samostatně.
+---
+title: "Karta zařízení: card manifest"
+description: "Jak firmware na idryer-core popisuje svou kartu přes s_link.card(): senzory, akce s parametry spuštění, co odchází na portál a co kreslí portál a aplikace."
+---
+
+# Karta zařízení: card manifest
+
+Portál i mobilní aplikace sestavují kartu každého zařízení z jeho **card manifestu** — popisu, který firmware publikuje o sobě: co zobrazit a co lze ovládat. Nový typ zařízení nepotřebuje žádný kód na portálu ani v aplikaci.
+
+Manifest je součástí fasády `iDryer::Link` (`s_link.card()`). Nízkoúrovňový runtime (`IdryerRuntime`) ho nepublikuje.
+
+Menu a karta jsou různé věci. Menu je zrcadlem nastavení zařízení: hodnota změněná z portálu se zapíše do paměti zařízení. Karta ukazuje měření a spouští operace: parametry spuštění odcházejí s jedním příkazem a do menu se nezapisují. Parametr spuštění může převzít meze a výchozí hodnotu z položky menu.
 
 ---
 
-# Přidejte widget a nové zařízení
+## Jak to funguje
 
-Úplný cyklus: od forku úložiště k sloučenému PR. Pokrývá firmware, smlouvu, widget React a testování portálu.
+```text
+firmware: deklarace s_link.card()
+   │  jádro sestaví JSON a publikuje ho retained (QoS 1) do idryer/{key}/card
+   ▼
+backend portálu: ověří manifest (limity, povolené typy a pole), uloží ho
+   ▼
+portál a aplikace: kreslí kartu
+   │  uživatel stiskne tlačítko
+   ▼
+idryer/{key}/commands/invoke  {"unitId":"U1","action":"card.<id>","args":{…}}
+   ▼
+jádro předá "card.<id>" vašemu callbacku
+```
 
-Pokud potřebujete pouze firmware bez nového widgetu — viz [01-add-new-product.md](01-add-new-product.md).
+Jádro publikuje manifest po navázání spojení MQTT a znovu ho publikuje, když se změní deklarace nebo položka menu, na které závisí.
 
 ---
 
-## Požadavky
+## Entity: co zobrazit
 
-- Python 3.9+ s `pip install pyyaml jsonschema`
-- Node.js 18+
-- PlatformIO CLI
-- Přístup k portálu iDryer pro testování UIKit
+Senzory ze slovníku ekosystému se přidají podle příznaků `Config`, nedeklarujete je:
 
----
-
-## Krok 1. Větvení a klonování
-
-1. Větvujte úložiště `idryer-core` na GitHubu.
-2. Klonujte vaši vidličku místně:
-
-    ```bash
-    git clone https://github.com/<your-username>/idryer-core.git
-    cd idryer-core
-    git checkout -b feature/my-new-device
-    ```
-
-3. Ověřte, že smlouva projde ověřením v současném stavu:
-
-    ```bash
-    cd contracts
-    ./regen.sh --firmware-only
-    ```
-
----
-
-## Krok 2. Upravte smlouvu
-
-Všechny změny jdou do `contracts/mqtt_contract.yaml`. Udržujte vše v jedné změně.
-
-!!! varování
-    Neupravujte soubory v `_generated/` — jsou přepsány generátory.
-
-### 2a. Slovník schopností (nový typ periférie)
-
-Pokud má zařízení nový hardwarový typ (např. senzor CO2), přidejte položku do sekce `capability_vocabulary`:
-
-```yaml
-capability_vocabulary:
-  co2:
-    description: "Senzor CO2 (ppm)"
-    config_flag: hasAirCo2
-    telemetry_field: airCo2Ppm
-```
-
-To automaticky přidá pole `hasAirCo2: bool` do `iDryer::Config` při příští regeneraci.
-
-### 2b. Kanonické role (nová role + widget)
-
-Pokud zařízení vystavuje nový prvek nabídky, zaregistrujte roli v `canonical_roles`:
-
-```yaml
-canonical_roles:
-  co2.read:
-    type: float
-    widget: Co2Display
-    unit: ppm
-    labels:
-      ru: "CO₂"
-      en: "CO₂"
-```
-
-Hodnota `widget` je název React komponenty, kterou napíšete v kroku 5.
-
-### 2c. Vyvolat akce (pokud widget posílá příkazy)
-
-Pokud widget spustí akci na zařízení, popište ji v `invoke_actions`:
-
-```yaml
-invoke_actions:
-  my_device:
-    co2.calibrate:
-      description: "Spustit kalibraci senzoru CO2"
-      args:
-        targetPpm:
-          type: uint16
-          description: "Referenční hodnota CO2 (ppm)"
-          required: true
-```
-
-### 2d. Profil zařízení (nový typ zařízení)
-
-Přidejte profil do `device_profiles`:
-
-```yaml
-device_profiles:
-  my_device:
-    description: "Moje zařízení"
-    capabilities: [led, co2]
-    invoke_actions: [co2.calibrate]
-```
-
-Hodnoty schopností pocházejí z `capability_vocabulary` definované v kroku 2a.
-
----
-
-## Krok 3. Ověřte a regenerujte
-
-```bash
-cd contracts
-./regen.sh
-```
-
-Příznaky:
-
-| Příznak | Efekt |
+| Příznak `Config` | Buňka karty |
 |---|---|
-| (žádný) | Ověř + všechny generátory + kopie na portal |
-| `--firmware-only` | Pouze generátory firmwaru, přepusť kopii portálu |
-| `--help` | Zobrazit nápovědu |
+| `hasAirTemp` | teplota vzduchu |
+| `hasAirHumidity` | vlhkost |
+| `hasHeaterTemp` | teplota topení |
+| `hasHeater` | výkon topení |
+| `hasFan` | ventilátor zap / vyp |
+| `hasServo` | klapka otevřená / zavřená |
+| `hasWeight` | vážní moduly (topic `weights`) |
+| `hasRfid` | jednotka má čtečku RFID |
 
-V úspěchu se aktualizuje `_generated/`:
+Vlastní hodnota: přidejte ji do telemetrie a deklarujte senzor s cestou v JSON:
 
-- `uart_protocol.h`, `mqtt_topics.h` — hlavičky C++
-- `iDryer_api.h` — Config/DeviceType fasáda
-- `mqtt-api.types.ts` — TypeScript typy
-- `scaffolds/my_device/` — PlatformIO kostry projektů
-- Na portálu: soubory v `src/components/widgets/`
-
-Pokud `regen.sh` skončí s chybou, problém opravte, než budete pokračovat.
-
----
-
-## Krok 4. Implementujte firmware
-
-Použijte generovaný projekt kostry:
-
-```bash
-cp -r contracts/_generated/scaffolds/my_device/ ~/my_device_fw/
-cd ~/my_device_fw
+```cpp
+s_link.onTelemetryPublish([](JsonObject root) {
+    root["units"][0]["co2ppm"] = g_co2;
+});
+s_link.card().sensor("co2", "CO2", "ppm", "units[0].co2ppm");
 ```
 
-Vyplňte sekce TODO v `src/main.cpp`:
+Jednoduché ovládací prvky jsou také entity: `button`, `number`, `select`. Hodnota se odešle hned, jak ji uživatel změní, jádro zavolá váš callback:
 
-- `onOnline()` — načtěte konfiguraci z NVS, inicializujte hardware.
-- `loop()` — zjišťujte senzory, volajte `s_runtime.publishTelemetry(tel)`.
-- `buildInfoJson()` — již naplněno generátorem ze schopností.
-- `onInvoke()` — zpracujte `co2.calibrate`.
-
-Podrobnosti viz [01-add-new-product.md](01-add-new-product.md).
+```cpp
+static const char* kModes[] = { "auto", "on", "off" };
+s_link.card().select("mode", "Mode", kModes, 3, [](const char* opt) { onMode(opt); });
+s_link.card().number("threshold", "Threshold", 100, 400, 10, "", [](float v) { onThreshold(v); });
+s_link.card().button("purge", "Purge", []() { onPurge(); });
+```
 
 ---
 
-## Krok 5. Vytvořte widget React
+## Akce: operace s parametry spuštění
 
-Widgety jsou v `contracts/widgets/` a jsou kopirovány na portál pomocí `regen.sh`.
+Akce je operace zařízení: spustit sušení, ohřát, rozsvítit, zastavit. Má **režim** — režim jednotky po akci (`status.units[].mode`) — a **parametry** s významem (`purpose`). Co zobrazit, rozhoduje karta podle aktuálního režimu jednotky:
 
-!!! poznámka
-    Neupravujte widgety přímo v `portal/src/components/widgets/` — budou přepsány při příštím `regen.sh`. Upravujte pouze v `contracts/widgets/`.
+- režim jednotky odpovídá režimu akce → zařízení je jí zaměstnáno: blok relace a tlačítko Stop (akce s režimem `IDLE`);
+- jinak → formulář spuštění; více akcí spuštění → přepínač režimů.
 
-### Vytvořte soubor widgetu
+Příklad: vyhřívaná skříň pro skladování na jednom ESP32. Cílová teplota je položka menu `target_temp` (30–50 °C, výchozí 45).
 
-```tsx
-// contracts/widgets/Co2Display.tsx
-import type { WidgetProps } from "./widget-props";
+```cpp
+#include <menu_meta.h>
+#include <menu_cache.h>
+#include <menu_bindings.h>          // menu_sync_state_to_cache
+#include <card/card_menu_bridge.h>
 
-export function Co2DisplayWidget({ device }: WidgetProps) {
-  const unit = device.units[0];
-  const co2 = unit?.co2Ppm ?? null;
-  return (
-    <div style={{ padding: "8px 16px" }}>
-      {co2 !== null ? `${co2} ppm` : "—"}
-    </div>
-  );
+static void onStorage(uint8_t unit, JsonObjectConst args) {
+    s_targetC = args["temperature"].as<float>();   // už v mezích 30..50
+    s_link.status.mode[unit]        = iDryer::UnitMode::Storage;
+    s_link.status.targetTempC[unit] = s_targetC;
+    s_link.publishStatusNow();
+}
+
+static void onStop(uint8_t unit, JsonObjectConst) {
+    s_link.status.mode[unit]        = iDryer::UnitMode::Idle;
+    s_link.status.targetTempC[unit] = 0.0f;
+    s_link.publishStatusNow();
+}
+
+void setup() {
+    menu.initDefaults();
+    menu.loadFromNVS();
+    menu_sync_state_to_cache();     // hodnoty menu do cache, ze které čte karta
+    s_link.begin();
+
+    auto& card = s_link.card();
+    idryer::card_menu::attach(card);
+    card.action("storage", "STORAGE", onStorage)
+        .name("ru", "Хранение").name("en", "Storage")
+        .param("temperature", "target_temperature", MENU_TARGET_TEMP);
+    card.action("stop", "IDLE", onStop)
+        .name("ru", "Стоп").name("en", "Stop");
 }
 ```
 
-### Zaregistrujte v index.ts
+Co dostane callback:
 
-```ts
-// contracts/widgets/index.ts
-export { Co2DisplayWidget } from "./Co2Display";
-```
+- čísla jsou omezena na meze jednotky, chybějící číslo nahradí výchozí hodnota;
+- `unit` — index jednotky z `unitId` (`"U1"` → 0); příkaz pro jednotku, kterou zařízení nemá, se ignoruje;
+- po spuštění nastavte `status.mode` a zavolejte `publishStatusNow()` — podle stavu karta přepne na blok relace.
 
-### Zaregistrujte v widget-registry.tsx (na portálu)
+### API akcí
 
-Po příštím `regen.sh` se soubor zobrazí v `portal/src/components/widgets/Co2Display.tsx`. Ručně přidejte položku do `widget-registry.tsx`:
-
-```tsx
-import { Co2DisplayWidget } from "./Co2Display";
-
-export const WIDGET_REGISTRY: Record<WidgetName, React.ComponentType<WidgetProps>> = {
-  // ...
-  Co2Display: Co2DisplayWidget,
-};
-```
-
----
-
-## Krok 6. Testujte v UIKit
-
-Otevřete `portal/src/pages/UiKitPage.tsx` a přidejte sekci s fiktivními daty uvnitř skupiny **Device Dashboard Widgets**:
-
-```tsx
-<KitSection title="Co2Display">
-  <Co2DisplayWidget device={MOCK_DEVICE} item={MOCK_CO2_ITEM} socket={null} />
-</KitSection>
-```
-
-Otevřete portál místně a přejděte na `/uikit` — widget by se měl vykreslit bez přihlášení.
-
----
-
-## Krok 7. Kontrolní seznam PR
-
-Před odesláním PR ověřte:
-
-- [ ] `./contracts/regen.sh` se zahájit bez chyb
-- [ ] `_generated/*` je potvrzen (nikoli v `.gitignore`)
-- [ ] `contracts/widgets/` — přidán nový soubor widgetu
-- [ ] `contracts/widgets/index.ts` — widget exportován
-- [ ] `widget-registry.tsx` na portálu — widget zaregistrován
-- [ ] Widget se vykreslí na `/uikit` bez chyb konzoly
-- [ ] Kostra v `_generated/scaffolds/my_device/` správně odráží schopnosti
-- [ ] Popis PR uvádí: účel zařízení, schopnosti, název widgetu
-
-Odesláním PR proti větvi `main` úložiště `idryer-core`.
-
----
-
-## Všechny změny v jednom PR
-
-| Soubor | Typ změny |
+| Volání | Co dělá |
 |---|---|
-| `contracts/mqtt_contract.yaml` | Zdroj pravdy |
-| `contracts/_generated/*` | Auto-generováno — potvrzeno v plnosti |
-| `contracts/widgets/MyWidget.tsx` | Nový soubor |
-| `contracts/widgets/index.ts` | +1 řádek exportu |
-| *(portal, po `regen.sh`)* | `src/components/widgets/MyWidget.tsx` — kopie |
-| *(portal, ručně)* | `src/components/widgets/widget-registry.tsx` — +1 záznam |
-| *(portal, ručně)* | `src/pages/UiKitPage.tsx` — +1 sekce v KitGroup |
+| `card.action(id, mode, cb)` | akce; `mode` — režim jednotky po ní, `nullptr` — režim se nemění |
+| `.param(id, purpose, MENU_ID)` | číslo: meze, krok, výchozí hodnota a jednotka z položky menu |
+| `.param(id, purpose, min, max, step, def[, unit])` | číslo s vlastními mezemi |
+| `.ceiling(MENU_ID)` | horní mez předchozího parametru je hodnota této položky menu (např. maximální teplota vzduchu) |
+| `.stages(id, "stages", MENU_ID)` | fáze profilu `[{temperature, ramp, hold}]`, sekundy; teplota fáze v mezích položky menu |
+| `.select(id, purpose, options, count[, def])` | výběr ze seznamu; hodnota mimo seznam se nahradí výchozí |
+| `.color(id, purpose, "#FFFFFF")` | barva `#RRGGBB` |
+| `.deviceClass("identify")`, `.deviceClass("clear_errors")` | stálá tlačítka v záhlaví: najít zařízení, smazat chyby |
+| `.name("ru", "…").name("en", "…")` | název akce, když karta nezná režim |
+
+Hodnoty `purpose`: `target_temperature`, `target_humidity`, `duration` (minuty, 0 — bez omezení), `stages`, `start_stage` (od 0), `effect`, `rgb_color`. Karta podle nich popisuje pole a zapojuje funkce portálu: předvolba sušení vyplní `target_temperature` a `duration` akce s režimem `DRYING`, profil sušení vyplní `stages`.
+
+Callbacky jsou funkce nebo lambdy bez zachycení. Řetězce `name` a možnosti výběru se ukládají jako ukazatele — použijte literály nebo statická pole.
+
+---
+
+## Co odchází na portál
+
+Skříň z příkladu publikuje (`Config`: `hasAirTemp`, `hasAirHumidity`, `hasHeaterTemp`, `hasHeater`, `hasFan`):
+
+```json
+{
+  "v": 2,
+  "entities": [
+    {"id": "temp", "type": "sensor", "device_class": "temperature", "unit": "°C", "source": "telemetry", "path": "units[0].temperature"},
+    {"id": "humidity", "type": "sensor", "device_class": "humidity", "unit": "%", "source": "telemetry", "path": "units[0].humidity"},
+    {"id": "heater_temp", "type": "sensor", "device_class": "heater_temp", "unit": "°C", "source": "telemetry", "path": "units[0].heaterTemp"},
+    {"id": "power", "type": "sensor", "device_class": "power", "unit": "%", "source": "telemetry", "path": "units[0].heaterPower"},
+    {"id": "fan", "type": "binary_sensor", "device_class": "fan", "source": "telemetry", "path": "units[0].fanStatus"}
+  ],
+  "actions": [
+    {"id": "storage", "mode": "STORAGE", "name": {"ru": "Хранение", "en": "Storage"}, "action": "card.storage",
+     "params": [{"id": "temperature", "purpose": "target_temperature", "type": "number",
+                 "limits": [30, 50], "step": 1, "default": 45, "unit": "°C"}]},
+    {"id": "stop", "mode": "IDLE", "name": {"ru": "Стоп", "en": "Stop"}, "action": "card.stop"}
+  ]
+}
+```
+
+`limits` a `default` přišly z položky menu. S `.ceiling()` dostane parametr ještě `max_by` — název položky menu, která srazila horní mez; karta ho uvede, když je hodnota nad mezí.
+
+---
+
+## Co kreslí portál a aplikace
+
+Schéma, ne snímek obrazovky. Nečinnost:
+
+```text
+┌─ DIY Storage Cabinet ────────────── [Nečinný] ─┐
+│ | 24.8 °C | 41 %  | 25.1 °C |                  │  ← teplota, vlhkost, topení
+│ | 0 %     | vyp             |                  │  ← výkon, ventilátor (šedé: 0 / vyp)
+│ [Tepl. 45 °C          ]  [Úložiště]            │  ← akce "storage"
+└────────────────────────────────────────────────┘
+```
+
+Po spuštění zařízení hlásí režim `STORAGE` a stejná karta ukáže blok relace (cílová teplota a doba uložení) a tlačítko Stop — akci s režimem `IDLE`.
+
+Pravidla na obou stranách:
+
+- buňka je šedá, když chybí hodnota; výkon — také při 0; ventilátor a klapka — ve stavu vyp / zavřeno;
+- hodnota mimo meze se nenahrazuje: spuštění je zablokováno a pod formulářem je důvod;
+- u firmwaru s akcemi v manifestu jsou tlačítka najít a smazat chyby jen tehdy, když deklaruje akce s `identify` / `clear_errors`.
+
+Kde se karta objeví:
+
+| | Portál | Aplikace |
+|---|---|---|
+| typ zařízení, který není produktem iDryer | karta na dashboardu z manifestu, akce na ní; stránka zařízení — hodnoty a akce (pokud manifest akce má) | hlavní obrazovka — hodnoty; akce — na stránce zařízení |
+| `deviceType = Dryer` | karta sušičky se stejnými akcemi z manifestu | hlavní obrazovka — sledování; akce — na stránce zařízení |
+
+---
+
+## Limity
+
+| | Jádro | Backend portálu |
+|---|---|---|
+| entity | 16 deklarovaných + automatické | 32 |
+| řádky layoutu | 8 | 16 |
+| id na řádek | 4 | 4 |
+| akce | 8 | 8 |
+| parametry akce | 4 (`IDRYER_CARD_MAX_PARAMS`) | 6 |
+| jazyky `name` | `ru`, `en` | až 4 |
+
+`id`: malá latinská písmena, číslice a `_`, až 24 znaků; entity a akce sdílejí jeden jmenný prostor. Dokument manifestu je omezen na 4096 bajtů; pokud se nevejde, jádro zapíše do logu `manifest overflows` a nepublikuje ho.
+
+Samotný formát — `contracts/mqtt_contract.yaml`, sekce `mqtt_only`, `suffix: card`.

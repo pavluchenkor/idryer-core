@@ -6,74 +6,44 @@
 
 | Soubor | Vlastník | Popisuje |
 |------|-------|-----------|
-| `src/menu/menu.yaml` | váš produkt | nabídku zařízení: parametry, akce, struktura |
-| `contracts/mqtt_contract.yaml` | idryer-core | seznam známých významů: co znamená každá `role:` a jak portal zobrazuje |
-| `frontend-v2/src/contracts/mqtt-api.types.ts` | generováno | TypeScript typy pro portal |
+| `src/menu/menu.yaml` | váš produkt | menu zařízení: parametry, akce, struktura |
+| `contracts/mqtt_contract.yaml` | idryer-core | seznam známých významů: `canonical_roles` s popisky v několika jazycích |
+| `frontend-v2/src/contracts/mqtt-api.types.ts` | generováno | typy TypeScript pro portál |
 
-**`role:`** — sémantické jméno pro položku nabídky. Firmware říká "mám `iheater.heat_start`" spíše než "mám tlačítko číslo 35". To je stabilní smlouva mezi zařízením a portálem — interní názvy firmwaru se mohou měnit, `role:` zůstává pevný.
+**`role:`** — sémantický název položky menu. Firmware říká „mám `iheater.heat_temp`“, ne „mám položku číslo 35“. Interní názvy firmwaru se mohou měnit, `role:` zůstává pevná.
 
-**Widget** — jak portal zobrazuje tuto položku: tlačítko, posuvník, přepínač nebo složitou komponentu (výběr barvy, editor profilu). Určeno smlouvou prostřednictvím `role:`, nikoli firmwarem.
+Menu je zrcadlem nastavení zařízení. Firmware publikuje každou položku `menu.yaml`, s `role:` i bez ní. Portál kreslí každou položku podle jejího typu: hodnota, přepínač, akce, podmenu. `role:` dává položce popisek z kontraktu v jazyce uživatele; bez `role:` portál ukáže název, který poslalo zařízení.
 
-Položka nabídky s `role:` je viditelná portálu. Bez `role:` — soukromá, viditelná pouze na displeji zařízení.
+Kartu zařízení menu nestaví. Co karta ukazuje a jaké operace spouští, popisuje card manifest — viz [Karta zařízení: card manifest](../09-add-product/02-add-widget.md). Akce karty může převzít meze a výchozí hodnotu svého parametru z položky menu.
 
 ---
 
-## 1. Stavba firmwaru (`pio run`)
+## 1. Sestavení firmwaru (`pio run`)
 
-`menu.yaml` → `pre_gen_menu.py` ověří každou `role:` proti `canonical_roles` ve smlouvě → pokud je role neznámá, stavba selže s chybou a seznamem platných rolí → `menu_gen.py` vygeneruje soubory C++ do `src/menu/`
-
-Ověřování je součástí kroku stavby — je fyzicky nemožné tiše použít neexistující roli.
+`menu.yaml` → `menu_gen.py` ověří každou `role:` proti `canonical_roles` v kontraktu → pokud je role neznámá, sestavení skončí chybou a seznamem platných rolí → generátor zapíše soubory C++ do `src/menu/`.
 
 ## 2. Aktualizace TypeScriptu pro portál (`regen.sh`)
 
-`mqtt_contract.yaml` → `gen_ts_types.py` vygeneruje `mqtt-api.types.ts` → soubor se zkopíruje do `frontend-v2/src/contracts/`
+`mqtt_contract.yaml` → `gen_ts_types.py` vygeneruje `mqtt-api.types.ts` a popisky rolí `roles.{lang}.json` → soubory se zkopírují do portálu.
 
-Spusťte ručně, když se změní smlouva. Potvrďte výsledek.
+Spouštějte při změně kontraktu. Výsledek commitněte.
 
-## 3. Runtime: zařízení ↔ portal
+## 3. Běh: zařízení ↔ portál
 
-Zařízení se připojí → publikuje nabídku na téma MQTT `config` → portal přečte každou položku s polem `r:` → vyhledá `CanonicalRoles[r].widget` → vykreslí widget z `WIDGET_REGISTRY`.
+Firmware publikuje menu do topicu `config` (dělá to kód produktu na příkaz `get_config`; produkty iDryer i při přechodu do online) → backend portálu ho uloží → portál ho získá přes `GET /devices/:id/menu-config` → každá položka se kreslí podle typu `t` (`val`, `tog`, `act`, `sub`), popisek je `canonical_roles[r].labels[lang]`, pak anglický, pak název `n` ze zařízení.
 
-Parametry (`min`, `max`, `val`) pocházejí z samotné položky nabídky — firmware zná aktuální hodnoty.
+Parametry (`min`, `max`, `val`) přicházejí ze samotné položky menu — aktuální hodnoty zná firmware.
 
----
-
-## Jak přidat novou akci na dashboard portálu
-
-`role:` není volné pole. Hodnota musí pocházet ze uzavřeného seznamu v `canonical_roles` ve smlouvě. Nemůžete improvizovat roli za běhu — stavba selže. Dostupné role se podívejte na `contracts/mqtt_contract.yaml` → sekce `canonical_roles` nebo v `menu.template.yaml`.
-
-**1. Vyberte roli ze smlouvy.** Pokud žádná nevyhovuje — nejdříve ji přidejte na `mqtt_contract.yaml` → `canonical_roles`, poté spusťte `regen.sh`:
-
-```yaml
-canonical_roles:
-  my.action: { type: action, widget: button }
-```
-
-**2. Přidejte položku do `menu.yaml`:**
-
-```yaml
-- id: my_action
-  type: action
-  role: my.action
-  title: { ru: "МОЁ ДЕЙСТВИЕ", en: "MY ACTION" }
-```
-
-**3. Zpracujte jej v firmwaru (`main.cpp`):**
-
-```cpp
-if (action == "my.action") { /* udělej věc */ }
-```
-
-`pio run` → ověření → C++ → firmware publikuje `r: "my.action"` → portal vykreslí tlačítko.
+Portál mění hodnotu příkazem `commands/set { "id": <id>, "val": <value> }`.
 
 ---
 
-## Jak přidat nastavení (parametr NVS)
+## Jak přidat nastavení (parametr v NVS)
 
 ```yaml
 - id: my_param
   type: value
-  role: my.param        # pouze pokud by se měl zobrazit na portálu; vynechte pro displej
+  role: my.param        # volitelné: popisek z kontraktu
   title: { ru: "ПАРАМЕТР", en: "PARAM" }
   unit: { ru: "°C", en: "°C" }
   vtype: uint16
@@ -86,13 +56,29 @@ if (action == "my.action") { /* udělej věc */ }
   default: 50
 ```
 
-`bind` = klíč NVS. `persist: true` = hodnota přetrvá restart.
-Portal změní hodnotu prostřednictvím `commands/set { "id": <id>, "val": <value> }`.
+`bind` = klíč NVS. `persist: true` = hodnota přežije restart.
+
+`role:` není volné pole: hodnota musí být z `canonical_roles` v kontraktu, jinak sestavení selže. Seznam je v `contracts/mqtt_contract.yaml` → `canonical_roles` nebo v `menu.template.yaml`. Nová role se nejdřív přidá do kontraktu, pak `regen.sh`.
 
 ---
 
-## Co NEDĚLAT
+## Jak přidat operaci na kartu zařízení
 
-- Nepřidávejte `widget:` do `menu.yaml` — widget je určen smlouvou prostřednictvím `role:`, nikoli firmwarem
-- Neupravujte `mqtt-api.types.ts` ručně — je generován pomocí `regen.sh`
-- Nedotýkejte se příznaků `Config.hasXxx` pro nové akce — ty jsou pouze pro telemetrii (senzory, stavy)
+Operace (spuštění, zastavení, ohřev, osvětlení) se deklarují jako akce karty, ne jako položky menu. Jejich meze lze vzít z položky menu:
+
+```cpp
+idryer::card_menu::attach(s_link.card());
+s_link.card().action("storage", "STORAGE", onStorage)
+    .param("temperature", "target_temperature", MENU_TARGET_TEMP);
+s_link.card().action("stop", "IDLE", onStop);
+```
+
+Úplný popis — [Karta zařízení: card manifest](../09-add-product/02-add-widget.md).
+
+---
+
+## Co NEdělat
+
+- Nepřidávejte `widget:` do `menu.yaml`. Pole `widget` v `canonical_roles` je jen referenční: portál ani aplikace ho nečtou.
+- Needitujte `mqtt-api.types.ts` ručně — generuje ho `regen.sh`.
+- Nesahejte na příznaky `Config.hasXxx` kvůli novým akcím — jsou jen pro telemetrii (senzory, stavy).

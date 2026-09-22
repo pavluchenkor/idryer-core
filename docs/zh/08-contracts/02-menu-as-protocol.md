@@ -1,98 +1,84 @@
-# 協議形式的菜單: menu.yaml ↔ mqtt_contract.yaml ↔ 門戶
+# 作为协议的菜单：menu.yaml ↔ mqtt_contract.yaml ↔ 门户
 
 ---
 
-## 三個文件 — 三個角色
+## 三个文件，三种角色
 
-| 文件 | 所有者 | 描述 |
+| 文件 | 所有者 | 描述内容 |
 |------|-------|-----------|
-| `src/menu/menu.yaml` | 你的產品 | 設備菜單: 參數、操作、結構 |
-| `contracts/mqtt_contract.yaml` | idryer-core | 已知含義的列表: 每個 `role:` 的含義以及門戶如何顯示它 |
-| `frontend-v2/src/contracts/mqtt-api.types.ts` | 生成 | 門戶的 TypeScript 類型 |
+| `src/menu/menu.yaml` | 你的产品 | 设备菜单：参数、动作、结构 |
+| `contracts/mqtt_contract.yaml` | idryer-core | 已知含义列表：带多语言标签的 `canonical_roles` |
+| `frontend-v2/src/contracts/mqtt-api.types.ts` | 生成 | 门户用的 TypeScript 类型 |
 
-**`role:`** — 菜單項的語義名稱。韌體說 "I have `iheater.heat_start`" 而不是 "I have button number 35"。這是設備和門戶之間的穩定合約 — 內部韌體名稱可以改變，`role:` 保持固定。
+**`role:`** —— 菜单项的语义名称。固件说“我有 `iheater.heat_temp`”，而不是“我有第 35 项”。固件内部名称可以变，`role:` 保持不变。
 
-**小部件** — 門戶如何顯示此項: 按鈕、滑塊、開關或複雜的組件 (調色板、配置文件編輯器)。通過 `role:` 由合約決定，而不是由韌體決定。
+菜单是设备设置的镜像。固件发布 `menu.yaml` 中的所有项，无论有没有 `role:`。门户按每一项的类型绘制：数值、开关、动作、子菜单。`role:` 为该项提供合同中用户语言的标签；没有 `role:` 时，门户显示设备发来的名称。
 
-帶有 `role:` 的菜單項對門戶可見。沒有 `role:` — 私有，僅在設備顯示屏上顯示。
-
----
-
-## 1. 韌體構建 (`pio run`)
-
-`menu.yaml` → `pre_gen_menu.py` 根據合約中的 `canonical_roles` 驗證每個 `role:` → 如果角色未知，構建失敗並出現錯誤和有效角色列表 → `menu_gen.py` 生成 C++ 文件到 `src/menu/`
-
-驗證內置在構建步驟中 — 不可能無聲地使用不存在的角色。
-
-## 2. 更新門戶的 TypeScript (`regen.sh`)
-
-`mqtt_contract.yaml` → `gen_ts_types.py` 生成 `mqtt-api.types.ts` → 文件被複製到 `frontend-v2/src/contracts/`
-
-在合約更改時手動運行。提交結果。
-
-## 3. 運行時: 設備 ↔ 門戶
-
-設備連接 → 發佈菜單到 MQTT 主題 `config` → 門戶讀取帶有字段 `r:` 的每一項 → 查找 `CanonicalRoles[r].widget` → 從 `WIDGET_REGISTRY` 渲染小部件。
-
-參數 (`min`, `max`, `val`) 來自菜單項本身 — 韌體知道當前值。
+设备卡片不是由菜单构建的。卡片显示什么、启动哪些操作，由 card 清单描述——见 [设备卡片：card 清单](../09-add-product/02-add-widget.md)。卡片动作的参数可以从菜单项获取范围和默认值。
 
 ---
 
-## 如何向門戶儀表板添加新操作
+## 1. 固件构建（`pio run`）
 
-`role:` 不是自由形式字段。該值必須來自合約中 `canonical_roles` 的閉合列表。你不能臨時發明角色 — 構建將失敗。請參閱 `contracts/mqtt_contract.yaml` → `canonical_roles` 部分或 `menu.template.yaml` 中的可用角色。
+`menu.yaml` → `menu_gen.py` 将每个 `role:` 与合同中的 `canonical_roles` 核对 → 如有未知角色，构建失败并列出有效角色 → 生成器把 C++ 文件写入 `src/menu/`。
 
-**1. 從合約中選擇一個角色。** 如果沒有合適的 — 首先將其添加到 `mqtt_contract.yaml` → `canonical_roles`，然後運行 `regen.sh`:
+## 2. 为门户更新 TypeScript（`regen.sh`）
 
-```yaml
-canonical_roles:
-  my.action: { type: action, widget: button }
-```
+`mqtt_contract.yaml` → `gen_ts_types.py` 生成 `mqtt-api.types.ts` 和角色标签 `roles.{lang}.json` → 文件被复制到门户。
 
-**2. 向 `menu.yaml` 添加一個項:**
+合同变更时运行，并提交结果。
 
-```yaml
-- id: my_action
-  type: action
-  role: my.action
-  title: { ru: "МОЁ ДЕЙСТВИЕ", en: "MY ACTION" }
-```
+## 3. 运行时：设备 ↔ 门户
 
-**3. 在韌體中處理它 (`main.cpp`)**:
+固件把菜单发布到 `config` 主题（由产品代码在收到 `get_config` 命令时完成；iDryer 产品在上线时也会发布）→ 门户后端保存 → 门户通过 `GET /devices/:id/menu-config` 获取 → 每一项按类型 `t`（`val`、`tog`、`act`、`sub`）绘制，标签依次取 `canonical_roles[r].labels[lang]`、英文、设备发来的名称 `n`。
 
-```cpp
-if (action == "my.action") { /* do the thing */ }
-```
+参数（`min`、`max`、`val`）来自菜单项本身——当前值由固件掌握。
 
-`pio run` → 驗證 → C++ → 韌體發佈 `r: "my.action"` → 門戶呈現按鈕。
+门户通过 `commands/set { "id": <id>, "val": <value> }` 修改数值。
 
 ---
 
-## 如何添加設置 (NVS 參數)
+## 如何添加设置（NVS 参数）
 
 ```yaml
 - id: my_param
   type: value
-  role: my.param        # 僅當它應在門戶上顯示時; 對於僅顯示則省略
+  role: my.param        # 可选：来自合同的标签
   title: { ru: "ПАРАМЕТР", en: "PARAM" }
   unit: { ru: "°C", en: "°C" }
   vtype: uint16
   min: 0
   max: 100
   step: 1
-  bind: my_param        # NVS 鍵 (≤ 15 個字符)
+  bind: my_param        # NVS 键（≤ 15 个字符）
   persist: true
   scope: global
   default: 50
 ```
 
-`bind` = NVS 鍵。`persist: true` = 值在重啟後仍然存在。
-門戶通過 `commands/set { "id": <id>, "val": <value> }` 改變值。
+`bind` = NVS 键。`persist: true` = 重启后值仍保留。
+
+`role:` 不是自由字段：值必须来自合同中的 `canonical_roles`，否则构建失败。列表见 `contracts/mqtt_contract.yaml` → `canonical_roles` 或 `menu.template.yaml`。新角色先加入合同，再运行 `regen.sh`。
 
 ---
 
-## 不要做什麼
+## 如何在设备卡片上添加操作
 
-- 不要向 `menu.yaml` 添加 `widget:` — 小部件由合約通過 `role:` 決定，而不是由韌體決定
-- 不要手動編輯 `mqtt-api.types.ts` — 它由 `regen.sh` 生成
-- 不要觸碰新操作的 `Config.hasXxx` 標誌 — 這些僅用於遙測 (傳感器、狀態)
+操作（启动、停止、加热、照明）声明为卡片动作，而不是菜单项。其范围可以取自菜单项：
+
+```cpp
+idryer::card_menu::attach(s_link.card());
+s_link.card().action("storage", "STORAGE", onStorage)
+    .param("temperature", "target_temperature", MENU_TARGET_TEMP);
+s_link.card().action("stop", "IDLE", onStop);
+```
+
+完整说明 —— [设备卡片：card 清单](../09-add-product/02-add-widget.md)。
+
+---
+
+## 不要做的事
+
+- 不要在 `menu.yaml` 中添加 `widget:`。`canonical_roles` 的 `widget` 字段仅供参考：门户和应用都不读取它。
+- 不要手动编辑 `mqtt-api.types.ts` —— 它由 `regen.sh` 生成。
+- 不要为新动作改动 `Config.hasXxx` 标志 —— 它们只用于遥测（传感器、状态）。
