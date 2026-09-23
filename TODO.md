@@ -1,29 +1,39 @@
-- Klipper-макрос для запуска сушки.
-  Примитив: в макросе задаются температура (например, 90 °C) и время (240 минут).
-  Сушилка читает макрос через Moonraker и запускает сушку. Больше от неё ничего не
-  требуется: ни ответа принтеру, ни участия в печати. Читающая сторона — тот же
-  механизм, что уже сделан для `VIRTUAL_CHAMBER` у iHeater (`MoonrakerClient`),
-  плюс прошивки link и touch: сейчас у них `allowMoonraker = false` и ни одного
-  обработчика данных принтера.
+# TODO
 
-- Развести Home Assistant и принтерные интеграции.
-  HA — канал управления и отдачи показаний, он не должен выключать Bambu и Moonraker.
-  Взаимоисключение остаётся только между Bambu и Moonraker: принтер у прибора один.
-  Сейчас `LinkIntegrationsManager` держит ровно одну активную интеграцию
-  (`selection_.active`), link и touch на старте жёстко зовут `setActive(Ha)`, iHeater
-  выбирает тумблерами меню (`bambu_en` / `moon_en` / `ha_en`), и включение HA гасит
-  Moonraker вместе с данными принтера.
-  Проверено на стенде 2026-09-22: параллельно работают, цена — около 2,2 КБ кучи на
-  ESP32-C3 (137,4 КБ свободно без HA против 135,2 КБ с ним), флеш не растёт.
-  На портале и в приложении менять нечего: HA остаётся обычной интеграцией в списке,
-  просто перестаёт быть в группе взаимоисключения.
+English is the main version. Russian: [TODO.ru.md](TODO.ru.md).
 
-- HA не помещается в память тача.
-  Замер на стенде 2026-09-22 (esp32-2424s012, ESP32-C3): после отрисовки интерфейса
-  свободно около 30 КБ кучи, LVGL занимает остальное. С включённым HA свободно падает
-  до 4 КБ, идут отказы выделения (272 за прогон), часть discovery не публикуется и
-  начинает рваться UART к контроллеру — страдает управление сушилкой. Moonraker один
-  при этом работает нормально (17 КБ свободно, отказов и ошибок UART нет).
-  Значит, генератор HA нужно облегчить (буфер публикации, порции discovery, временные
-  JSON-документы) либо не включать HA на таче. На link и iHeater запас 130–140 КБ,
-  там проблемы нет.
+- **A Klipper macro that starts drying.**
+  Keep it primitive: the macro holds a temperature (say 90 °C) and a time (240 minutes).
+  The dryer reads the macro through Moonraker and starts drying. Nothing else is asked
+  of it: no reply to the printer, no part in the print. The reading side is the same
+  mechanism already built for iHeater's `VIRTUAL_CHAMBER` (`MoonrakerClient`), plus the
+  link and touch firmware, which have no printer data handlers at all.
+
+- **Separate Home Assistant from the printer integrations.**
+  HA is a control and reporting channel; it must not switch Bambu and Moonraker off.
+  Mutual exclusion stays between Bambu and Moonraker only: a device has one printer.
+  Today `LinkIntegrationsManager` keeps exactly one active integration
+  (`selection_.active`), link and touch call `setActive(Ha)` at boot, iHeater picks by
+  menu toggles, and switching HA on kills Moonraker together with the printer data.
+  Measured on the bench 2026-09-22: they run in parallel at a cost of about 2.2 KB of
+  heap on an ESP32-C3, flash unchanged. Nothing to change in the portal or the app.
+
+- **Start only the selected integration.**
+  Objects of every compiled-in integration live in memory all the time. Create only the
+  selected one at boot and skip the rest; switching takes a reboot. This gives back RAM
+  wherever several integrations are compiled in — iHeater, for example.
+
+- **A menu fingerprint in the handshake.**
+  The menu has no version of its own: compatibility rests entirely on the controller and
+  the link module sharing the same major version. If the menu changes and the major is
+  not bumped, nothing catches the mismatch. The handshake should carry a fingerprint of
+  the menu and compare it.
+
+- **Status on connect.**
+  While idle the core publishes status once every five minutes and does not publish it
+  on connecting to the broker, so after a reboot the broker holds the mode of the
+  previous run. Storage publishes it by itself; the core is not fixed.
+
+- **Documentation on the old API.**
+  The reference, the architecture pages, troubleshooting and `04-patterns/99-data-flow`
+  describe the API from before the card manifest. Quickstart and the examples are done.
