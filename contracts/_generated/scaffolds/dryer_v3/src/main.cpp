@@ -1,6 +1,6 @@
 // ============================================================================
 // SCAFFOLD: dryer_v3
-// Generated 2026-09-22 by contracts/gen_scaffold.py from mqtt_contract.yaml
+// Generated 2026-09-23 by contracts/gen_scaffold.py from mqtt_contract.yaml
 //
 // HOW TO START:
 //   1. Copy this directory; put idryer-core into lib/idryer-core

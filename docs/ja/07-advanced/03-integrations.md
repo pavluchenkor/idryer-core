@@ -36,8 +36,11 @@ intManager.begin(); // after runtime.begin()
 マネージャーは `LinkIntegrationsStore` を通じて NVS 内の3つすべての統合の設定を格納します。アクティブな統合を切り替えるには以下のコマンドで行います：
 
 ```json
-{"active": "bambu"}     // or "ha", "moonraker", "none"
+{"type": "ha", "enabled": true, "host": "..."}          // HA is independent of the printer
+{"type": "moonraker", "enabled": true, "host": "..."}   // turns Bambu off if it was selected
 ```
+
+> **Note (EN):** Main class of the module. Home Assistant is switched on independently and runs alongside the printer; the printer integration is one of two (Bambu or Moonraker), because the device has a single printer. One printer integration at a time: Bambu and Moonraker are mutually exclusive. Home Assistant is not part of that rule — it runs alongside.
 
 状態は `idryer/{serial}/integrations/status`（保持）に変更時と30秒ごとに発行されます。
 

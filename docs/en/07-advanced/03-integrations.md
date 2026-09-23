@@ -10,7 +10,7 @@ The integrations module allows an iDryer/iHeater device to connect to third-part
 
 ## LinkIntegrationsManager
 
-Main class of the module. Manages one active integration at a time. Wired in through the product's `CommandHandler` — the same handler used for MQTT and local WS.
+Main class of the module. Home Assistant is switched on independently and runs alongside the printer; the printer integration is one of two (Bambu or Moonraker), because the device has a single printer. Wired in through the product's `CommandHandler` — the same handler used for MQTT and local WS.
 
 ```cpp
 LinkIntegrationsStore intStore;
@@ -33,10 +33,11 @@ intManager.begin(); // after runtime.begin()
 // in loop(): intManager.loop();
 ```
 
-The manager stores configurations for all three integrations in NVS via `LinkIntegrationsStore`. Switching the active integration is done with the command:
+The manager stores configurations for all three integrations in NVS via `LinkIntegrationsStore`. Turning one on or off is done with the `enabled` field of its section:
 
 ```json
-{"active": "bambu"}     // or "ha", "moonraker", "none"
+{"type": "ha", "enabled": true, "host": "..."}          // HA is independent of the printer
+{"type": "moonraker", "enabled": true, "host": "..."}   // turns Bambu off if it was selected
 ```
 
 State is published to `idryer/{serial}/integrations/status` (retained) on change and every 30 seconds.
@@ -120,7 +121,7 @@ intManager.setMoonrakerStatusCallback([](const MoonrakerStatus& s) {
 
 ## Limitations
 
-- One active integration at a time. Switching is atomic: the old one stops, the new one starts.
+- One printer integration at a time: Bambu and Moonraker are mutually exclusive, turning one on turns the other off. Home Assistant is not part of that rule — it runs alongside.
 - One `BambuClient` instance per device (singleton via a static pointer).
 - `LinkIntegrationsStore` stores configuration in NVS — settings persist across reboots.
 - The device must specify its type (`setDeviceType`) for correct Bambu mode selection:

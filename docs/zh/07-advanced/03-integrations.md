@@ -36,8 +36,11 @@ intManager.begin(); // after runtime.begin()
 manager 通过 `LinkIntegrationsStore` 将三个集成的配置都存入 NVS。使用以下命令切换活动集成：
 
 ```json
-{"active": "bambu"}     // or "ha", "moonraker", "none"
+{"type": "ha", "enabled": true, "host": "..."}          // HA is independent of the printer
+{"type": "moonraker", "enabled": true, "host": "..."}   // turns Bambu off if it was selected
 ```
+
+> **Note (EN):** Main class of the module. Home Assistant is switched on independently and runs alongside the printer; the printer integration is one of two (Bambu or Moonraker), because the device has a single printer. One printer integration at a time: Bambu and Moonraker are mutually exclusive. Home Assistant is not part of that rule — it runs alongside.
 
 状态会在变化时以及每 30 秒发布到 `idryer/{serial}/integrations/status`（retained）。
 

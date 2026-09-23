@@ -100,6 +100,54 @@ void LinkIntegrationsManager::begin()
     }, this);
 #endif
 
+    // NVS от прошивки до развязки HA: там выбор HA лежал в active. Переносим в
+    // собственный выключатель, чтобы после обновления HA не отвалился, а место
+    // принтерной интеграции освободилось.
+    if (selection_.active == ActiveIntegration::Ha) {
+        HAL_LOG_INFO("LINK_MGR", "NVS: active=ha → ha.enabled=1, active=none");
+        ha_.enabled = true;
+        selection_.active = ActiveIntegration::None;
+        store_->saveHa(ha_);
+        store_->saveCommon(selection_);
+    }
+
+    // До развязки active менялся только из меню iHeater, поэтому у прибора,
+    // настроенного с портала, принтерная секция могла лежать с enabled=true при
+    // active=none. Теперь enabled — настоящий выключатель: поднимаем выбор из
+    // него, иначе принтер молчал бы до повторного нажатия в разделе интеграций.
+    if (selection_.active == ActiveIntegration::None) {
+#if IDRYER_WITH_BAMBU
+        if (bambu_.enabled) selection_.active = ActiveIntegration::Bambu;
+#endif
+#if IDRYER_WITH_MOONRAKER
+        if (selection_.active == ActiveIntegration::None && moonraker_.enabled)
+            selection_.active = ActiveIntegration::Moonraker;
+#endif
+        if (selection_.active != ActiveIntegration::None) {
+            HAL_LOG_INFO("LINK_MGR", "NVS: enabled=1 без выбора → active=%s",
+                         activeIntegrationToString(selection_.active));
+            store_->saveCommon(selection_);
+        }
+    }
+
+    // Обе принтерные секции могли остаться включёнными: до развязки enabled ни
+    // на что не влиял. Оставляем ту, что выбрана, вторую гасим — иначе статус
+    // противоречил бы сам себе.
+    {
+#if IDRYER_WITH_BAMBU
+        if (selection_.active != ActiveIntegration::Bambu && bambu_.enabled) {
+            bambu_.enabled = false;
+            store_->saveBambu(bambu_);
+        }
+#endif
+#if IDRYER_WITH_MOONRAKER
+        if (selection_.active != ActiveIntegration::Moonraker && moonraker_.enabled) {
+            moonraker_.enabled = false;
+            store_->saveMoonraker(moonraker_);
+        }
+#endif
+    }
+
     // Активная из NVS может быть от прошивки, где эта интеграция ещё собиралась.
     if (!isSupported(selection_.active)) {
         HAL_LOG_WARN("LINK_MGR", "active=%s не собрана в этой прошивке — сбрасываю",
@@ -137,7 +185,7 @@ void LinkIntegrationsManager::begin()
                  IDRYER_WITH_HA, IDRYER_WITH_BAMBU, IDRYER_WITH_MOONRAKER);
     HAL_LOG_INFO("LINK_MGR", "─── end NVS dump ───");
 
-    applyActiveIntegration();
+    applyIntegrations();
     publishStatus();
 }
 
@@ -172,8 +220,12 @@ void LinkIntegrationsManager::handleLinkIntegrationCommand(JsonObjectConst data)
         store_->saveHa(ha_);
         haLastError_[0] = '\0';
 
-        if (selection_.active == ActiveIntegration::Ha) {
+        // HA независим от принтера: поднимается и гасится своим enabled,
+        // selection_.active при этом не меняется.
+        if (ha_.enabled) {
             haClient_.configure(ha_);
+        } else {
+            haClient_.shutdown();
         }
     }
     else
@@ -189,9 +241,7 @@ void LinkIntegrationsManager::handleLinkIntegrationCommand(JsonObjectConst data)
         store_->saveBambu(bambu_);
         bambuLastError_[0] = '\0';
 
-        if (selection_.active == ActiveIntegration::Bambu) {
-            bambuClient_.configure(bambu_);
-        }
+        selectPrinter(ActiveIntegration::Bambu, bambu_.enabled);
     }
     else
 #endif
@@ -206,9 +256,7 @@ void LinkIntegrationsManager::handleLinkIntegrationCommand(JsonObjectConst data)
         store_->saveMoonraker(moonraker_);
         moonrakerLastError_[0] = '\0';
 
-        if (selection_.active == ActiveIntegration::Moonraker) {
-            moonrakerClient_.configure(moonraker_);
-        }
+        selectPrinter(ActiveIntegration::Moonraker, moonraker_.enabled);
     }
     else
 #endif
@@ -282,8 +330,57 @@ void LinkIntegrationsManager::handleBambuApplyCommand(JsonObjectConst data)
 #endif
 }
 
+// Включение принтерной интеграции гасит вторую: принтер у прибора один.
+// Выключение активной освобождает выбор; выключение неактивной — no-op.
+void LinkIntegrationsManager::selectPrinter(ActiveIntegration kind, bool enabled)
+{
+    if (!enabled) {
+        if (selection_.active == kind) setActive(ActiveIntegration::None);
+        return;
+    }
+
+    // Второй принтер гасится и в своей секции, а не только выбором: иначе
+    // integrations/status показывал бы enabled=true у выключенной интеграции,
+    // и «включено» снова означало бы разное в двух полях одного сообщения.
+#if IDRYER_WITH_BAMBU
+    if (kind != ActiveIntegration::Bambu && bambu_.enabled) {
+        bambu_.enabled = false;
+        if (store_) store_->saveBambu(bambu_);
+    }
+#endif
+#if IDRYER_WITH_MOONRAKER
+    if (kind != ActiveIntegration::Moonraker && moonraker_.enabled) {
+        moonraker_.enabled = false;
+        if (store_) store_->saveMoonraker(moonraker_);
+    }
+#endif
+    setActive(kind);
+}
+
+void LinkIntegrationsManager::setHaEnabled(bool enabled)
+{
+#if IDRYER_WITH_HA
+    if (ha_.enabled == enabled) return;
+    HAL_LOG_INFO("LINK_MGR", "setHaEnabled: %d -> %d", (int)ha_.enabled, (int)enabled);
+    ha_.enabled = enabled;
+    if (store_) store_->saveHa(ha_);
+    applyIntegrations();
+    publishStatus();
+#else
+    (void)enabled;
+    HAL_LOG_WARN("LINK_MGR", "setHaEnabled: HA не собрана в прошивке");
+#endif
+}
+
 void LinkIntegrationsManager::setActive(ActiveIntegration active)
 {
+    // Совместимость со старыми клиентами: до развязки HA выбиралась через
+    // active. Теперь это отдельный выключатель, а принтерную интеграцию
+    // вызов не трогает.
+    if (active == ActiveIntegration::Ha) {
+        setHaEnabled(true);
+        return;
+    }
     if (!isSupported(active)) {
         HAL_LOG_WARN("LINK_MGR", "setActive %s: интеграция не собрана в прошивке",
                      activeIntegrationToString(active));
@@ -298,7 +395,7 @@ void LinkIntegrationsManager::setActive(ActiveIntegration active)
     selection_.active = active;
     if (store_) store_->saveCommon(selection_);
 
-    applyActiveIntegration();
+    applyIntegrations();
     publishStatus();
 }
 
@@ -312,6 +409,26 @@ void LinkIntegrationsManager::loop()
 #endif
 #if IDRYER_WITH_HA
     haClient_.loop();
+#endif
+
+#if IDRYER_WITH_MOONRAKER
+    // Снимок статуса публикуется по смене состояния соединения, а поля
+    // виртуальной камеры наполняются позже: подписка на объекты Klipper уходит
+    // уже после connected. Снимок оставался с нулями, и портал показывал
+    // «камера недоступна» при работающем макросе. Сторожим только то, что
+    // меняется редко; температуру нельзя — она идёт раз в секунду, а сообщение
+    // retained. Свои колбэки клиента заняты продуктом, поэтому сверка здесь.
+    {
+        const MoonrakerStatus& ms = moonrakerClient_.status();
+        if (ms.virtualChamberAvailable != vcAvailableSeen_
+            || ms.chamberHasSensor != vcHasSensorSeen_
+            || ms.chamberTarget != vcTargetSeen_) {
+            vcAvailableSeen_ = ms.virtualChamberAvailable;
+            vcHasSensorSeen_ = ms.chamberHasSensor;
+            vcTargetSeen_    = ms.chamberTarget;
+            publishStatus();
+        }
+    }
 #endif
 
     // integrations/status — событийный (изменение состояния/конфига интеграции
@@ -332,7 +449,7 @@ void LinkIntegrationsManager::setDeviceType(UartDeviceType deviceType)
     HAL_LOG_INFO("LINK_MGR", "setDeviceType: %u -> %u",
                  (unsigned)deviceType_, (unsigned)deviceType);
     deviceType_ = deviceType;
-    applyActiveIntegration();
+    applyIntegrations();
     publishStatus();
 }
 
@@ -381,11 +498,15 @@ void LinkIntegrationsManager::setBambuPrinterStatusCallback(
 }
 
 // =============================================================================
-// applyActiveIntegration
+// applyIntegrations
 // =============================================================================
 
-void LinkIntegrationsManager::applyActiveIntegration()
+void LinkIntegrationsManager::applyIntegrations()
 {
+    // Принтерные интеграции взаимоисключающие: принтер у прибора один, поэтому
+    // выбор хранится в selection_.active. Home Assistant — не альтернатива
+    // принтеру, а канал управления и отдачи показаний, и поднимается по
+    // собственному ha_.enabled параллельно с принтером.
 #if IDRYER_WITH_BAMBU
     BambuMode mode = BambuMode::Writer;
     if (deviceType_ == UartDeviceType::Heater
@@ -410,7 +531,7 @@ void LinkIntegrationsManager::applyActiveIntegration()
 #endif
 
 #if IDRYER_WITH_HA
-    if (selection_.active == ActiveIntegration::Ha) {
+    if (ha_.enabled) {
         haClient_.configure(ha_);
     } else {
         haClient_.shutdown();
@@ -590,8 +711,8 @@ void LinkIntegrationsManager::serializeMoonrakerSection(JsonObject section) cons
 IntegrationState LinkIntegrationsManager::computeHaState() const
 {
 #if IDRYER_WITH_HA
-    if (selection_.active != ActiveIntegration::Ha) return IntegrationState::Disabled;
-    if (!ha_.configured())                       return IntegrationState::ConfigMissing;
+    if (!ha_.enabled)     return IntegrationState::Disabled;
+    if (!ha_.configured()) return IntegrationState::ConfigMissing;
 
     switch (haClient_.state()) {
     case HaConnectionState::Connected:  return IntegrationState::Online;

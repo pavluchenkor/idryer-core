@@ -3,7 +3,7 @@
  * @brief Orchestrator for LINK printer integrations: Home Assistant, Bambu Lab, Moonraker.
  *
  * Handles two commands dispatched through the product's command handler:
- *   - @c commands/link_integration — configure or switch the active integration
+ *   - @c commands/link_integration — configure and switch integrations on or off
  *   - @c commands/bambu_apply      — apply filament profile to a Bambu printer AMS slot
  *
  * Stores integration config in NVS via @c LinkIntegrationsStore and publishes
@@ -53,10 +53,15 @@ namespace idryer {
 namespace cloud {
 
 /**
- * @brief Manages one active printer integration at a time (HA, Bambu, or Moonraker).
+ * @brief Manages the device integrations: Home Assistant plus one printer.
  *
- * Only one integration can be active at a time. Switching is done via
- * @c handleLinkIntegrationCommand() with @c {"active": "ha"|"bambu"|"moonraker"|"none"}.
+ * Home Assistant is independent — it is a control and reporting channel, not an
+ * alternative to the printer, so it runs in parallel and is switched by its own
+ * @c ha.enabled flag.
+ *
+ * Bambu and Moonraker are mutually exclusive: the device has a single printer.
+ * The choice lives in @c selection_.active and follows the @c enabled field of
+ * their sections in @c commands/link_integration.
  */
 class LinkIntegrationsManager
 {
@@ -82,7 +87,9 @@ public:
      *   - @c "bambu"     — updates Bambu Lab config (host, serial, access code)
      *   - @c "moonraker" — updates Moonraker config (host, port, API key)
      *
-     * Also handles @c {"active": "..."} to switch the active integration.
+     * The @c "enabled" field of a section is the switch: for Home Assistant it
+     * starts or stops HA, for a printer section it also becomes the active
+     * printer integration (turning the other one off).
      */
     void handleLinkIntegrationCommand(JsonObjectConst data);
 
@@ -95,14 +102,22 @@ public:
     void handleBambuApplyCommand(JsonObjectConst data);
 
     /**
-     * @brief Switches the active integration and saves the choice to NVS.
+     * @brief Switches the active PRINTER integration and saves the choice to NVS.
      *
      * Tears down the previously active client and starts the new one.
+     * @c ActiveIntegration::Ha is accepted for backwards compatibility and is
+     * redirected to @c setHaEnabled(true) without touching the printer.
      */
     void setActive(ActiveIntegration active);
 
-    /// @brief Returns the currently active integration.
+    /// @brief Returns the currently active printer integration.
     ActiveIntegration getActive() const { return selection_.active; }
+
+    /// @brief Turns Home Assistant on or off, independently of the printer.
+    void setHaEnabled(bool enabled);
+
+    /// @brief Is Home Assistant switched on?
+    bool haEnabled() const { return ha_.enabled; }
 
     /// Сущности HA строит генератор из card-манифеста: менеджер передаёт ему
     /// смену соединения и входящие сообщения брокера HA.
@@ -245,6 +260,14 @@ private:
     char bambuLastError_[96]     = {0};
     char moonrakerLastError_[96] = {0};
 
+#if IDRYER_WITH_MOONRAKER
+    // Последнее опубликованное состояние виртуальной камеры — по нему loop()
+    // замечает, что данные Klipper доехали уже после публикации снимка.
+    bool  vcAvailableSeen_ = false;
+    bool  vcHasSensorSeen_ = false;
+    float vcTargetSeen_    = 0.0f;
+#endif
+
     // integrations/status — событийный: публикуется при изменении состояния/
     // конфига интеграций (retained+QoS1 хранят снапшот). Флаг — дошив
     // публикации, если событие случилось до MQTT-коннекта.
@@ -257,7 +280,10 @@ private:
     uint8_t bambuLastApplyAmsId_       = 0;
     uint8_t bambuLastApplyTrayId_      = 0;
 
-    void applyActiveIntegration();
+    /// Включение принтерной интеграции гасит вторую; выключение освобождает выбор.
+    void selectPrinter(ActiveIntegration kind, bool enabled);
+
+    void applyIntegrations();
 };
 
 } // namespace cloud

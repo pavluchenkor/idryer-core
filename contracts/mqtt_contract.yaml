@@ -429,22 +429,10 @@ canonical_roles:
     labels: { ru: "Записать метку", en: "Write tag" }
 
   # ── iHeater Link ─────────────────────────────────────────────────────────
-  # Integration toggles (interlock): активна максимум одна из трёх.
-  # Включение одной автоматически выключает остальные (enforced на устройстве).
-  iheater.bambu_enabled:
-    type: bool
-    widget: toggle
-    labels: { ru: "Bambu Lab", en: "Bambu Lab" }
-
-  iheater.moonraker_enabled:
-    type: bool
-    widget: toggle
-    labels: { ru: "Moonraker", en: "Moonraker" }
-
-  iheater.ha_enabled:
-    type: bool
-    widget: toggle
-    labels: { ru: "Home Assistant", en: "Home Assistant" }
+  # Ролей для интеграций в меню больше нет. Единственный путь — раздел
+  # интеграций портала и приложения: только он умеет задать адрес брокера,
+  # серийник принтера и ключи, без которых тумблер всё равно ничего не включал.
+  # Были: iheater.bambu_enabled, iheater.moonraker_enabled, iheater.ha_enabled.
 
   iheater.heat_temp:
     type: float
@@ -2765,7 +2753,13 @@ mqtt_only:
             type: string,
             enum_ref: "ActiveIntegration.json_string_form",
             values: ["none", "ha", "bambu", "moonraker"],
-            note: "Wire-форма — lowercase string. См. enums.ActiveIntegration.",
+            note: "Выбранная ПРИНТЕРНАЯ интеграция: принтер у прибора один, поэтому
+              bambu и moonraker взаимоисключающие. Home Assistant сюда не входит —
+              он включается независимо своим `ha.enabled` и работает параллельно
+              с принтером. Значение \"ha\" остаётся только для совместимости со
+              старыми клиентами: прибор трактует его как «включить HA» и принтерную
+              интеграцию не трогает. Wire-форма — lowercase string.
+              См. enums.ActiveIntegration.",
           }
         supported:
           {
@@ -2779,7 +2773,13 @@ mqtt_only:
         updatedAt: { type: ISO8601 }
       ha:
         configured: { type: bool }
-        enabled: { type: bool }
+        enabled:
+          {
+            type: bool,
+            note: "Выключатель Home Assistant, независимый от `active`. HA поднимается
+              при enabled:true и заданном host, параллельно с Bambu или Moonraker:
+              HA — канал управления и отдачи показаний, а не альтернатива принтеру.",
+          }
         state:
           {
             type: string,
@@ -2984,7 +2984,12 @@ mqtt_only:
             ssl: { type: bool, default: false }
             pollIntervalMs: { type: uint32, default: 1000 }
     notes:
-      - "iHeater-link дополнительно синхронизирует toggle меню (moon_en/bambu_en/ha_en) при enabled:true."
+      - "ha.enabled включает Home Assistant независимо: принтерная интеграция
+        (bambu или moonraker) при этом продолжает работать."
+      - "bambu.enabled:true и moonraker.enabled:true взаимоисключающие — принтер
+        у прибора один; включение одного гасит другое."
+      - "Единственный путь настройки интеграций — раздел интеграций портала и
+        приложения. Пунктов меню для этого нет ни у одной прошивки."
 
   - suffix: commands/bambu_apply
     full_topic: "idryer/{serial}/commands/bambu_apply"

@@ -9,15 +9,6 @@ English is the main version. Russian: [TODO.ru.md](TODO.ru.md).
   mechanism already built for iHeater's `VIRTUAL_CHAMBER` (`MoonrakerClient`), plus the
   link and touch firmware, which have no printer data handlers at all.
 
-- **Separate Home Assistant from the printer integrations.**
-  HA is a control and reporting channel; it must not switch Bambu and Moonraker off.
-  Mutual exclusion stays between Bambu and Moonraker only: a device has one printer.
-  Today `LinkIntegrationsManager` keeps exactly one active integration
-  (`selection_.active`), link and touch call `setActive(Ha)` at boot, iHeater picks by
-  menu toggles, and switching HA on kills Moonraker together with the printer data.
-  Measured on the bench 2026-09-22: they run in parallel at a cost of about 2.2 KB of
-  heap on an ESP32-C3, flash unchanged. Nothing to change in the portal or the app.
-
 - **Start only the selected integration.**
   Objects of every compiled-in integration live in memory all the time. Create only the
   selected one at boot and skip the rest; switching takes a reboot. This gives back RAM

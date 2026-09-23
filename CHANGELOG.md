@@ -38,6 +38,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Changed
 
+- **Home Assistant no longer competes with the printer.** A device used to have a single integration: turning Home Assistant on shut down Moonraker or Bambu along with the printer data. Home Assistant now has its own switch and runs alongside — it is a control and reporting channel, not a replacement for the printer. Mutual exclusion stayed where it is physically justified: the device has a single printer, so Bambu and Moonraker are still one instead of the other.
+- **An integration is switched on and off by the `enabled` field of its section.** There is no separate command for selecting the active integration any more; `{"active": "ha"}` from older clients is read as "turn Home Assistant on" and leaves the printer alone.
+
 - **⚠️ Breaking change.** A zero publish period now means "take the value from the contract" instead of "do not publish". Products that do not need status have the new `Config.statusDisabled` flag. Firmware that used zero to switch status off will start publishing it after the update — it compiles silently, the behaviour changes. Replace the zero with the flag.
 - **Major rework of the protocol contract.** A topic support matrix per product, one severity scale for events, one unit convention for temperatures over UART.
 - Device capability flags follow the common contract vocabulary.
